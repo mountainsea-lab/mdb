@@ -12,6 +12,8 @@ mdb 当前定位是金融级高频交易数据中心，核心能力包括接入�
 
 目标是在 mdb 中复用 barter-rs 的多交易所实时行情能力，并为历史数据获取预留统一抽象。
 
+设计回顾与缺口分析见：`docs/architecture/fdc-barter-design-review.md`。
+
 ## 方向结论
 
 采用 **mdb 侧适配器模式**：在 mdb 中维护统一适配器目录 `crates/fdc-adapter`，并在其中放置 Barter 集成 crate `crates/fdc-adapter/barter`（crate 名保持 `fdc-barter`）。

@@ -5,6 +5,7 @@
 - 状态：已确认方向，后续持续维护
 - 适用范围：加密交易所市场数据接入，包括实时数据、历史数据和后续回放能力
 - 关联文档：`docs/architecture/barter-rs-integration.md`
+- 设计回顾：`docs/architecture/fdc-barter-design-review.md`
 - 关联模块：`crates/fdc-adapter/barter`、`fdc-ingestion`、`fdc-transform`、`fdc-storage`
 
 ## 核心约定
