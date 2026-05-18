@@ -12,7 +12,7 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-fdc-core = { path = "../fdc-core" }
+fdc-core = { path = "../../fdc-core" }
 barter-data = { path = "/Volumes/wdata/mountainsea-lab/barter-rs/barter-data" }
 barter-instrument = { path = "/Volumes/wdata/mountainsea-lab/barter-rs/barter-instrument" }
 chrono = { workspace = true, features = ["serde"] }

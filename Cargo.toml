@@ -10,7 +10,7 @@ members = [
     "crates/fdc-wasm",        # WASM插件系统
     "crates/fdc-types",       # 自定义类型系统
     "crates/fdc-transform",   # 数据转换引擎
-    "crates/fdc-barter",      # Barter-rs行情适配器
+    "crates/fdc-adapter/barter", # Barter-rs行情适配器
     "crates/fdc-common",
     "crates/fdc-proto",
     "crates/fdc-cli",

@@ -14,7 +14,7 @@ mdb 当前定位是金融级高频交易数据中心，核心能力包括接入�
 
 ## 方向结论
 
-建议采用 **mdb 侧适配器模式**：在 mdb 中新增独立 crate `fdc-barter`，依赖 barter-rs 相关 crate，将 Barter 的行情流和事件模型转换为 mdb 的接入/转换模型。
+建议采用 **mdb 侧适配器模式**：在 mdb 中新增统一适配器目录 `crates/fdc-adapter`，并在其中放置 Barter 集成 crate `crates/fdc-adapter/barter`（crate 名保持 `fdc-barter`），依赖 barter-rs 相关 crate，将 Barter 的行情流和事件模型转换为 mdb 的接入/转换模型。
 
 不建议优先在 barter-rs 中增加 mdb 专用模块。
 
@@ -23,7 +23,7 @@ mdb 当前定位是金融级高频交易数据中心，核心能力包括接入�
 ```text
 barter-data / barter-integration / barter-instrument
         ↓
-crates/fdc-barter
+crates/fdc-adapter/barter (`fdc-barter`)
         ↓
 Barter MarketEvent / Subscription / ExchangeId
         ↓
@@ -38,7 +38,7 @@ fdc-storage / fdc-query / fdc-analytics
 
 ## 方案对比
 
-### 方案 A：在 mdb 中新增 `fdc-barter` 适配器 crate，推荐
+### 方案 A：在 mdb 的 `crates/fdc-adapter/barter` 中维护 `fdc-barter` 适配器 crate，推荐
 
 优点：
 
@@ -95,7 +95,7 @@ fdc-storage / fdc-query / fdc-analytics
 
 包含：
 
-- 新增 `crates/fdc-barter` crate。
+- 新增 `crates/fdc-adapter/barter` crate，crate 名为 `fdc-barter`。
 - 接入 workspace。
 - 定义适配器配置、数据模式、错误类型和标准化事件结构。
 - 定义实时数据客户端边界，但不启动真实 WebSocket。

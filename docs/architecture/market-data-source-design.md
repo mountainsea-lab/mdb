@@ -13,7 +13,8 @@
 
 职责约定：
 
-- `fdc-barter`：加密交易所数据源适配器，优先复用 `barter-data`、`barter-integration`、`barter-instrument`。
+- `fdc-barter`：位于 `crates/fdc-adapter/barter`，是加密交易所数据源适配器，优先复用 `barter-data`、`barter-integration`、`barter-instrument`。
+- `crates/fdc-adapter`：统一存放具体外部数据源适配器，未来新增数据源也放在该目录下。
 - `fdc-ingestion`：mdb 接入中枢，负责 source 生命周期、缓冲、背压、批处理、恢复、指标。
 - `fdc-transform`：数据标准化、格式转换、类型转换、schema 转换。
 - `fdc-storage`：数据写入、多层存储、缓存和后续查询支撑。
@@ -54,7 +55,7 @@ fdc-storage / fdc-query / fdc-analytics
 
 如果短期不新增 crate，也可以先放入 `fdc-ingestion` 的 `source` 模块，但长期建议抽为独立 crate。
 
-### fdc-barter
+### fdc-adapter/barter (`fdc-barter`)
 
 负责使用 Barter 生态实现加密交易所数据源。
 
