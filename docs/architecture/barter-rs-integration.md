@@ -14,7 +14,11 @@ mdb 当前定位是金融级高频交易数据中心，核心能力包括接入�
 
 ## 方向结论
 
-建议采用 **mdb 侧适配器模式**：在 mdb 中新增统一适配器目录 `crates/fdc-adapter`，并在其中放置 Barter 集成 crate `crates/fdc-adapter/barter`（crate 名保持 `fdc-barter`），依赖 barter-rs 相关 crate，将 Barter 的行情流和事件模型转换为 mdb 的接入/转换模型。
+采用 **mdb 侧适配器模式**：在 mdb 中维护统一适配器目录 `crates/fdc-adapter`，并在其中放置 Barter 集成 crate `crates/fdc-adapter/barter`（crate 名保持 `fdc-barter`）。
+
+`fdc-barter` 负责加密交易所实时数据和历史数据的获取，优先复用 barter-rs 生态完成需求。它输出 mdb 可识别的 adapter 事件和 ingestion envelope，但不负责存储、查询、交易策略或全局调度。
+
+不新增 `fdc-market-data-core`。市场数据相关抽象先按业务放在 `fdc-adapter/barter` 内，后续多个 adapter 出现重复需求时再考虑抽公共 crate。
 
 不建议优先在 barter-rs 中增加 mdb 专用模块。
 
@@ -25,16 +29,131 @@ barter-data / barter-integration / barter-instrument
         ↓
 crates/fdc-adapter/barter (`fdc-barter`)
         ↓
-Barter MarketEvent / Subscription / ExchangeId
+BarterMarketEvent / BarterIngestionEnvelope
         ↓
-mdb BarterMarketEvent / RawData / TickData / transform input
+fdc-ingestion source path
         ↓
 fdc-transform
         ↓
 fdc-storage / fdc-query / fdc-analytics
 ```
 
-`fdc-barter` 应只承担适配职责，不承担存储、查询、交易策略或执行职责。
+关键约束：
+
+- `fdc-barter` 不绕过 `fdc-ingestion`。
+- `fdc-barter` 不把数据直接写入 `fdc-storage`。
+- `fdc-transform` 不依赖 barter-rs 类型。
+- `fdc-ingestion` 不需要理解 Barter 内部类型，只处理 source envelope。
+
+## fdc-ingestion 对接参考
+
+当前 `crates/fdc-ingestion/examples/ingestion_demo.rs` 展示的是网络字节流路径：
+
+```text
+ReceivedData
+        ↓
+DataParser
+        ↓
+DataValidator
+        ↓
+BatchItem
+        ↓
+BatchProcessor
+        ↓
+SimpleStorage
+```
+
+`fdc-barter` 输出的是已经结构化的市场数据事件，不应该伪装成 `ReceivedData` 再走 `DataParser`。因此后续需要在 `fdc-ingestion` 中增加 source path：
+
+```text
+BarterIngestionEnvelope
+        ↓
+DataBuffer<BarterIngestionEnvelope>
+        ↓
+SourceValidator / SourceValidationResult
+        ↓
+SourceBatchItem
+        ↓
+SourceBatchProcessor 或现有 BatchProcessor 的泛化版本
+        ↓
+fdc-transform
+```
+
+这能复用 ingestion 的 buffer、backpressure、batch、recovery、metrics 思路，同时保留原有 network receiver path。
+
+## fdc-adapter/barter 推荐分包
+
+```text
+crates/fdc-adapter/barter/src/
+  lib.rs
+  error.rs
+  config.rs
+
+  model/
+    mod.rs
+    event.rs
+    request.rs
+    source.rs
+    checkpoint.rs
+
+  live/
+    mod.rs
+    source.rs
+    subscription.rs
+    stream.rs
+
+  historical/
+    mod.rs
+    source.rs
+    request.rs
+    checkpoint.rs
+    binance.rs
+    okx.rs
+
+  mapper/
+    mod.rs
+    event.rs
+    instrument.rs
+    exchange.rs
+
+  ingestion/
+    mod.rs
+    envelope.rs
+    sink.rs
+
+  capability/
+    mod.rs
+    exchange.rs
+```
+
+分包原则：
+
+- 按业务能力拆分，不堆单个大文件。
+- `live` 负责实时 WebSocket。
+- `historical` 负责历史 REST、分页、checkpoint、resume。
+- `mapper` 是 Barter 类型到 mdb adapter 类型的唯一映射层。
+- `ingestion` 只定义给 `fdc-ingestion` 的交接对象和 sink 边界。
+- `capability` 声明交易所和数据类型能力。
+
+## Barter 实时数据参考
+
+`barter-data/examples` 中可直接参考：
+
+- `dynamic_multi_stream_multi_exchange.rs`
+- `public_trades_streams.rs`
+- `public_trades_streams_multi_exchange.rs`
+- `order_books_l1_streams_multi_exchange.rs`
+
+实时 MVP 推荐优先参考 `dynamic_multi_stream_multi_exchange.rs`，使用 `DynamicStreams`：
+
+```rust
+let streams = DynamicStreams::init(subscription_batches).await?;
+let merged = streams
+    .select_all::<MarketStreamResult<MarketDataInstrument, DataKind>>()
+    .with_error_handler(|error| warn!(?error, "MarketStream generated error"));
+```
+
+原因：mdb 需要同时支持多交易所、多 symbol、多数据类型，`DynamicStreams` 比单独 `Streams::<PublicTrades>` 或 `Streams::<OrderBooksL1>` 更适合作为统一 source 基础。
 
 ## 方案对比
 
@@ -46,7 +165,7 @@ fdc-storage / fdc-query / fdc-analytics
 - 避免 mdb 业务模型污染 barter-rs。
 - mdb 可独立维护自己的类型映射、错误处理、配置和数据转换管道。
 - 后续可通过 path/git dependency 独立升级 barter-rs。
-- 适合当前 `fdc-transform` 缺口，能快速形成真实数据闭环。
+- 适合当前数据接入和转换闭环。
 
 缺点：
 
@@ -79,7 +198,7 @@ fdc-storage / fdc-query / fdc-analytics
 阶段：
 
 1. mdb 内部实现 `fdc-barter`。
-2. 验证实时行情接入、转换、存储、查询闭环。
+2. 验证实时行情接入、ingestion、transform、storage/query 闭环。
 3. 补齐历史数据获取与回放。
 4. 如果 API 稳定且有外部复用价值，再抽出或贡献为 Barter 生态插件。
 
@@ -89,9 +208,11 @@ fdc-storage / fdc-query / fdc-analytics
 
 后续如果 barter-rs 补齐通用历史数据客户端，`fdc-barter` 可以切换为复用 Barter 的历史数据抽象。
 
+历史数据输出必须和实时数据输出同一种 adapter 事件和 ingestion envelope，不能走旁路。
+
 ## 第一阶段范围
 
-第一阶段只做准备和骨架，不接真实交易所网络。
+第一阶段已完成准备和骨架，不接真实交易所网络。
 
 包含：
 
@@ -112,13 +233,14 @@ fdc-storage / fdc-query / fdc-analytics
 
 ## 后续路线
 
-1. `fdc-barter` 骨架与基础类型。
-2. Barter 实时 public trades / L1 order book 映射。
-3. 与 `fdc-transform` 的输入类型打通。
-4. 端到端流：Barter stream -> fdc-barter -> fdc-transform -> fdc-storage。
-5. 历史数据接口与交易所 REST 实现。
-6. 配置化订阅和运行时管理。
-7. 如有外部复用价值，再考虑反向贡献到 barter-rs 生态。
+1. 按业务分包重构 `fdc-adapter/barter`，不接真实网络。
+2. 在 `fdc-ingestion` 中设计并实现 source path 骨架。
+3. 参考 Barter examples 接入实时 public trades / L1 order book。
+4. 输出 `BarterIngestionEnvelope` 进入 `fdc-ingestion` source buffer/batch。
+5. 与 `fdc-transform` 的输入类型打通。
+6. 历史数据接口与交易所 REST MVP。
+7. 历史补齐 + 实时衔接。
+8. 如有外部复用价值，再考虑反向贡献到 barter-rs 生态。
 
 ## 维护原则
 
@@ -126,3 +248,4 @@ fdc-storage / fdc-query / fdc-analytics
 - Barter 类型只在适配边界出现，mdb 内部使用自己的标准事件和类型。
 - 历史和实时使用统一输出模型，便于后续回放与实时混合处理。
 - 优先保证编译、测试和边界清晰，再逐步接入真实网络能力。
+- `fdc-barter` 不伪装成 network receiver，不强行复用 `ReceivedData -> DataParser` 路径。

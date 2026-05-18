@@ -5,17 +5,19 @@
 - 状态：已确认方向，后续持续维护
 - 适用范围：加密交易所市场数据接入，包括实时数据、历史数据和后续回放能力
 - 关联文档：`docs/architecture/barter-rs-integration.md`
-- 关联模块：`fdc-barter`、`fdc-ingestion`、`fdc-transform`、`fdc-storage`
+- 关联模块：`crates/fdc-adapter/barter`、`fdc-ingestion`、`fdc-transform`、`fdc-storage`
 
 ## 核心约定
 
-`fdc-barter` 负责加密交易所实时数据和历史数据的获取。它的目的不是重新实现交易所接入生态，而是尽量复用 `/Volumes/wdata/mountainsea-lab/barter-rs` 中的 Barter 生态完成需求。
+`fdc-barter` 位于 `crates/fdc-adapter/barter`，负责加密交易所实时数据和历史数据的获取。它的目的不是重新实现交易所接入生态，而是尽量复用 `/Volumes/wdata/mountainsea-lab/barter-rs` 中的 Barter 生态完成需求。
+
+本阶段 **不新增 `fdc-market-data-core` crate**。市场数据请求、事件、source、checkpoint 等抽象先在 `fdc-adapter/barter` 内按业务模块拆分。未来如果多个 adapter 需要共享这些抽象，再考虑抽取公共 crate。
 
 职责约定：
 
-- `fdc-barter`：位于 `crates/fdc-adapter/barter`，是加密交易所数据源适配器，优先复用 `barter-data`、`barter-integration`、`barter-instrument`。
 - `crates/fdc-adapter`：统一存放具体外部数据源适配器，未来新增数据源也放在该目录下。
-- `fdc-ingestion`：mdb 接入中枢，负责 source 生命周期、缓冲、背压、批处理、恢复、指标。
+- `fdc-barter`：加密交易所数据源适配器，优先复用 `barter-data`、`barter-integration`、`barter-instrument`。
+- `fdc-ingestion`：mdb 接入中枢，负责 source 生命周期、缓冲、背压、批处理、恢复、指标和 checkpoint 协调。
 - `fdc-transform`：数据标准化、格式转换、类型转换、schema 转换。
 - `fdc-storage`：数据写入、多层存储、缓存和后续查询支撑。
 
@@ -24,9 +26,9 @@
 实时、历史和回放数据进入 mdb 后必须走同一条下游管道，避免为实时和历史维护两套模型。
 
 ```text
-fdc-barter / future data source adapters
+fdc-adapter/barter 或 future data source adapters
         ↓
-fdc-ingestion
+fdc-ingestion source path
         ↓
 fdc-transform
         ↓
@@ -35,75 +37,122 @@ fdc-storage / fdc-query / fdc-analytics
 
 `fdc-barter` 是数据源插件，不绕过 `fdc-ingestion` 直接进入 `fdc-transform` 或 `fdc-storage`。
 
-## 推荐模块边界
+## 当前 fdc-ingestion 参考结论
 
-### fdc-market-data-core，建议新增
-
-定义市场数据源的通用抽象，避免未来所有数据源都依赖 `fdc-barter` 或 barter-rs。
-
-建议包含：
-
-- `MarketDataSource`
-- `MarketDataMode`
-- `MarketDataRequest`
-- `MarketDataEvent`
-- `MarketDataKind`
-- `MarketDataPayload`
-- `SourceCapabilities`
-- `SourceCheckpoint`
-- `MarketDataSourceError`
-
-如果短期不新增 crate，也可以先放入 `fdc-ingestion` 的 `source` 模块，但长期建议抽为独立 crate。
-
-### fdc-adapter/barter (`fdc-barter`)
-
-负责使用 Barter 生态实现加密交易所数据源。
-
-建议包含：
-
-- `BarterLiveSource`：基于 `barter-data` WebSocket 实时行情。
-- `BarterHistoricalSource`：优先复用 Barter 历史抽象；如果 Barter 当前能力不足，则在 `fdc-barter` 内通过交易所 REST 补齐。
-- `BarterEventMapper`：将 Barter 事件映射为 mdb 统一 `MarketDataEvent`。
-- `BarterSubscriptionBuilder`：将 mdb 请求转换为 Barter subscriptions。
-- `BarterExchangeCapabilities`：声明每个交易所支持的实时/历史数据种类。
-
-不包含：
-
-- 存储写入逻辑。
-- 查询逻辑。
-- 策略交易逻辑。
-- mdb 全局调度逻辑。
-
-### fdc-ingestion
-
-负责把任意 `MarketDataSource` 纳入 mdb 接入生命周期。
-
-建议包含：
-
-- source 启停管理。
-- 多 source 并发运行。
-- buffer 管理。
-- backpressure。
-- batch。
-- recovery。
-- metrics。
-- checkpoint 协调。
-- 将 source 输出交给 `fdc-transform`。
-
-### fdc-transform
-
-只处理统一事件，不感知数据来自 Barter、REST、文件还是回放。
-
-建议输入：
+`crates/fdc-ingestion/examples/ingestion_demo.rs` 当前展示的是网络字节流路径：
 
 ```text
-MarketDataEvent -> TransformPipeline -> ProcessedData
+ReceivedData
+        ↓
+DataParser
+        ↓
+DataValidator
+        ↓
+BatchItem
+        ↓
+BatchProcessor
+        ↓
+SimpleStorage
 ```
 
-## 统一数据模式
+这条路径适合 TCP/WebSocket/UDP 等原始字节输入。`fdc-barter` 输出的是已标准化的市场数据事件，不应该强行伪装成 `ReceivedData` 再走 `DataParser`。
+
+因此 `fdc-ingestion` 需要新增 source path：
+
+```text
+BarterIngestionEnvelope
+        ↓
+DataBuffer<BarterIngestionEnvelope>
+        ↓
+SourceValidator / SourceValidationResult
+        ↓
+SourceBatchItem
+        ↓
+SourceBatchProcessor 或现有 BatchProcessor 的泛化版本
+        ↓
+fdc-transform
+```
+
+短期设计目标是先定义交接边界，不急于改造现有 `DataParser` 和 `BatchProcessor`。
+
+## fdc-adapter/barter 推荐分包
+
+```text
+crates/fdc-adapter/barter/src/
+  lib.rs
+  error.rs
+  config.rs
+
+  model/
+    mod.rs
+    event.rs          # BarterMarketEvent / BarterMarketPayload / BarterMarketDataKind
+    request.rs        # BarterMarketDataRequest / symbol/kind/mode request
+    source.rs         # source id / source status / source trait
+    checkpoint.rs     # historical checkpoint / resume cursor
+
+  live/
+    mod.rs
+    source.rs         # BarterLiveSource
+    subscription.rs   # mdb request -> Barter subscription batches
+    stream.rs         # Barter DynamicStreams / Streams 包装
+
+  historical/
+    mod.rs
+    source.rs         # BarterHistoricalSource
+    request.rs        # historical request / time range / pagination
+    checkpoint.rs     # checkpoint persistence model
+    binance.rs        # 第一阶段 Binance REST 历史数据
+    okx.rs            # 后续 OKX
+
+  mapper/
+    mod.rs
+    event.rs          # Barter MarketEvent -> BarterMarketEvent
+    instrument.rs     # symbol <-> base/quote/instrument
+    exchange.rs       # exchange enum/string 映射
+
+  ingestion/
+    mod.rs
+    envelope.rs       # 给 fdc-ingestion 的统一输出 envelope
+    sink.rs           # 后续对接 ingestion sender/stream
+
+  capability/
+    mod.rs
+    exchange.rs       # 每个交易所支持 trade/l1/candle/history 等声明
+```
+
+分包原则：
+
+- 按业务功能拆分，不按技术层堆大文件。
+- 每个模块只暴露必要 public API。
+- `live` 只处理实时流，不处理历史分页。
+- `historical` 只处理历史拉取、分页、checkpoint，不处理实时 WebSocket。
+- `mapper` 是 Barter 类型和 mdb adapter 类型的唯一映射层。
+- `ingestion` 只定义给 `fdc-ingestion` 的输出 envelope 和 sink 边界，不实现存储。
+
+## Barter 实时数据参考
+
+`barter-data/examples` 中可直接参考：
+
+- `dynamic_multi_stream_multi_exchange.rs`
+- `public_trades_streams.rs`
+- `public_trades_streams_multi_exchange.rs`
+- `order_books_l1_streams_multi_exchange.rs`
+
+推荐优先使用 `DynamicStreams` 作为 mdb 的实时流基础，因为它可以统一多交易所、多 symbol、多数据类型：
 
 ```rust
-enum MarketDataMode {
+let streams = DynamicStreams::init(subscription_batches).await?;
+let merged = streams
+    .select_all::<MarketStreamResult<MarketDataInstrument, DataKind>>()
+    .with_error_handler(|error| warn!(?error, "MarketStream generated error"));
+```
+
+相比 `Streams::<PublicTrades>` 或 `Streams::<OrderBooksL1>`，`DynamicStreams` 更适合 mdb 统一 source，因为后续需要同时支持 trades、L1、L2、candles、liquidations。
+
+## fdc-barter 内部数据模式
+
+```rust
+enum BarterMarketDataMode {
     Live,
     Historical { start: TimestampNs, end: Option<TimestampNs> },
     Replay { dataset_id: String, speed: ReplaySpeed },
@@ -112,44 +161,44 @@ enum MarketDataMode {
 
 语义：
 
-- `Live`：实时 WebSocket 或类似实时流。
-- `Historical`：交易所 REST、文件、对象存储等历史数据源。
+- `Live`：Barter WebSocket 或类似实时流。
+- `Historical`：交易所 REST、Barter 历史抽象、文件或对象存储等历史数据源。
 - `Replay`：基于已落地数据集的模拟实时回放。
 
-## 统一请求模型
+## fdc-barter 请求模型
 
 ```rust
-struct MarketDataRequest {
+struct BarterMarketDataRequest {
     exchange: String,
     symbols: Vec<String>,
-    kinds: Vec<MarketDataKind>,
-    mode: MarketDataMode,
+    kinds: Vec<BarterMarketDataKind>,
+    mode: BarterMarketDataMode,
     granularity: Option<Duration>,
-    options: MarketDataRequestOptions,
+    options: BarterRequestOptions,
 }
 ```
 
 请求约束：
 
 - `symbols` 使用 mdb 标准符号，例如 `BTCUSDT`。
-- `fdc-barter` 负责转换为 Barter 或交易所要求的 base/quote/instrument 表示。
+- `mapper::instrument` 负责转换为 Barter 或交易所要求的 base/quote/instrument 表示。
 - `granularity` 主要用于 candles/klines。
 - 请求中不包含存储目标，存储由下游统一决定。
 
-## 统一事件模型
+## fdc-barter 事件模型
 
 ```rust
-struct MarketDataEvent {
+struct BarterMarketEvent {
     source: String,
-    mode: MarketDataMode,
+    mode: BarterMarketDataMode,
     exchange: String,
     symbol: Symbol,
-    kind: MarketDataKind,
+    kind: BarterMarketDataKind,
     timestamp: TimestampNs,
     received_at: TimestampNs,
-    payload: MarketDataPayload,
+    payload: BarterMarketPayload,
     sequence: Option<u64>,
-    checkpoint: Option<SourceCheckpoint>,
+    checkpoint: Option<BarterCheckpoint>,
 }
 ```
 
@@ -163,7 +212,7 @@ struct MarketDataEvent {
 ## 数据类型
 
 ```rust
-enum MarketDataKind {
+enum BarterMarketDataKind {
     Trade,
     OrderBookL1,
     OrderBookL2,
@@ -174,7 +223,7 @@ enum MarketDataKind {
 ```
 
 ```rust
-enum MarketDataPayload {
+enum BarterMarketPayload {
     Trade(TradePayload),
     OrderBookL1(OrderBookL1Payload),
     OrderBookDelta(OrderBookDeltaPayload),
@@ -191,12 +240,12 @@ enum MarketDataPayload {
 每个数据源需要声明能力，便于 ingestion 在运行前校验请求。
 
 ```rust
-struct SourceCapabilities {
+struct BarterSourceCapabilities {
     supports_live: bool,
     supports_historical: bool,
     supports_replay: bool,
     exchanges: Vec<String>,
-    kinds: Vec<MarketDataKind>,
+    kinds: Vec<BarterMarketDataKind>,
     max_symbols_per_subscription: Option<usize>,
     historical_granularities: Vec<Duration>,
     rate_limits: Vec<RateLimitRule>,
@@ -213,9 +262,42 @@ struct SourceCapabilities {
 4. 如果 barter-rs 没有某个交易所历史 REST 客户端，则在 `fdc-barter` 中实现最小历史客户端，并保持接口与 Barter 风格兼容。
 5. 当历史能力成熟且可复用时，再考虑反向贡献到 barter-rs 生态。
 
+## fdc-ingestion 对接模型
+
+`fdc-barter` 给 `fdc-ingestion` 的交接对象是 envelope：
+
+```rust
+struct BarterIngestionEnvelope {
+    source: String,
+    mode: BarterMarketDataMode,
+    event: BarterMarketEvent,
+    checkpoint: Option<BarterCheckpoint>,
+    received_at: TimestampNs,
+}
+```
+
+`fdc-ingestion` 后续应新增 source path 模块：
+
+```text
+crates/fdc-ingestion/src/
+  source.rs
+  source_manager.rs
+  source_pipeline.rs
+  source_envelope.rs
+  source_batch.rs
+```
+
+建议职责：
+
+- `source.rs`：定义 ingestion 侧 source 输入边界。
+- `source_manager.rs`：管理 source 启停和生命周期。
+- `source_pipeline.rs`：连接 source stream、buffer、validation、batch 和 transform。
+- `source_envelope.rs`：定义通用 source envelope，避免 ingestion 依赖具体 Barter 内部细节。
+- `source_batch.rs`：source 事件批处理项，可复用或泛化现有 `BatchProcessor`。
+
 ## 历史数据设计
 
-历史数据是 `MarketDataMode::Historical`，不是旁路。
+历史数据是 `BarterMarketDataMode::Historical`，不是旁路。
 
 必须支持的机制：
 
@@ -255,32 +337,12 @@ LiveSource(from T or current)
 - 实时启动前的短暂数据空窗。
 - candles 与 trades 的不同时间边界。
 
-## fdc-ingestion 中枢职责
-
-`fdc-ingestion` 不负责理解 Barter 内部类型，但负责管理 source 输出的统一事件流。
-
-建议数据流：
-
-```text
-MarketDataSource::stream(request)
-        ↓
-DataBuffer
-        ↓
-BackpressureController
-        ↓
-BatchProcessor
-        ↓
-RecoveryManager / checkpoint
-        ↓
-fdc-transform
-```
-
 ## 错误模型
 
 错误需要区分可重试和不可重试：
 
 ```rust
-enum MarketDataSourceError {
+enum BarterMarketDataError {
     UnsupportedExchange,
     UnsupportedSymbol,
     UnsupportedKind,
@@ -305,32 +367,40 @@ enum MarketDataSourceError {
 验收标准：
 
 - 文档明确 `fdc-barter`、`fdc-ingestion`、`fdc-transform` 的职责边界。
+- 文档明确不新增 `fdc-market-data-core`，抽象先留在 `fdc-adapter/barter`。
 - 文档明确实时、历史、回放统一事件模型。
+- 文档明确 `fdc-ingestion` 新增 source path，而不是强行套旧的 `ReceivedData -> DataParser` 路径。
 - 文档明确历史数据 checkpoint/resume/rate limit/gap detection 要求。
 
-### Phase 2：抽象落地骨架
+### Phase 2：fdc-barter 业务分包落地
 
-- 新增或确定 `fdc-market-data-core`。
-- 定义统一类型和 trait。
-- `fdc-barter` 适配当前 `BarterMarketEvent` 到统一 `MarketDataEvent`。
-- `fdc-ingestion` 增加 source 管理骨架。
+- 按 `model/live/historical/mapper/ingestion/capability` 拆分文件。
+- 将当前 `lib.rs` 中的事件、配置、错误和 mapper 迁移到对应模块。
+- 保持现有测试通过。
+- 不接真实网络。
 
-不接真实网络。
+### Phase 3：fdc-ingestion source path 骨架
 
-### Phase 3：实时 Barter MVP
+- 增加 source envelope/source pipeline 设计对应的最小模块。
+- 支持接收 `BarterIngestionEnvelope` 或其通用化形式。
+- 对接 `DataBuffer<T>`。
+- 不改动现有 network receiver path。
 
+### Phase 4：实时 Barter MVP
+
+- 参考 `barter-data/examples/dynamic_multi_stream_multi_exchange.rs`。
 - 接入 `barter-data` 实时 public trades。
 - 接入 L1 order book。
-- 输出统一 `MarketDataEvent`。
-- 进入 `fdc-ingestion` buffer/batch。
+- 输出 `BarterIngestionEnvelope`。
+- 进入 `fdc-ingestion` source buffer/batch。
 
-### Phase 4：历史数据 MVP
+### Phase 5：历史数据 MVP
 
 - 实现 Binance spot candles/trades 历史拉取。
 - 支持分页、rate limit、retry、checkpoint。
-- 输出统一 `MarketDataEvent`。
+- 输出同一个 `BarterIngestionEnvelope`。
 
-### Phase 5：历史 + 实时衔接
+### Phase 6：历史 + 实时衔接
 
 - 历史补齐到 T。
 - 实时从 T 附近启动。
@@ -339,14 +409,16 @@ enum MarketDataSourceError {
 
 ## 当前不做
 
+- 不新增 `fdc-market-data-core`。
 - 不把 storage 写入逻辑放入 `fdc-barter`。
 - 不让 `fdc-transform` 依赖 barter-rs 类型。
 - 不绕过 `fdc-ingestion`。
+- 不强行把 `fdc-barter` 输出伪装成 `ReceivedData`。
 - 不在顶层设计阶段实现真实 WebSocket 或 REST。
 - 不优先支持所有交易所，先用少量交易所验证抽象。
 
 ## 推荐下一步
 
-先实现 Phase 2 的设计计划，但在写代码前应先产出详细 implementation plan。优先决策点是：是否新增独立 `fdc-market-data-core` crate。
+先写 Phase 2 的 implementation plan：重构 `crates/fdc-adapter/barter` 的模块结构，但不接真实网络。
 
-推荐：新增 `fdc-market-data-core`，因为它能避免 `fdc-ingestion`、`fdc-transform`、`fdc-barter` 之间产生错误依赖方向。
+Phase 2 完成后，再写 Phase 3 的 `fdc-ingestion` source path 计划。
