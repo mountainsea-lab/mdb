@@ -45,6 +45,45 @@ pub struct SourceBatchResult {
     pub errors: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SourceBatchProcessorStats {
+    pub batches_processed: u64,
+    pub total_messages: u64,
+    pub successful_messages: u64,
+    pub failed_messages: u64,
+    pub total_processing_time_ms: u64,
+    pub avg_batch_size: f64,
+    pub avg_processing_time_ms: f64,
+    pub throughput_msg_per_sec: f64,
+}
+
+impl SourceBatchProcessorStats {
+    pub fn record_batch(&mut self, result: &SourceBatchResult) {
+        self.batches_processed += 1;
+        self.total_messages += result.processed_count as u64;
+        self.successful_messages += result.success_count as u64;
+        self.failed_messages += result.failure_count as u64;
+        self.total_processing_time_ms += result.processing_time_ms;
+
+        self.avg_batch_size = self.total_messages as f64 / self.batches_processed as f64;
+        self.avg_processing_time_ms =
+            self.total_processing_time_ms as f64 / self.batches_processed as f64;
+
+        if self.total_processing_time_ms > 0 {
+            self.throughput_msg_per_sec =
+                (self.total_messages as f64 * 1000.0) / self.total_processing_time_ms as f64;
+        }
+    }
+
+    pub fn success_rate(&self) -> f64 {
+        if self.total_messages == 0 {
+            0.0
+        } else {
+            self.successful_messages as f64 / self.total_messages as f64
+        }
+    }
+}
+
 #[async_trait]
 pub trait SourceBatchSink<T>: Send + Sync {
     async fn write_batch(&self, items: Vec<SourceBatchItem<T>>) -> Result<usize>;
@@ -55,6 +94,7 @@ pub struct SourceBatchProcessor<T> {
     sink: Arc<dyn SourceBatchSink<T>>,
     current_batch: Arc<RwLock<Vec<SourceBatchItem<T>>>>,
     batch_timer: Arc<RwLock<Option<Instant>>>,
+    stats: Arc<RwLock<SourceBatchProcessorStats>>,
 }
 
 impl<T> SourceBatchProcessor<T>
@@ -67,7 +107,16 @@ where
             sink,
             current_batch: Arc::new(RwLock::new(Vec::new())),
             batch_timer: Arc::new(RwLock::new(None)),
+            stats: Arc::new(RwLock::new(SourceBatchProcessorStats::default())),
         }
+    }
+
+    pub async fn get_stats(&self) -> SourceBatchProcessorStats {
+        self.stats.read().await.clone()
+    }
+
+    pub async fn reset_stats(&self) {
+        *self.stats.write().await = SourceBatchProcessorStats::default();
     }
 
     pub async fn add_item(&self, item: SourceBatchItem<T>) -> Result<Option<SourceBatchResult>> {
@@ -135,7 +184,25 @@ where
         let written_count = if valid_items.is_empty() {
             0
         } else {
-            self.sink.write_batch(valid_items).await?
+            match self.sink.write_batch(valid_items).await {
+                Ok(written_count) => written_count,
+                Err(error) => {
+                    let result = SourceBatchResult {
+                        batch_id,
+                        processed_count: batch_size,
+                        success_count: 0,
+                        failure_count: batch_size,
+                        batch_size,
+                        processing_time_ms: start.elapsed().as_millis() as u64,
+                        processed_at: Utc::now(),
+                        errors,
+                    };
+
+                    self.stats.write().await.record_batch(&result);
+
+                    return Err(error);
+                }
+            }
         };
 
         if written_count < valid_count {
@@ -147,7 +214,7 @@ where
 
         let failure_count = invalid_count + valid_count.saturating_sub(written_count);
 
-        Ok(SourceBatchResult {
+        let result = SourceBatchResult {
             batch_id,
             processed_count: batch_size,
             success_count: written_count,
@@ -156,6 +223,10 @@ where
             processing_time_ms: start.elapsed().as_millis() as u64,
             processed_at: Utc::now(),
             errors,
-        })
+        };
+
+        self.stats.write().await.record_batch(&result);
+
+        Ok(result)
     }
 }

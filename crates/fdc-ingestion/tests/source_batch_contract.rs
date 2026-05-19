@@ -36,7 +36,6 @@ async fn source_batch_item_preserves_envelope_and_validation_result() {
     assert!(item.is_valid());
 }
 
-
 #[tokio::test]
 async fn source_batch_item_validity_comes_from_validation_result() {
     let mut envelope = dummy_envelope("", "ETHUSDT");
@@ -258,4 +257,51 @@ async fn source_batch_processor_propagates_sink_errors() {
         .unwrap_err();
 
     assert!(err.to_string().contains("sink unavailable"));
+
+    let stats = processor.get_stats().await;
+    assert_eq!(stats.batches_processed, 1);
+    assert_eq!(stats.total_messages, 1);
+    assert_eq!(stats.successful_messages, 0);
+    assert_eq!(stats.failed_messages, 1);
+}
+
+#[tokio::test]
+async fn source_batch_processor_records_and_resets_stats() {
+    let sink = Arc::new(RecordingSourceBatchSink::<DummyMarketEvent>::default());
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 10,
+            ..Default::default()
+        },
+        sink,
+    );
+
+    let valid_envelope = dummy_envelope("dummy-source", "BTCUSDT");
+    let valid_validation = SourceValidator::default().validate(&valid_envelope).await;
+    let invalid_envelope = dummy_envelope("", "ETHUSDT");
+    let invalid_validation = SourceValidator::default().validate(&invalid_envelope).await;
+
+    processor
+        .add_item(SourceBatchItem::new(valid_envelope, valid_validation))
+        .await
+        .unwrap();
+    processor
+        .add_item(SourceBatchItem::new(invalid_envelope, invalid_validation))
+        .await
+        .unwrap();
+    processor.flush().await.unwrap().unwrap();
+
+    let stats = processor.get_stats().await;
+    assert_eq!(stats.batches_processed, 1);
+    assert_eq!(stats.total_messages, 2);
+    assert_eq!(stats.successful_messages, 1);
+    assert_eq!(stats.failed_messages, 1);
+    assert_eq!(stats.avg_batch_size, 2.0);
+    assert_eq!(stats.success_rate(), 0.5);
+
+    processor.reset_stats().await;
+    let reset = processor.get_stats().await;
+    assert_eq!(reset.batches_processed, 0);
+    assert_eq!(reset.total_messages, 0);
+    assert_eq!(reset.success_rate(), 0.0);
 }

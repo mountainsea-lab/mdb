@@ -4,7 +4,10 @@ pub mod envelope;
 pub mod quality;
 pub mod validator;
 
-pub use batch::{SourceBatchItem, SourceBatchProcessor, SourceBatchResult, SourceBatchSink};
+pub use batch::{
+    SourceBatchItem, SourceBatchProcessor, SourceBatchProcessorStats, SourceBatchResult,
+    SourceBatchSink,
+};
 pub use checkpoint::{SourceCheckpoint, SourcePartition, SourcePosition};
 pub use envelope::{SourceEnvelope, SourceMetadata, SourceType};
 pub use quality::SourceQualityFlags;
