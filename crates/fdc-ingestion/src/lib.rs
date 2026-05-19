@@ -13,6 +13,7 @@ pub mod recovery;       // 错误恢复
 pub mod metrics;        // 接入指标
 pub mod config;         // 配置管理
 pub mod protocols;      // 协议支持
+pub mod source;         // 结构化 source path
 
 // 重新导出常用类型
 pub use receiver::{DataReceiver, ReceiverType};
@@ -26,6 +27,11 @@ pub use metrics::IngestionMetrics;
 pub use config::{
     IngestionConfig, ReceiverConfig, ParserConfig, ValidatorConfig,
     BufferConfig, BatchConfig, BackpressureConfig, RecoveryConfig, MetricsConfig
+};
+pub use source::{
+    SourceCheckpoint, SourceEnvelope, SourceMetadata, SourcePartition, SourcePosition,
+    SourceQualityFlags, SourceType, SourceValidationError, SourceValidationErrorType,
+    SourceValidationResult, SourceValidationWarning, SourceValidator, SourceValidatorStats,
 };
 
 /// 库版本信息
