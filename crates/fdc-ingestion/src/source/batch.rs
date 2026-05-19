@@ -119,6 +119,11 @@ where
         *self.stats.write().await = SourceBatchProcessorStats::default();
     }
 
+    /// Enqueues one item and processes the current batch when the batch size is reached
+    /// or when `batch_timeout` has already elapsed at enqueue time.
+    ///
+    /// This processor does not spawn a background timer. Autonomous timeout flushing
+    /// belongs to the source pipeline runner/runtime layer.
     pub async fn add_item(&self, item: SourceBatchItem<T>) -> Result<Option<SourceBatchResult>> {
         let mut batch = self.current_batch.write().await;
         let mut timer = self.batch_timer.write().await;
