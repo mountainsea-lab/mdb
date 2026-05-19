@@ -4,6 +4,8 @@
 
 **Goal:** 将 `crates/fdc-adapter/barter` 从单文件骨架重构为按业务划分的模块结构，补齐实时/历史数据获取前必须存在的核心模型，但不接真实网络。
 
+**Review Input:** 代码实现前先 review `docs/architecture/fdc-barter-phase-a-pseudocode-review.md`。该文档用伪代码梳理实时映射、历史分页/checkpoint、ingestion envelope、source 状态机和 capability 业务逻辑。
+
 **Architecture:** Phase A 只处理 `fdc-barter` crate 内部边界。先用伪代码梳理业务流程和数据结构，再用 TDD 落地 `model / mapper / ingestion / capability` 模块。`live` 和 `historical` 只创建类型边界，不启动 Barter WebSocket 或 REST。
 
 **Tech Stack:** Rust 2021, `fdc-core`, `barter-data`, `barter-instrument`, `chrono`, `serde`, `thiserror`, `rust_decimal`.
