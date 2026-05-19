@@ -42,3 +42,26 @@ pub struct HistoricalPageRequest {
     pub limit: Option<usize>,
     pub cursor: Option<HistoricalCursor>,
 }
+
+impl HistoricalPageRequest {
+    pub fn new(
+        source_id: impl Into<String>,
+        exchange: impl Into<String>,
+        symbol: impl Into<String>,
+        kind: BarterMarketDataKind,
+        start: TimestampNs,
+        end: Option<TimestampNs>,
+        limit: Option<usize>,
+    ) -> Self {
+        Self {
+            source_id: source_id.into(),
+            exchange: exchange.into(),
+            symbol: symbol.into(),
+            kind,
+            start,
+            end,
+            limit,
+            cursor: None,
+        }
+    }
+}
