@@ -123,3 +123,139 @@ async fn source_batch_processor_empty_flush_returns_none() {
 
     assert!(result.is_none());
 }
+
+#[tokio::test]
+async fn source_batch_processor_filters_invalid_items_before_sink() {
+    let sink = Arc::new(RecordingSourceBatchSink::<DummyMarketEvent>::default());
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 10,
+            ..Default::default()
+        },
+        sink.clone(),
+    );
+
+    let valid_envelope = dummy_envelope("dummy-source", "BTCUSDT");
+    let valid_validation = SourceValidator::default().validate(&valid_envelope).await;
+    let valid_item = SourceBatchItem::new(valid_envelope, valid_validation);
+
+    let invalid_envelope = dummy_envelope("", "ETHUSDT");
+    let invalid_validation = SourceValidator::default().validate(&invalid_envelope).await;
+    let invalid_item = SourceBatchItem::new(invalid_envelope, invalid_validation);
+
+    processor.add_item(valid_item).await.unwrap();
+    processor.add_item(invalid_item).await.unwrap();
+
+    let result = processor.flush().await.unwrap().unwrap();
+
+    assert_eq!(result.processed_count, 2);
+    assert_eq!(result.success_count, 1);
+    assert_eq!(result.failure_count, 1);
+    assert_eq!(sink.written_count().await, 1);
+    assert_eq!(result.errors.len(), 1);
+    assert!(result.errors[0].contains("invalid source batch item"));
+}
+
+#[tokio::test]
+async fn source_batch_processor_processes_when_batch_size_is_reached() {
+    let sink = Arc::new(RecordingSourceBatchSink::<DummyMarketEvent>::default());
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 2,
+            ..Default::default()
+        },
+        sink.clone(),
+    );
+
+    let first = dummy_envelope("dummy-source", "BTCUSDT");
+    let first_validation = SourceValidator::default().validate(&first).await;
+    let second = dummy_envelope("dummy-source", "ETHUSDT");
+    let second_validation = SourceValidator::default().validate(&second).await;
+
+    assert!(processor
+        .add_item(SourceBatchItem::new(first, first_validation))
+        .await
+        .unwrap()
+        .is_none());
+
+    let result = processor
+        .add_item(SourceBatchItem::new(second, second_validation))
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.processed_count, 2);
+    assert_eq!(result.success_count, 2);
+    assert_eq!(result.failure_count, 0);
+    assert_eq!(sink.written_count().await, 2);
+    assert!(processor.flush().await.unwrap().is_none());
+}
+
+struct ShortWriteSourceBatchSink {
+    accepted_count: usize,
+}
+
+#[async_trait]
+impl SourceBatchSink<DummyMarketEvent> for ShortWriteSourceBatchSink {
+    async fn write_batch(&self, _items: Vec<SourceBatchItem<DummyMarketEvent>>) -> Result<usize> {
+        Ok(self.accepted_count)
+    }
+}
+
+struct FailingSourceBatchSink;
+
+#[async_trait]
+impl SourceBatchSink<DummyMarketEvent> for FailingSourceBatchSink {
+    async fn write_batch(&self, _items: Vec<SourceBatchItem<DummyMarketEvent>>) -> Result<usize> {
+        Err(fdc_core::error::Error::storage("sink unavailable"))
+    }
+}
+
+#[tokio::test]
+async fn source_batch_processor_records_short_write_as_failure() {
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 10,
+            ..Default::default()
+        },
+        Arc::new(ShortWriteSourceBatchSink { accepted_count: 1 }),
+    );
+
+    for symbol in ["BTCUSDT", "ETHUSDT"] {
+        let envelope = dummy_envelope("dummy-source", symbol);
+        let validation = SourceValidator::default().validate(&envelope).await;
+        processor
+            .add_item(SourceBatchItem::new(envelope, validation))
+            .await
+            .unwrap();
+    }
+
+    let result = processor.flush().await.unwrap().unwrap();
+
+    assert_eq!(result.processed_count, 2);
+    assert_eq!(result.success_count, 1);
+    assert_eq!(result.failure_count, 1);
+    assert_eq!(result.errors.len(), 1);
+    assert!(result.errors[0].contains("source sink accepted 1 of 2 valid items"));
+}
+
+#[tokio::test]
+async fn source_batch_processor_propagates_sink_errors() {
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 1,
+            ..Default::default()
+        },
+        Arc::new(FailingSourceBatchSink),
+    );
+
+    let envelope = dummy_envelope("dummy-source", "BTCUSDT");
+    let validation = SourceValidator::default().validate(&envelope).await;
+
+    let err = processor
+        .add_item(SourceBatchItem::new(envelope, validation))
+        .await
+        .unwrap_err();
+
+    assert!(err.to_string().contains("sink unavailable"));
+}
