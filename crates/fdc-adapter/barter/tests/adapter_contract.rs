@@ -8,7 +8,10 @@ use barter_instrument::{
     Side,
 };
 use chrono::Utc;
-use fdc_barter::{BarterAdapterConfig, BarterDataMode, BarterMarketDataKind, BarterMarketEvent};
+use fdc_barter::{
+    BarterAdapterConfig, BarterDataMode, BarterMarketDataKind, BarterMarketEvent,
+    BarterMarketPayload, TradeSide,
+};
 
 #[test]
 fn default_config_is_live_and_disables_real_network_startup() {
@@ -38,8 +41,15 @@ fn public_trade_event_maps_to_mdb_standard_event() {
 
     assert_eq!(event.exchange, "binance_spot");
     assert_eq!(event.symbol.as_str(), "BTCUSDT");
+    match event.payload {
+        BarterMarketPayload::Trade(trade) => {
+            assert_eq!(trade.trade_id.as_deref(), Some("trade-1"));
+            assert_eq!(trade.price.to_f64(), 65000.25);
+            assert_eq!(trade.quantity.to_string(), "2.5");
+            assert_eq!(trade.side, Some(TradeSide::Buy));
+        }
+        other => panic!("expected trade payload, got {other:?}"),
+    }
     assert_eq!(event.kind, BarterMarketDataKind::Trade);
-    assert_eq!(event.price.expect("price").to_f64(), 65000.25);
-    assert_eq!(event.volume.expect("volume").as_u64(), 2);
     assert_eq!(event.source, "barter-rs");
 }
