@@ -29,7 +29,7 @@ pub use config::{
     BufferConfig, BatchConfig, BackpressureConfig, RecoveryConfig, MetricsConfig
 };
 pub use source::{
-    SourceCheckpoint, SourceEnvelope, SourceMetadata, SourcePartition, SourcePosition,
+    SourceBatchItem, SourceCheckpoint, SourceEnvelope, SourceMetadata, SourcePartition, SourcePosition,
     SourceQualityFlags, SourceType, SourceValidationError, SourceValidationErrorType,
     SourceValidationResult, SourceValidationWarning, SourceValidator, SourceValidatorStats,
 };

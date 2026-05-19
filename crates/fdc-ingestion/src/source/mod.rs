@@ -1,8 +1,10 @@
+pub mod batch;
 pub mod checkpoint;
 pub mod envelope;
 pub mod quality;
 pub mod validator;
 
+pub use batch::SourceBatchItem;
 pub use checkpoint::{SourceCheckpoint, SourcePartition, SourcePosition};
 pub use envelope::{SourceEnvelope, SourceMetadata, SourceType};
 pub use quality::SourceQualityFlags;
