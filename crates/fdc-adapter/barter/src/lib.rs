@@ -11,6 +11,7 @@ pub mod ingestion;
 pub mod mapper;
 pub mod model;
 
+pub use capability::{BarterSourceCapabilities, RateLimitRule};
 pub use config::{BarterAdapterConfig, BarterDataMode};
 pub use error::{BarterAdapterError, Result};
 pub use ingestion::{BarterIngestionEnvelope, DataQualityFlags};
