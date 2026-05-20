@@ -31,8 +31,9 @@ pub use config::{
 pub use source::{
     SourceBatchItem, SourceBatchProcessor, SourceBatchProcessorStats, SourceBatchResult,
     SourceBatchSink, SourceCheckpoint, SourceEnvelope, SourceMetadata, SourcePartition,
-    SourcePosition, SourceQualityFlags, SourceType, SourceValidationError, SourceValidationErrorType,
-    SourceValidationResult, SourceValidationWarning, SourceValidator, SourceValidatorStats,
+    SourcePipelineResult, SourcePosition, SourceQualityFlags, SourceType, SourceValidationError,
+    SourceValidationErrorType, SourceValidationResult, SourceValidationWarning, SourceValidator,
+    SourceValidatorStats, run_source_pipeline_once,
 };
 
 /// 库版本信息
