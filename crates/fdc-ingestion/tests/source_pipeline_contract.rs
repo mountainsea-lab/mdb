@@ -148,3 +148,68 @@ async fn source_pipeline_counts_invalid_items_without_writing_them_to_sink() {
     assert_eq!(validator_stats.validation_successes, 1);
     assert_eq!(validator_stats.validation_failures, 1);
 }
+
+#[tokio::test]
+async fn source_pipeline_collects_size_triggered_and_final_flush_results() {
+    let sink = Arc::new(RecordingSourcePipelineSink::<DummyMarketEvent>::default());
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 2,
+            ..Default::default()
+        },
+        sink.clone(),
+    );
+    let validator = SourceValidator::default();
+    let envelopes = vec![
+        dummy_envelope("dummy-source", "BTCUSDT"),
+        dummy_envelope("dummy-source", "ETHUSDT"),
+        dummy_envelope("dummy-source", "SOLUSDT"),
+    ];
+
+    let result = run_source_pipeline_once(envelopes, &validator, &processor)
+        .await
+        .unwrap();
+
+    assert_eq!(result.input_count, 3);
+    assert_eq!(result.validation_success_count, 3);
+    assert_eq!(result.validation_failure_count, 0);
+    assert_eq!(result.batch_count(), 2);
+    assert_eq!(result.batch_results[0].processed_count, 2);
+    assert_eq!(result.batch_results[1].processed_count, 1);
+    assert_eq!(result.processed_count(), 3);
+    assert_eq!(result.success_count(), 3);
+    assert_eq!(result.failure_count(), 0);
+    assert_eq!(sink.written_count().await, 3);
+}
+
+struct FailingSourcePipelineSink;
+
+#[async_trait]
+impl<T> SourceBatchSink<T> for FailingSourcePipelineSink
+where
+    T: Send + Sync + 'static,
+{
+    async fn write_batch(&self, _items: Vec<SourceBatchItem<T>>) -> Result<usize> {
+        Err(fdc_core::error::Error::internal("pipeline sink failed"))
+    }
+}
+
+#[tokio::test]
+async fn source_pipeline_propagates_sink_errors() {
+    let sink = Arc::new(FailingSourcePipelineSink);
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 1,
+            ..Default::default()
+        },
+        sink,
+    );
+    let validator = SourceValidator::default();
+    let envelopes = vec![dummy_envelope("dummy-source", "BTCUSDT")];
+
+    let error = run_source_pipeline_once(envelopes, &validator, &processor)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("pipeline sink failed"));
+}
