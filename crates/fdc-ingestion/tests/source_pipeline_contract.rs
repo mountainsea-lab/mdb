@@ -77,3 +77,74 @@ async fn source_pipeline_empty_input_returns_zero_counts() {
     assert_eq!(result.batch_results.len(), 0);
     assert_eq!(sink.written_count().await, 0);
 }
+
+#[tokio::test]
+async fn source_pipeline_validates_batches_and_flushes_valid_items() {
+    let sink = Arc::new(RecordingSourcePipelineSink::<DummyMarketEvent>::default());
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 10,
+            ..Default::default()
+        },
+        sink.clone(),
+    );
+    let validator = SourceValidator::default();
+    let envelopes = vec![
+        dummy_envelope("dummy-source", "BTCUSDT"),
+        dummy_envelope("dummy-source", "ETHUSDT"),
+    ];
+
+    let result = run_source_pipeline_once(envelopes, &validator, &processor)
+        .await
+        .unwrap();
+
+    assert_eq!(result.input_count, 2);
+    assert_eq!(result.validation_success_count, 2);
+    assert_eq!(result.validation_failure_count, 0);
+    assert_eq!(result.processed_count(), 2);
+    assert_eq!(result.success_count(), 2);
+    assert_eq!(result.failure_count(), 0);
+    assert_eq!(result.batch_count(), 1);
+    assert_eq!(sink.written_count().await, 2);
+
+    let validator_stats = validator.get_stats().await;
+    assert_eq!(validator_stats.messages_validated, 2);
+    assert_eq!(validator_stats.validation_successes, 2);
+    assert_eq!(validator_stats.validation_failures, 0);
+}
+
+#[tokio::test]
+async fn source_pipeline_counts_invalid_items_without_writing_them_to_sink() {
+    let sink = Arc::new(RecordingSourcePipelineSink::<DummyMarketEvent>::default());
+    let processor = SourceBatchProcessor::new(
+        BatchConfig {
+            batch_size: 10,
+            ..Default::default()
+        },
+        sink.clone(),
+    );
+    let validator = SourceValidator::default();
+    let envelopes = vec![
+        dummy_envelope("dummy-source", "BTCUSDT"),
+        dummy_envelope("", "ETHUSDT"),
+    ];
+
+    let result = run_source_pipeline_once(envelopes, &validator, &processor)
+        .await
+        .unwrap();
+
+    assert_eq!(result.input_count, 2);
+    assert_eq!(result.validation_success_count, 1);
+    assert_eq!(result.validation_failure_count, 1);
+    assert_eq!(result.processed_count(), 2);
+    assert_eq!(result.success_count(), 1);
+    assert_eq!(result.failure_count(), 1);
+    assert_eq!(result.batch_count(), 1);
+    assert_eq!(sink.written_count().await, 1);
+    assert_eq!(result.batch_results[0].errors.len(), 1);
+
+    let validator_stats = validator.get_stats().await;
+    assert_eq!(validator_stats.messages_validated, 2);
+    assert_eq!(validator_stats.validation_successes, 1);
+    assert_eq!(validator_stats.validation_failures, 1);
+}

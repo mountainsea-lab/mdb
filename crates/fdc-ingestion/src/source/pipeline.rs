@@ -1,6 +1,8 @@
 use fdc_core::error::Result;
 
-use super::{SourceBatchProcessor, SourceBatchResult, SourceEnvelope, SourceValidator};
+use super::{
+    SourceBatchItem, SourceBatchProcessor, SourceBatchResult, SourceEnvelope, SourceValidator,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct SourcePipelineResult {
@@ -39,19 +41,34 @@ impl SourcePipelineResult {
 
 pub async fn run_source_pipeline_once<T, I>(
     envelopes: I,
-    _validator: &SourceValidator,
-    _processor: &SourceBatchProcessor<T>,
+    validator: &SourceValidator,
+    processor: &SourceBatchProcessor<T>,
 ) -> Result<SourcePipelineResult>
 where
     T: Send + Sync + 'static,
     I: IntoIterator<Item = SourceEnvelope<T>>,
 {
-    let input_count = envelopes.into_iter().count();
+    let mut result = SourcePipelineResult::default();
 
-    Ok(SourcePipelineResult {
-        input_count,
-        validation_success_count: 0,
-        validation_failure_count: 0,
-        batch_results: Vec::new(),
-    })
+    for envelope in envelopes {
+        result.input_count += 1;
+
+        let validation_result = validator.validate(&envelope).await;
+        if validation_result.is_valid {
+            result.validation_success_count += 1;
+        } else {
+            result.validation_failure_count += 1;
+        }
+
+        let item = SourceBatchItem::new(envelope, validation_result);
+        if let Some(batch_result) = processor.add_item(item).await? {
+            result.batch_results.push(batch_result);
+        }
+    }
+
+    if let Some(batch_result) = processor.flush().await? {
+        result.batch_results.push(batch_result);
+    }
+
+    Ok(result)
 }
