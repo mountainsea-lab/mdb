@@ -1,4 +1,4 @@
-use std::process::Command;
+use std::{fs, path::PathBuf};
 
 use barter_data::{
     error::DataError,
@@ -15,7 +15,8 @@ use chrono::{TimeZone, Utc};
 use fdc_barter::{
     collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
     init_binance_spot_public_trades, map_live_trade_result, BarterMarketDataKind,
-    BarterMarketDataMode, IntoSourceEnvelope, LiveExchange, LiveTradeSubscription,
+    BarterMarketDataMode, BarterMarketPayload, IntoSourceEnvelope, LiveExchange,
+    LiveTradeSubscription, TradeSide,
 };
 use fdc_ingestion::SourceType;
 use futures::{stream, StreamExt};
@@ -66,6 +67,23 @@ fn live_trade_result_maps_to_ingestion_envelope() {
     assert_eq!(envelope.event.exchange, "binance_spot");
     assert_eq!(envelope.event.symbol.to_string(), "BTCUSDT");
     assert_eq!(envelope.event.kind, BarterMarketDataKind::Trade);
+    assert_eq!(
+        envelope.event.timestamp.as_nanos(),
+        1_700_000_000_000_000_000
+    );
+    assert_eq!(
+        envelope.event.received_at.as_nanos(),
+        1_700_000_000_000_001_000
+    );
+    match &envelope.event.payload {
+        BarterMarketPayload::Trade(trade) => {
+            assert_eq!(trade.trade_id.as_deref(), Some("trade-1"));
+            assert_eq!(trade.price.to_f64(), 65_000.25);
+            assert_eq!(trade.quantity.to_string(), "0.5");
+            assert_eq!(trade.side, Some(TradeSide::Buy));
+        }
+        payload => panic!("expected trade payload, got {payload:?}"),
+    }
     assert_eq!(envelope.checkpoint, None);
     assert!(!envelope.quality.is_replay);
     assert!(!envelope.quality.is_backfill);
@@ -85,6 +103,23 @@ fn mapped_live_trade_envelope_bridges_to_market_data_source_envelope() {
     assert_eq!(source.payload.exchange, "binance_spot");
     assert_eq!(source.payload.symbol.to_string(), "ETHUSDT");
     assert_eq!(source.payload.kind, BarterMarketDataKind::Trade);
+    assert_eq!(
+        source.event_time.as_nanos(),
+        1_700_000_000_000_000_000
+    );
+    assert_eq!(
+        source.received_at.as_nanos(),
+        1_700_000_000_000_001_000
+    );
+    match &source.payload.payload {
+        BarterMarketPayload::Trade(trade) => {
+            assert_eq!(trade.trade_id.as_deref(), Some("trade-2"));
+            assert_eq!(trade.price.to_f64(), 65_000.25);
+            assert_eq!(trade.quantity.to_string(), "0.5");
+            assert_eq!(trade.side, Some(TradeSide::Buy));
+        }
+        payload => panic!("expected trade payload, got {payload:?}"),
+    }
     assert_eq!(source.metadata.adapter.as_deref(), Some("barter-rs"));
     assert_eq!(source.metadata.exchange.as_deref(), Some("binance_spot"));
 }
@@ -156,17 +191,51 @@ async fn ignored_live_smoke_can_collect_one_binance_spot_trade() {
 
 #[test]
 fn fdc_ingestion_does_not_reference_fdc_barter() {
-    let output = Command::new("sh")
-        .arg("-c")
-        .arg("grep -R \"fdc-barter\\|fdc_barter\" -n crates/fdc-ingestion Cargo.toml crates/fdc-ingestion/Cargo.toml")
-        .output()
-        .expect("dependency guard command should run");
+    let adapter_manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = adapter_manifest_dir
+        .parent()
+        .and_then(|path| path.parent())
+        .and_then(|path| path.parent())
+        .expect("fdc-barter should live under crates/fdc-adapter/barter");
+    let files_to_scan = [
+        workspace_root.join("Cargo.toml"),
+        workspace_root.join("crates/fdc-ingestion/Cargo.toml"),
+    ];
+    let ingestion_src_dir = workspace_root.join("crates/fdc-ingestion/src");
+    let mut violations = Vec::new();
 
-    assert_eq!(
-        output.status.code(),
-        Some(1),
-        "fdc-ingestion must not reference fdc-barter; stdout: {}; stderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+    for file in files_to_scan {
+        collect_fdc_barter_references(&file, &mut violations);
+    }
+    collect_fdc_barter_references_recursively(&ingestion_src_dir, &mut violations);
+
+    assert!(
+        violations.is_empty(),
+        "fdc-ingestion must not reference fdc-barter; violations: {violations:#?}"
     );
+}
+
+fn collect_fdc_barter_references_recursively(path: &PathBuf, violations: &mut Vec<String>) {
+    for entry in fs::read_dir(path).unwrap_or_else(|error| {
+        panic!("failed to read directory {}: {error}", path.display())
+    }) {
+        let entry = entry.expect("failed to read fdc-ingestion directory entry");
+        let path = entry.path();
+        if path.is_dir() {
+            collect_fdc_barter_references_recursively(&path, violations);
+        } else if path.is_file() {
+            collect_fdc_barter_references(&path, violations);
+        }
+    }
+}
+
+fn collect_fdc_barter_references(path: &PathBuf, violations: &mut Vec<String>) {
+    let contents = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+
+    for (line_number, line) in contents.lines().enumerate() {
+        if line.contains("fdc-barter") || line.contains("fdc_barter") {
+            violations.push(format!("{}:{}:{line}", path.display(), line_number + 1));
+        }
+    }
 }
