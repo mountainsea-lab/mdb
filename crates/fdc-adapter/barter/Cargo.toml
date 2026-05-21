@@ -24,4 +24,5 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt", "sync"] }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
+futures = { workspace = true }
