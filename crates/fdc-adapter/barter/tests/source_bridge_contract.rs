@@ -4,8 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use fdc_barter::{
     BarterCheckpoint, BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode,
-    BarterMarketEvent, BarterMarketPayload, DataQualityFlags, HistoricalCursor,
-    IntoSourceEnvelope, TradePayload, TradeSide,
+    BarterMarketEvent, BarterMarketPayload, DataQualityFlags, HistoricalCursor, IntoSourceEnvelope,
+    TradePayload, TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_ingestion::{
@@ -106,8 +106,22 @@ fn live_trade_envelope_maps_identity_timing_payload_quality_and_metadata() {
     assert_eq!(converted.metadata.exchange.as_deref(), Some("binance_spot"));
     assert_eq!(converted.metadata.symbol.as_deref(), Some("BTCUSDT"));
     assert_eq!(converted.metadata.kind.as_deref(), Some("Trade"));
-    assert_eq!(converted.metadata.attributes.get("mode").map(String::as_str), Some("Live"));
-    assert_eq!(converted.metadata.attributes.get("payload_kind").map(String::as_str), Some("Trade"));
+    assert_eq!(
+        converted
+            .metadata
+            .attributes
+            .get("mode")
+            .map(String::as_str),
+        Some("Live")
+    );
+    assert_eq!(
+        converted
+            .metadata
+            .attributes
+            .get("payload_kind")
+            .map(String::as_str),
+        Some("Trade")
+    );
 }
 
 #[test]
@@ -126,7 +140,14 @@ fn historical_envelope_maps_to_replay_backfill_source_semantics() {
 
     assert_eq!(converted.source_type, SourceType::Replay);
     assert!(converted.quality.is_backfill);
-    assert_eq!(converted.metadata.attributes.get("mode").map(String::as_str), Some("Historical"));
+    assert_eq!(
+        converted
+            .metadata
+            .attributes
+            .get("mode")
+            .map(String::as_str),
+        Some("Historical")
+    );
 }
 
 #[test]
@@ -144,13 +165,22 @@ fn barter_checkpoint_maps_to_source_checkpoint_partition_and_page_token_position
     let converted = source.into_source_envelope();
     let checkpoint = converted.checkpoint.expect("checkpoint should map");
 
-    assert_eq!(checkpoint.checkpoint_id, "barter-historical-binance-btcusdt:binance_spot:BTCUSDT:Trade:Historical:2000");
+    assert_eq!(
+        checkpoint.checkpoint_id,
+        "barter-historical-binance-btcusdt:binance_spot:BTCUSDT:Trade:Historical:2000"
+    );
     assert_eq!(checkpoint.source_id, "barter-historical-binance-btcusdt");
-    assert_eq!(checkpoint.partition.exchange.as_deref(), Some("binance_spot"));
+    assert_eq!(
+        checkpoint.partition.exchange.as_deref(),
+        Some("binance_spot")
+    );
     assert_eq!(checkpoint.partition.symbol.as_deref(), Some("BTCUSDT"));
     assert_eq!(checkpoint.partition.kind.as_deref(), Some("Trade"));
     assert_eq!(checkpoint.partition.shard, None);
-    assert_eq!(checkpoint.position, SourcePosition::PageToken("page-token-1".to_string()));
+    assert_eq!(
+        checkpoint.position,
+        SourcePosition::PageToken("page-token-1".to_string())
+    );
     assert_eq!(checkpoint.updated_at, TimestampNs::from_nanos(2_100));
 }
 
@@ -233,5 +263,8 @@ fn fdc_ingestion_does_not_reference_fdc_barter() {
         .output()
         .expect("grep should run");
 
-    assert!(!output.status.success(), "fdc-ingestion must not reference fdc-barter");
+    assert!(
+        !output.status.success(),
+        "fdc-ingestion must not reference fdc-barter"
+    );
 }
