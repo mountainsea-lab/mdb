@@ -4,9 +4,8 @@ use barter_data::{
     streams::{consumer::MarketStreamResult, reconnect, Streams},
     subscription::trade::{PublicTrade, PublicTrades},
 };
-use barter_instrument::{
-    exchange::ExchangeId,
-    instrument::market_data::{kind::MarketDataInstrumentKind, MarketDataInstrument},
+use barter_instrument::instrument::market_data::{
+    kind::MarketDataInstrumentKind, MarketDataInstrument,
 };
 use futures::{Stream, StreamExt};
 
