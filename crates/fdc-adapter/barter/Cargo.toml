@@ -13,6 +13,7 @@ rust-version.workspace = true
 
 [dependencies]
 fdc-core = { path = "../../fdc-core" }
+fdc-ingestion = { path = "../../fdc-ingestion" }
 barter-data = { path = "/Volumes/wdata/mountainsea-lab/barter-rs/barter-data" }
 barter-instrument = { path = "/Volumes/wdata/mountainsea-lab/barter-rs/barter-instrument" }
 chrono = { workspace = true, features = ["serde"] }
@@ -22,3 +23,5 @@ rust_decimal = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }
