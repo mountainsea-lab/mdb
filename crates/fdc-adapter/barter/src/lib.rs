@@ -14,7 +14,7 @@ pub mod model;
 pub use capability::{BarterSourceCapabilities, RateLimitRule};
 pub use config::{BarterAdapterConfig, BarterDataMode};
 pub use error::{BarterAdapterError, Result};
-pub use ingestion::{BarterIngestionEnvelope, DataQualityFlags};
+pub use ingestion::{BarterIngestionEnvelope, DataQualityFlags, IntoSourceEnvelope};
 pub use mapper::event::map_market_event;
 pub use model::{
     BarterCheckpoint, BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest,
