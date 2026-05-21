@@ -103,14 +103,8 @@ fn mapped_live_trade_envelope_bridges_to_market_data_source_envelope() {
     assert_eq!(source.payload.exchange, "binance_spot");
     assert_eq!(source.payload.symbol.to_string(), "ETHUSDT");
     assert_eq!(source.payload.kind, BarterMarketDataKind::Trade);
-    assert_eq!(
-        source.event_time.as_nanos(),
-        1_700_000_000_000_000_000
-    );
-    assert_eq!(
-        source.received_at.as_nanos(),
-        1_700_000_000_000_001_000
-    );
+    assert_eq!(source.event_time.as_nanos(), 1_700_000_000_000_000_000);
+    assert_eq!(source.received_at.as_nanos(), 1_700_000_000_000_001_000);
     match &source.payload.payload {
         BarterMarketPayload::Trade(trade) => {
             assert_eq!(trade.trade_id.as_deref(), Some("trade-2"));
@@ -155,7 +149,9 @@ fn reconnect_event_is_observable_but_does_not_emit_envelope() {
 
 #[tokio::test]
 async fn stream_item_error_is_returned_instead_of_panicking() {
-    let input = stream::iter(vec![reconnect::Event::Item(Err(DataError::SubscriptionsEmpty))]);
+    let input = stream::iter(vec![reconnect::Event::Item(Err(
+        DataError::SubscriptionsEmpty,
+    ))]);
 
     let error = collect_live_trade_envelopes(SOURCE_ID, input, 1)
         .await
@@ -175,7 +171,9 @@ async fn ignored_live_smoke_can_collect_one_binance_spot_trade() {
     let streams = init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())
         .await
         .expect("live Binance Spot stream should initialize");
-    let stream = streams.select_all().map(fdc_barter::public_trade_result_to_data_kind);
+    let stream = streams
+        .select_all()
+        .map(fdc_barter::public_trade_result_to_data_kind);
     let envelopes = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         collect_live_trade_envelopes(SOURCE_ID, stream, 1),
@@ -216,9 +214,9 @@ fn fdc_ingestion_does_not_reference_fdc_barter() {
 }
 
 fn collect_fdc_barter_references_recursively(path: &PathBuf, violations: &mut Vec<String>) {
-    for entry in fs::read_dir(path).unwrap_or_else(|error| {
-        panic!("failed to read directory {}: {error}", path.display())
-    }) {
+    for entry in fs::read_dir(path)
+        .unwrap_or_else(|error| panic!("failed to read directory {}: {error}", path.display()))
+    {
         let entry = entry.expect("failed to read fdc-ingestion directory entry");
         let path = entry.path();
         if path.is_dir() {

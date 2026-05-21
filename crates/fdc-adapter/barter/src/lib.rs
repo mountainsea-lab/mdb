@@ -14,7 +14,12 @@ pub mod model;
 pub use capability::{BarterSourceCapabilities, RateLimitRule};
 pub use config::{BarterAdapterConfig, BarterDataMode};
 pub use error::{BarterAdapterError, Result};
-pub use ingestion::{BarterIngestionEnvelope, DataQualityFlags, IntoSourceEnvelope};
+pub use ingestion::{
+    collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
+    init_binance_spot_public_trades, map_live_trade_result, public_trade_result_to_data_kind,
+    BarterIngestionEnvelope, DataQualityFlags, IntoSourceEnvelope, LiveExchange,
+    LiveTradeSubscription,
+};
 pub use mapper::event::map_market_event;
 pub use model::{
     BarterCheckpoint, BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest,

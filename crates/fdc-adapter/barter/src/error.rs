@@ -15,4 +15,16 @@ pub enum BarterAdapterError {
     /// A timestamp cannot be represented as nanoseconds.
     #[error("timestamp cannot be represented as nanoseconds")]
     InvalidTimestamp,
+
+    /// Barter-rs failed to initialise a live stream.
+    #[error("live stream initialization error: {0}")]
+    LiveStreamInit(String),
+
+    /// Barter-rs yielded an error item from a live stream.
+    #[error("live stream item error: {0}")]
+    LiveStreamItem(String),
+
+    /// A requested live subscription is not supported by this adapter slice.
+    #[error("unsupported live subscription: {0}")]
+    UnsupportedLiveSubscription(String),
 }
