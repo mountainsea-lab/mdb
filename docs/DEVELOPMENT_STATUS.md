@@ -3,7 +3,7 @@
 Last updated: 2026-05-21
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `13a5871`
+Latest checkpoint commit when this file was written: `HEAD` (`docs: update live acquisition status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -207,22 +207,68 @@ Important docs:
 - `docs/superpowers/specs/2026-05-21-fdc-barter-source-envelope-bridge-design.md`
 - `docs/superpowers/plans/2026-05-21-fdc-barter-source-envelope-bridge.md`
 
+### fdc-barter Phase B3: Live Exchange Acquisition
+
+Implemented in `crates/fdc-adapter/barter/src/ingestion/live.rs`.
+
+Completed capabilities:
+
+- Added a thin live acquisition path for Binance Spot public trades using Barter-rs `Streams::<PublicTrades>`.
+- Default first-slice subscriptions are BTC/USDT and ETH/USDT.
+- Added public live acquisition API:
+  - `LiveExchange`
+  - `LiveTradeSubscription`
+  - `default_binance_spot_trade_subscriptions`
+  - `init_binance_spot_public_trades`
+  - `public_trade_result_to_data_kind`
+  - `map_live_trade_result`
+  - `collect_live_trade_envelopes`
+- Live Barter market events map into `BarterIngestionEnvelope` and remain compatible with the B2 `IntoSourceEnvelope` bridge.
+- Reconnect behavior is delegated to Barter-rs. `fdc-barter` does not implement a custom reconnect or lifecycle framework.
+- Historical data, persistence, transform sinks, and storage remain deferred.
+- Optional real Binance Spot smoke validation is gated behind `#[ignore]` and `FDC_BARTER_LIVE_SMOKE=1`.
+
+Contract tests:
+
+- `crates/fdc-adapter/barter/tests/live_acquisition_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-21-fdc-barter-live-acquisition-design.md`
+- `docs/superpowers/plans/2026-05-21-fdc-barter-live-acquisition.md`
+
+Verification:
+
+- `rtk cargo test -p fdc-barter --test live_acquisition_contract`
+- `rtk cargo test -p fdc-barter -p fdc-ingestion`
+- `FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-barter --test live_acquisition_contract ignored_live_smoke_can_collect_one_binance_spot_trade -- --ignored --nocapture`
+- Dependency guard: no `fdc-barter` or `fdc_barter` references inside `crates/fdc-ingestion`.
+
 ## Current Verification Baseline
 
-Last successful verification after B2 source bridge implementation:
+Last successful verification after B3 live exchange acquisition:
 
 ```bash
-rtk cargo fmt --package fdc-barter
+rtk cargo fmt --package fdc-barter --check
+rtk cargo test -p fdc-barter --test live_acquisition_contract
 rtk cargo test -p fdc-barter -p fdc-ingestion
 ! grep -R "fdc-barter\|fdc_barter" -n crates/fdc-ingestion Cargo.toml crates/fdc-ingestion/Cargo.toml
 ```
 
+Optional live smoke validation was also run with network access:
+
+```bash
+FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-barter --test live_acquisition_contract ignored_live_smoke_can_collect_one_binance_spot_trade -- --ignored --nocapture
+```
+
 Result:
 
-- `rtk cargo fmt --package fdc-barter` exit 0, formatted source bridge contract test.
-- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 50 passed.
+- `rtk cargo fmt --package fdc-barter --check` exit 0.
+- `rtk cargo test -p fdc-barter --test live_acquisition_contract` exit 0, 7 passed and 1 ignored.
+- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 57 passed and 1 ignored.
 - Dependency guard exit 0, no matches for `fdc-barter` / `fdc_barter` references in `fdc-ingestion`.
-- Existing warnings remain and are intentionally not addressed yet.
+- Optional live smoke test exit 0, 1 passed and collected a Binance Spot trade.
+- Existing warnings remain in older crates and are intentionally not addressed yet.
 
 ### External Local Dependency Caveat
 
@@ -259,7 +305,7 @@ Do not violate these without a new design review:
 
 ## Next Recommended Development Slice
 
-### Phase B3: Transform Sink Boundary
+### Phase B4: Transform Sink Boundary
 
 Goal: connect validated source batch output to a bounded transform-facing handoff without introducing real storage I/O.
 
@@ -272,7 +318,7 @@ Recommended scope:
 
 ## Later Work After B2
 
-These should be separate plans, not bundled into the completed B2 source bridge. B3 should address only the transform sink boundary in a bounded, testable slice before broader runtime work:
+These should be separate plans, not bundled into the completed B3 live acquisition. B4 should address only the transform sink boundary in a bounded, testable slice before broader runtime work:
 
 1. Checkpoint persistence boundary.
 2. Storage sink boundary.
@@ -297,8 +343,8 @@ When starting the next session:
 2. Confirm branch is `mdb-mqdev` and toolchain is overridden by `rust-toolchain.toml` to Rust 1.95.
 3. Confirm the local Barter-rs checkout exists if you need to run `fdc-barter` tests.
 4. Read this file.
-5. Read the B2 source bridge design, plan, and status before designing B3.
-6. Write a B3 implementation plan before editing code.
+5. Read the B3 live acquisition design, plan, and status before designing B4.
+6. Write a B4 implementation plan before editing code.
 7. Use TDD: create failing contract tests before implementation.
 8. Keep `fdc-ingestion` independent from `fdc-barter`.
 9. Run the verification baseline before committing, or document why the local Barter-rs dependency is unavailable.
