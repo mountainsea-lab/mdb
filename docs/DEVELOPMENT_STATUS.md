@@ -1,9 +1,9 @@
 # Development Status
 
-Last updated: 2026-05-20
+Last updated: 2026-05-21
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `aea0879 test: cover source pipeline batch results`
+Latest checkpoint commit when this file was written: `13a5871`
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -184,28 +184,45 @@ Important docs:
 - `docs/superpowers/specs/2026-05-20-fdc-ingestion-phase-b1c-source-pipeline-design.md`
 - `docs/superpowers/plans/2026-05-20-fdc-ingestion-phase-b1c-source-pipeline.md`
 
+### fdc-barter Phase B2: SourceEnvelope Bridge
+
+Implemented in `crates/fdc-adapter/barter/src/ingestion/source_bridge.rs`.
+
+Completed capabilities:
+
+- Added `IntoSourceEnvelope` for converting `BarterIngestionEnvelope` into `SourceEnvelope<BarterMarketEvent>`.
+- Preserved Barter envelope identity, source id, sequence, timing, payload, quality flags, metadata, and checkpoint hints.
+- Mapped live events to `SourceType::MarketData`.
+- Mapped historical events to `SourceType::Replay` and ensured historical events carry backfill semantics.
+- Mapped `BarterCheckpoint` into `SourceCheckpoint` without persistence.
+- Demonstrated bounded Barter fixture flow through `run_source_pipeline_once` with a recording sink.
+- Preserved the dependency boundary: `fdc-ingestion` still has no `fdc-barter` dependency.
+
+Contract tests:
+
+- `crates/fdc-adapter/barter/tests/source_bridge_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-21-fdc-barter-source-envelope-bridge-design.md`
+- `docs/superpowers/plans/2026-05-21-fdc-barter-source-envelope-bridge.md`
+
 ## Current Verification Baseline
 
-Last successful verification after B1c source pipeline implementation:
+Last successful verification after B2 source bridge implementation:
 
 ```bash
-cargo fmt --package fdc-ingestion
-cargo test -p fdc-ingestion --test source_pipeline_contract
-cargo test -p fdc-ingestion
-cargo test -p fdc-barter -p fdc-ingestion
+rtk cargo fmt --package fdc-barter
+rtk cargo test -p fdc-barter -p fdc-ingestion
 ! grep -R "fdc-barter\|fdc_barter" -n crates/fdc-ingestion Cargo.toml crates/fdc-ingestion/Cargo.toml
 ```
 
 Result:
 
-- Exit code: 0 for the full verification chain above.
-- `source_pipeline_contract` passed with 5 tests.
-- `fdc-ingestion` unit and source contract tests passed.
-- `fdc-barter` contract tests passed alongside `fdc-ingestion`.
-- Dependency guard found no `fdc-barter` / `fdc_barter` references in `fdc-ingestion`.
+- `rtk cargo fmt --package fdc-barter` exit 0, formatted source bridge contract test.
+- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 50 passed.
+- Dependency guard exit 0, no matches for `fdc-barter` / `fdc_barter` references in `fdc-ingestion`.
 - Existing warnings remain and are intentionally not addressed yet.
-
-Note: `cargo fmt --package fdc-ingestion` can format older `fdc-ingestion` files outside the B1c source pipeline scope. Those unrelated formatting changes were reverted for this slice.
 
 ### External Local Dependency Caveat
 
@@ -242,44 +259,26 @@ Do not violate these without a new design review:
 
 ## Next Recommended Development Slice
 
-### Phase B2: fdc-barter to SourceEnvelope Bridge
+### Phase B3: Transform Sink Boundary
 
-Goal: connect the Barter-specific collection boundary to the generic B1 source ingestion primitives without making `fdc-ingestion` depend on `fdc-barter`.
+Goal: connect validated source batch output to a bounded transform-facing handoff without introducing real storage I/O.
 
 Recommended scope:
 
-- Add a Barter-to-`SourceEnvelope<T>` adapter bridge outside `fdc-ingestion`, likely in `fdc-barter` or a higher-level integration crate.
-- Map `BarterIngestionEnvelope` / `BarterMarketEvent` metadata into generic `SourceEnvelope` fields.
-- Preserve source identifiers, event times, received/emitted times, quality flags, symbols, exchange metadata, and checkpoint hints where available.
-- Feed bounded fixtures through `run_source_pipeline_once` using dummy or Barter fixture payloads.
-- Keep the bridge bounded and test-only/demo-friendly at first; do not add a real WebSocket, REST historical pagination runtime, storage sink, or transform sink in this slice.
-- Preserve the dependency boundary: `fdc-ingestion` remains generic and independent from `fdc-barter`.
+- Define a small transform sink boundary that accepts validated `SourceBatchItem<BarterMarketEvent>` or a neutral market-data DTO.
+- Keep the sink bounded and test-only/demo-friendly at first.
+- Do not add database writes, real exchange networking, or checkpoint persistence in this slice.
+- Preserve dependency direction and avoid making `fdc-ingestion` depend on adapter crates.
 
-Likely starting references:
+## Later Work After B2
 
-- `crates/fdc-adapter/barter/src/ingestion/*`
-- `crates/fdc-adapter/barter/src/model/*`
-- `crates/fdc-ingestion/src/source/envelope.rs`
-- `crates/fdc-ingestion/src/source/pipeline.rs`
-- `crates/fdc-ingestion/tests/source_pipeline_contract.rs`
-
-Initial verification commands for B2 should include:
-
-```bash
-cargo test -p fdc-barter -p fdc-ingestion
-! grep -R "fdc-barter\|fdc_barter" -n crates/fdc-ingestion Cargo.toml crates/fdc-ingestion/Cargo.toml
-```
-
-## Later Work After B1c
-
-These should be separate plans, not bundled into B1c or B2:
+These should be separate plans, not bundled into the completed B2 source bridge. B3 should address only the transform sink boundary in a bounded, testable slice before broader runtime work:
 
 1. Checkpoint persistence boundary.
-2. Transform sink boundary from source batch output into `fdc-transform`.
-3. Storage sink boundary.
-4. Stateful dedupe/gap detection.
-5. Warning cleanup across existing crates.
-6. Revisit `.gitignore` ignoring `Cargo.lock`. For application/workspace reproducibility, committing `Cargo.lock` is usually preferable, but this repository currently ignores it and already has an untracked/ignored lockfile history pattern.
+2. Storage sink boundary.
+3. Stateful dedupe/gap detection.
+4. Warning cleanup across existing crates.
+5. Revisit `.gitignore` ignoring `Cargo.lock`. For application/workspace reproducibility, committing `Cargo.lock` is usually preferable, but this repository currently ignores it and already has an untracked/ignored lockfile history pattern.
 
 ## Resume Checklist
 
@@ -298,8 +297,8 @@ When starting the next session:
 2. Confirm branch is `mdb-mqdev` and toolchain is overridden by `rust-toolchain.toml` to Rust 1.95.
 3. Confirm the local Barter-rs checkout exists if you need to run `fdc-barter` tests.
 4. Read this file.
-5. Read the B1 source path review and the B1c pipeline plan/status before designing B2.
-6. Write a B2 implementation plan before editing code.
+5. Read the B2 source bridge design, plan, and status before designing B3.
+6. Write a B3 implementation plan before editing code.
 7. Use TDD: create failing contract tests before implementation.
 8. Keep `fdc-ingestion` independent from `fdc-barter`.
 9. Run the verification baseline before committing, or document why the local Barter-rs dependency is unavailable.
