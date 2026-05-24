@@ -182,9 +182,67 @@ async fn ignored_live_smoke_can_collect_one_binance_spot_trade() {
     .expect("should receive one live trade within timeout")
     .expect("live collection should succeed");
 
+    for (index, envelope) in envelopes.iter().enumerate() {
+        eprintln!("live envelope #{index}: {envelope:#?}");
+    }
+
     assert_eq!(envelopes.len(), 1);
     assert_eq!(envelopes[0].event.exchange, "binance_spot");
     assert_eq!(envelopes[0].event.kind, BarterMarketDataKind::Trade);
+}
+
+#[ignore = "requires public internet and FDC_BARTER_LIVE_SMOKE=1"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ignored_live_smoke_prints_realtime_binance_spot_trades_for_review() {
+    if std::env::var("FDC_BARTER_LIVE_SMOKE").as_deref() != Ok("1") {
+        eprintln!("skipping live smoke test because FDC_BARTER_LIVE_SMOKE=1 is not set");
+        return;
+    }
+
+    let duration = std::env::var("FDC_BARTER_LIVE_PRINT_SECONDS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(std::time::Duration::from_secs)
+        .unwrap_or_else(|| std::time::Duration::from_secs(10));
+
+    let streams = init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())
+        .await
+        .expect("live Binance Spot stream should initialize");
+    let mut stream = streams
+        .select_all()
+        .map(fdc_barter::public_trade_result_to_data_kind);
+    let deadline = tokio::time::Instant::now() + duration;
+    let mut received_count = 0usize;
+
+    eprintln!(
+        "collecting realtime Binance Spot trades for {}s; set FDC_BARTER_LIVE_PRINT_SECONDS to change the window",
+        duration.as_secs()
+    );
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+
+        let item = match tokio::time::timeout(remaining, stream.next()).await {
+            Ok(Some(item)) => item,
+            Ok(None) => break,
+            Err(_) => break,
+        };
+
+        if let Some(envelope) = map_live_trade_result(SOURCE_ID, item)
+            .expect("live trade item should map to an envelope")
+        {
+            received_count += 1;
+            eprintln!("realtime live envelope #{received_count}: {envelope:#?}");
+        }
+    }
+
+    assert!(
+        received_count > 0,
+        "expected at least one realtime Binance Spot trade during the review window"
+    );
 }
 
 #[test]
