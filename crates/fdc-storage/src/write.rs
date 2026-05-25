@@ -218,3 +218,61 @@ impl StorageWriteBatch {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_record() -> StorageWriteRecord {
+        StorageWriteRecord::new("namespace", "collection", b"key".to_vec(), b"value".to_vec())
+    }
+
+    #[test]
+    fn record_validation_rejects_empty_namespace() {
+        let record = StorageWriteRecord::new(" ", "collection", b"key".to_vec(), b"value".to_vec());
+        let error = record.validate().expect_err("blank namespace should fail");
+        assert!(error.to_string().contains("namespace must not be empty"));
+    }
+
+    #[test]
+    fn record_validation_rejects_empty_collection() {
+        let record = StorageWriteRecord::new("namespace", "", b"key".to_vec(), b"value".to_vec());
+        let error = record.validate().expect_err("empty collection should fail");
+        assert!(error.to_string().contains("collection must not be empty"));
+    }
+
+    #[test]
+    fn record_validation_rejects_empty_value() {
+        let record = StorageWriteRecord::new("namespace", "collection", b"key".to_vec(), Vec::new());
+        let error = record.validate().expect_err("empty value should fail");
+        assert!(error.to_string().contains("value must not be empty"));
+    }
+
+    #[test]
+    fn metadata_validation_rejects_empty_tag_key() {
+        let mut metadata = StorageWriteMetadata::default();
+        metadata.tags.insert(" ".to_string(), "bad".to_string());
+        let record = valid_record().with_metadata(metadata);
+
+        let error = record.validate().expect_err("blank metadata tag key should fail");
+        assert!(error.to_string().contains("metadata tag key must not be empty"));
+    }
+
+    #[test]
+    fn batch_metadata_validation_rejects_empty_tag_key() {
+        let mut metadata = StorageBatchMetadata::default();
+        metadata.tags.insert("".to_string(), "bad".to_string());
+        let batch = StorageWriteBatch::new(vec![valid_record()]).with_metadata(metadata);
+
+        let error = batch.validate().expect_err("blank batch tag key should fail");
+        assert!(error.to_string().contains("batch metadata tag key must not be empty"));
+    }
+
+    #[test]
+    fn batch_helpers_report_record_count() {
+        let batch = StorageWriteBatch::new(vec![valid_record(), valid_record()]);
+
+        assert_eq!(batch.len(), 2);
+        assert!(!batch.is_empty());
+    }
+}

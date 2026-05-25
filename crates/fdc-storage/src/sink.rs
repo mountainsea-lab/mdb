@@ -84,3 +84,39 @@ impl StorageWriteSink for RecordingStorageSink {
         Ok(outcome)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn valid_batch() -> StorageWriteBatch {
+        StorageWriteBatch::new(vec![StorageWriteRecord::new(
+            "namespace",
+            "collection",
+            b"key".to_vec(),
+            b"value".to_vec(),
+        )])
+    }
+
+    #[tokio::test]
+    async fn recording_sink_records_batches_in_order() {
+        let sink = RecordingStorageSink::new();
+        let first = valid_batch();
+        let second = StorageWriteBatch::new(vec![StorageWriteRecord::new(
+            "namespace",
+            "collection",
+            b"key-2".to_vec(),
+            b"value-2".to_vec(),
+        )]);
+        let first_id = first.batch_id;
+        let second_id = second.batch_id;
+
+        sink.write_batch(first).await.expect("first batch should write");
+        sink.write_batch(second).await.expect("second batch should write");
+
+        let batches = sink.recorded_batches();
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].batch_id, first_id);
+        assert_eq!(batches[1].batch_id, second_id);
+    }
+}
