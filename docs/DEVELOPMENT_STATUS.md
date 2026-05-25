@@ -331,26 +331,65 @@ Do not violate these without a new design review:
 - Checkpoint persistence is not implemented yet.
 - Cross-event dedupe/gap detection state machine is not implemented yet.
 
+## Completed Development Slice
+
+### Phase B5: Tier-aware Storage Sink Boundary
+
+Implemented in `crates/fdc-storage`.
+
+Completed capabilities:
+
+- Added storage-owned generic write boundary types:
+  - `StorageWriteRecord`
+  - `StorageWriteBatch`
+  - `StorageWriteMetadata`
+  - `StorageBatchMetadata`
+- Added tier-aware placement hints aligned with existing L1/L2/L3/L4 storage architecture:
+  - `StoragePlacementHint`
+  - `StorageAccessPatternHint`
+  - `StorageDurabilityHint`
+  - optional shard routing key and TTL
+- Added async `StorageWriteSink` trait.
+- Added file-free, database-free `RecordingStorageSink` for contract tests and future examples.
+- Preserved dependency boundaries: `fdc-storage` does not depend on `fdc-transform`, `fdc-ingestion`, or adapter crates.
+- Deferred production `TierManager` / `ShardManager` / engine routing to a future storage runtime slice.
+- Deferred `MarketDataDto -> StorageWriteRecord` mapping to a future orchestration/integration slice.
+
+Contract tests:
+
+- `crates/fdc-storage/tests/storage_sink_boundary_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-25-fdc-storage-sink-boundary-design.md`
+- `docs/superpowers/plans/2026-05-25-fdc-storage-sink-boundary.md`
+
+Verification:
+
+- `rtk cargo fmt --package fdc-storage --check`
+- `rtk cargo test -p fdc-storage --test storage_sink_boundary_contract`
+- `rtk cargo test -p fdc-storage`
+- Dependency guard: no `fdc-transform`, `fdc_transform`, `fdc-ingestion`, `fdc_ingestion`, `fdc-barter`, or `fdc_barter` references in `crates/fdc-storage/Cargo.toml` or `crates/fdc-storage/src`.
+
 ## Next Recommended Development Slice
 
-### Phase B5: Storage Sink Boundary
+### Phase B6: Orchestration Glue Boundary Design
 
-Goal: define a bounded storage-facing handoff around storage-owned generic write records, then map market-data DTOs into those records in a later transform/glue slice without introducing a production database runtime.
+Goal: define where cross-layer glue lives without violating crate dependency direction.
 
 Recommended scope:
 
-- Define a generic storage sink trait that accepts storage-owned write batches/records, not `MarketDataDto` directly.
-- Add an in-memory or file-free recording sink contract first.
-- Preserve dependency direction: `fdc-storage` must not depend on `fdc-transform` or adapter crates.
-- Leave `MarketDataDto -> StorageWriteRecord` mapping to `fdc-transform` or a later orchestration/glue layer.
-- Do not add real DB writes, checkpoint persistence, or infinite stream lifecycle management in this slice.
+- Decide whether glue belongs in `fdc-server`, a new integration crate, or a dedicated orchestrator module.
+- Define bounded mapping responsibilities such as adapter envelope to ingestion source envelope, transform DTO to storage write record, and runtime wiring.
+- Do not move adapter-specific mapping into `fdc-storage`, `fdc-transform`, or `fdc-ingestion` core.
+- Keep production infinite stream lifecycle, checkpoint persistence, and real database writes as separate follow-up slices.
 
-## Later Work After B4
+## Later Work After B5
 
-These should be separate plans, not bundled into the completed B4 transform boundary. B5 should address only the storage sink boundary in a bounded, testable slice before broader runtime work:
+These should be separate plans, not bundled into the completed B5 storage sink boundary before broader runtime work:
 
 1. Checkpoint persistence boundary.
-2. Storage sink boundary.
+2. Production tier-aware storage runtime routing.
 3. Stateful dedupe/gap detection.
 4. Warning cleanup across existing crates.
 5. Revisit `.gitignore` ignoring `Cargo.lock`. For application/workspace reproducibility, committing `Cargo.lock` is usually preferable, but this repository currently ignores it and already has an untracked/ignored lockfile history pattern.
