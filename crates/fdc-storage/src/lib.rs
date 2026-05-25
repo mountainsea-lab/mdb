@@ -14,6 +14,7 @@ pub mod replication;    // 数据复制
 pub mod backup;         // 备份恢复
 pub mod metrics;        // 存储指标
 pub mod config;         // 配置管理
+pub mod write;          // storage-owned write records and placement hints
 
 // 具体存储引擎实现
 pub mod engines {
@@ -34,6 +35,10 @@ pub use replication::{ReplicationManager, ReplicationConfig};
 pub use backup::{BackupManager, BackupConfig, RestoreConfig};
 pub use metrics::StorageMetrics;
 pub use config::StorageConfig;
+pub use write::{
+    StorageAccessPatternHint, StorageBatchMetadata, StorageDurabilityHint, StoragePlacementHint,
+    StorageWriteBatch, StorageWriteMetadata, StorageWriteRecord,
+};
 
 /// 库版本信息
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
