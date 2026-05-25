@@ -172,7 +172,7 @@ async fn ignored_live_smoke_prints_realtime_binance_spot_trades_for_review() {
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .map(std::time::Duration::from_secs)
-        .unwrap_or_else(|| std::time::Duration::from_secs(10));
+        .unwrap_or_else(|| std::time::Duration::from_secs(100));
 
     let streams = init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())
         .await
