@@ -33,7 +33,7 @@ fdc-core      全局基础类型、错误、配置、指标
 fdc-types     自定义类型、金融类型、类型校验
 fdc-wasm      插件、沙箱、动态扩展
 fdc-analytics 分析、指标、风控、机器学习
-fdc-transform 数据转换，当前仍是模板
+fdc-transform 数据转换，已具备市场数据 DTO 和 transform sink 边界
 ```
 
 ## Workspace 模块概览
@@ -50,7 +50,7 @@ fdc-transform 数据转换，当前仍是模板
 | `fdc-analytics` | `crates/fdc-analytics` | 流处理、批处理、机器学习、风控、技术指标、窗口计算 | 模块骨架存在 |
 | `fdc-wasm` | `crates/fdc-wasm` | WASM 运行时、插件、注册表、沙箱、桥接、事件、指标 | 模块骨架存在 |
 | `fdc-types` | `crates/fdc-types` | 类型注册、定义、校验、转换、schema、金融类型、WASM 类型集成 | 模块骨架存在 |
-| `fdc-transform` | `crates/fdc-transform` | 数据清洗、字段映射、格式转换、类型转换 | 当前仍是默认模板 |
+| `fdc-transform` | `crates/fdc-transform` | 数据清洗、字段映射、格式转换、类型转换 | 已有市场数据 DTO 和 transform sink 边界 |
 | `fdc-adapter/barter` | `crates/fdc-adapter/barter` | Barter 行情源适配、模型、映射、capability、ingestion envelope | 边界清晰，已有测试 |
 | `fdc-common` | `crates/fdc-common` | 公共工具或共享能力 | 当前较轻量 |
 | `fdc-proto` | `crates/fdc-proto` | Protobuf/gRPC 协议模型 | 待进一步集成 |
