@@ -89,6 +89,7 @@ Contract tests must cover:
 ## Non-goals
 
 - No database or storage writes.
+- No `fdc-storage -> fdc-transform` dependency or storage API that directly accepts `MarketDataDto`.
 - No transform analytics logic.
 - No historical acquisition implementation.
 - No checkpoint persistence.

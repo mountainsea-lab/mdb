@@ -340,13 +340,14 @@ Do not violate these without a new design review:
 
 ### Phase B5: Storage Sink Boundary
 
-Goal: connect neutral `MarketDataDto` batches to a bounded storage-facing handoff without introducing a production database runtime.
+Goal: define a bounded storage-facing handoff around storage-owned generic write records, then map market-data DTOs into those records in a later transform/glue slice without introducing a production database runtime.
 
 Recommended scope:
 
-- Define a storage sink trait that accepts validated `MarketDataDto` batches.
+- Define a generic storage sink trait that accepts storage-owned write batches/records, not `MarketDataDto` directly.
 - Add an in-memory or file-free recording sink contract first.
-- Preserve dependency direction: storage-facing code should depend on neutral DTOs, not adapter crates.
+- Preserve dependency direction: `fdc-storage` must not depend on `fdc-transform` or adapter crates.
+- Leave `MarketDataDto -> StorageWriteRecord` mapping to `fdc-transform` or a later orchestration/glue layer.
 - Do not add real DB writes, checkpoint persistence, or infinite stream lifecycle management in this slice.
 
 ## Later Work After B4

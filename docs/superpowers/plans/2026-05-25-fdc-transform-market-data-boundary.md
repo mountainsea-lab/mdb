@@ -4,7 +4,7 @@
 
 **Goal:** Add a neutral market-data DTO and transform sink boundary, then map `fdc-barter` trade envelopes into that boundary without making `fdc-ingestion` depend on adapters.
 
-**Architecture:** `fdc-transform` owns neutral DTOs and sink traits. `fdc-barter` depends on `fdc-transform` only for adapter-to-neutral mapping. `fdc-ingestion` remains generic and has no dependency on `fdc-barter` or `fdc-transform`.
+**Architecture:** `fdc-transform` owns neutral DTOs and sink traits. `fdc-barter` depends on `fdc-transform` only for the bounded adapter-to-neutral mapping contract in this slice, and integration still flows through validated `fdc-ingestion` source batches. `fdc-ingestion` remains generic and has no dependency on `fdc-barter` or `fdc-transform`. `fdc-storage` must remain generic and must not depend on `fdc-transform` or `MarketDataDto`; later storage handoff work should define generic storage write records first.
 
 **Tech Stack:** Rust 1.95 workspace, `serde`, `async-trait`, existing `fdc-core` timestamp/price/symbol types, existing `fdc-ingestion` source batch traits, existing `fdc-barter` market event models.
 
