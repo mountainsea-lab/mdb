@@ -273,7 +273,16 @@ Verification:
 
 ## Current Verification Baseline
 
-Last successful verification after B4b architecture audit and adapter decoupling:
+Last successful verification after B5 tier-aware storage sink boundary implementation on branch `mdb-mqdev` at pushed commit `610fb1d`:
+
+```bash
+rtk cargo fmt --package fdc-storage --check
+rtk cargo test -p fdc-storage --test storage_sink_boundary_contract
+rtk cargo test -p fdc-storage
+! grep -RInE "fdc-transform|fdc_transform|fdc-ingestion|fdc_ingestion|fdc-barter|fdc_barter" crates/fdc-storage/Cargo.toml crates/fdc-storage/src
+```
+
+Previous B4b architecture audit baseline also passed:
 
 ```bash
 rtk cargo fmt --package fdc-transform --package fdc-barter --check
@@ -290,11 +299,16 @@ FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-barter --test live_acquisition_contrac
 
 Result:
 
-- `rtk cargo fmt --package fdc-transform --package fdc-barter --check` exit 0.
-- `rtk cargo test -p fdc-transform` exit 0, 2 passed.
-- `rtk cargo test -p fdc-barter --test live_acquisition_contract` exit 0, 6 passed and 2 ignored.
-- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 51 passed and 2 ignored.
-- Dependency guard exit 0, no downstream crate references in `fdc-barter`, no adapter/transform references in `fdc-ingestion`, no adapter/ingestion references in `fdc-transform`.
+- `rtk cargo fmt --package fdc-storage --check` exit 0.
+- `rtk cargo test -p fdc-storage --test storage_sink_boundary_contract` exit 0, 8 passed.
+- `rtk cargo test -p fdc-storage` exit 0, 45 passed.
+- Storage dependency guard exit 0, no upstream pipeline or adapter crate references in `fdc-storage` manifest/src.
+- Previous B4b checks passed before B5:
+  - `rtk cargo fmt --package fdc-transform --package fdc-barter --check` exit 0.
+  - `rtk cargo test -p fdc-transform` exit 0, 2 passed.
+  - `rtk cargo test -p fdc-barter --test live_acquisition_contract` exit 0, 6 passed and 2 ignored.
+  - `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 51 passed and 2 ignored.
+  - Dependency guard exit 0, no downstream crate references in `fdc-barter`, no adapter/transform references in `fdc-ingestion`, no adapter/ingestion references in `fdc-transform`.
 - Optional B3 live smoke test exit 0, 1 passed and collected a Binance Spot trade.
 - Existing warnings remain in older crates and are intentionally not addressed yet.
 
@@ -328,8 +342,11 @@ Do not violate these without a new design review:
 - B1a/B1b/B1c are generic source-path building blocks, not real Barter stream integration.
 - Do not add real WebSocket, REST, storage, or transform I/O inside B1 source-path primitives.
 - Existing network byte ingestion path in `crates/fdc-ingestion/src/batch.rs`, `receiver.rs`, `parser.rs`, and `validator.rs` should remain unchanged unless a specific plan says otherwise.
-- Checkpoint persistence is not implemented yet.
-- Cross-event dedupe/gap detection state machine is not implemented yet.
+- `fdc-storage` must not depend on `fdc-transform`, `fdc-ingestion`, or adapter crates.
+- `fdc-storage` write boundary must remain storage-owned and generic; no `MarketDataDto`, adapter event, or `SourceEnvelope` types inside storage core.
+- B5 `StoragePlacementHint` is advisory only; do not add production `TierManager` / `ShardManager` / engine routing without a new design review.
+- B5 `RecordingStorageSink` is file-free and database-free; do not hide real DB writes behind it.
+- Concrete `MarketDataDto -> StorageWriteRecord` mapping belongs in future orchestration/integration glue, not in `fdc-storage`.
 
 ## Completed Development Slice
 
@@ -411,9 +428,9 @@ When starting the next session:
 2. Confirm branch is `mdb-mqdev` and toolchain is overridden by `rust-toolchain.toml` to Rust 1.95.
 3. Confirm the local Barter-rs checkout exists if you need to run `fdc-barter` tests.
 4. Read this file.
-5. Read the B4b ingestion-centered transform boundary design, plan, and status before designing B5.
-6. Write a B5 implementation plan before editing code.
-7. Use TDD: create failing contract tests before implementation.
-8. Keep `fdc-ingestion` independent from `fdc-barter`.
-9. Run the verification baseline before committing, or document why the local Barter-rs dependency is unavailable.
-10. Update this file at the end of the session with completed work, verification evidence, and next recommended slice.
+5. Read the B5 storage sink boundary design, plan, and status before designing B6.
+6. Start B6 with architecture review and design/spec before editing code.
+7. Keep storage/transform/ingestion/adapter core crates decoupled; concrete cross-layer mappings belong in orchestration/integration glue.
+8. Use TDD for any implementation after the B6 design/spec is approved.
+9. Run the relevant verification baseline before committing, or document why a local dependency is unavailable.
+10. Update this file at the end of the session with completed work, verification evidence, pushed commit, and next recommended slice.
