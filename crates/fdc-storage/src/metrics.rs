@@ -45,7 +45,7 @@ impl StorageMetrics {
             ..Default::default()
         }
     }
-    
+
     pub fn record_read(&mut self, latency_us: u64) {
         self.reads += 1;
         let count = self.reads;
@@ -61,11 +61,12 @@ impl StorageMetrics {
     fn update_avg_latency(avg: &mut f64, new_latency: u64, count: u64) {
         *avg = (*avg * (count - 1) as f64 + new_latency as f64) / count as f64;
     }
-    
+
     pub fn uptime(&self) -> Option<Duration> {
-        self.start_time.and_then(|start| SystemTime::now().duration_since(start).ok())
+        self.start_time
+            .and_then(|start| SystemTime::now().duration_since(start).ok())
     }
-    
+
     pub fn operations_per_second(&self) -> f64 {
         if let Some(uptime) = self.uptime() {
             let seconds = uptime.as_secs_f64();
@@ -84,15 +85,15 @@ mod tests {
     #[test]
     fn test_storage_metrics() {
         let mut metrics = StorageMetrics::new();
-        
+
         metrics.record_read(100);
         metrics.record_write(200);
-        
+
         assert_eq!(metrics.reads, 1);
         assert_eq!(metrics.writes, 1);
         assert_eq!(metrics.avg_read_latency_us, 100.0);
         assert_eq!(metrics.avg_write_latency_us, 200.0);
-        
+
         assert!(metrics.uptime().is_some());
     }
 }

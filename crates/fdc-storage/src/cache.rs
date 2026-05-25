@@ -25,7 +25,11 @@ pub struct CacheStats {
 impl CacheStats {
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
-        if total == 0 { 0.0 } else { self.hits as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            self.hits as f64 / total as f64
+        }
     }
 }
 
@@ -46,7 +50,7 @@ impl CacheManager {
             data: HashMap::new(),
         }
     }
-    
+
     pub fn get(&mut self, key: &[u8]) -> Option<Vec<u8>> {
         if let Some(value) = self.data.get(key) {
             self.stats.hits += 1;
@@ -56,7 +60,7 @@ impl CacheManager {
             None
         }
     }
-    
+
     pub fn put(&mut self, key: Vec<u8>, value: Vec<u8>) {
         if self.data.len() >= self.capacity {
             self.evict_one();
@@ -64,14 +68,14 @@ impl CacheManager {
         self.data.insert(key, value);
         self.stats.size = self.data.len();
     }
-    
+
     fn evict_one(&mut self) {
         if let Some(key) = self.data.keys().next().cloned() {
             self.data.remove(&key);
             self.stats.evictions += 1;
         }
     }
-    
+
     pub fn stats(&self) -> &CacheStats {
         &self.stats
     }
@@ -84,13 +88,13 @@ mod tests {
     #[test]
     fn test_cache_manager() {
         let mut cache = CacheManager::new(CachePolicy::LRU, 2);
-        
+
         cache.put(b"key1".to_vec(), b"value1".to_vec());
         cache.put(b"key2".to_vec(), b"value2".to_vec());
-        
+
         assert_eq!(cache.get(b"key1"), Some(b"value1".to_vec()));
         assert_eq!(cache.get(b"key3"), None);
-        
+
         assert_eq!(cache.stats().hits, 1);
         assert_eq!(cache.stats().misses, 1);
         assert_eq!(cache.stats().hit_rate(), 0.5);

@@ -33,17 +33,17 @@ impl IndexManager {
             indexes: HashMap::new(),
         }
     }
-    
+
     pub fn create_index(&mut self, config: IndexConfig) -> Result<()> {
         self.indexes.insert(config.name.clone(), config);
         Ok(())
     }
-    
+
     pub fn drop_index(&mut self, name: &str) -> Result<()> {
         self.indexes.remove(name);
         Ok(())
     }
-    
+
     pub fn list_indexes(&self) -> Vec<&IndexConfig> {
         self.indexes.values().collect()
     }
@@ -62,17 +62,17 @@ mod tests {
     #[test]
     fn test_index_manager() {
         let mut manager = IndexManager::new();
-        
+
         let config = IndexConfig {
             name: "test_index".to_string(),
             index_type: IndexType::BTree,
             columns: vec!["col1".to_string()],
             unique: false,
         };
-        
+
         assert!(manager.create_index(config).is_ok());
         assert_eq!(manager.list_indexes().len(), 1);
-        
+
         assert!(manager.drop_index("test_index").is_ok());
         assert_eq!(manager.list_indexes().len(), 0);
     }

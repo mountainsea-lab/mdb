@@ -28,12 +28,12 @@ impl BackupManager {
     pub fn new(config: BackupConfig) -> Self {
         Self { config }
     }
-    
+
     pub async fn create_backup(&self) -> Result<String> {
         // 简化实现
         Ok("backup_id".to_string())
     }
-    
+
     pub async fn restore_backup(&self, _restore_config: RestoreConfig) -> Result<()> {
         // 简化实现
         Ok(())
@@ -51,7 +51,7 @@ mod tests {
             compression: true,
             incremental: false,
         };
-        
+
         let manager = BackupManager::new(config);
         assert_eq!(manager.config.path, "/backup");
     }

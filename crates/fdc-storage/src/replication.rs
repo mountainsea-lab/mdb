@@ -26,7 +26,7 @@ impl ReplicationManager {
     pub fn new(config: ReplicationConfig) -> Self {
         Self { config }
     }
-    
+
     pub fn get_config(&self) -> &ReplicationConfig {
         &self.config
     }
@@ -42,7 +42,7 @@ mod tests {
             factor: 3,
             strategy: ReplicationStrategy::Sync,
         };
-        
+
         let manager = ReplicationManager::new(config);
         assert_eq!(manager.get_config().factor, 3);
     }

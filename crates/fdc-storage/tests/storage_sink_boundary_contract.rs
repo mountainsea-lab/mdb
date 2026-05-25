@@ -47,7 +47,10 @@ async fn recording_sink_accepts_valid_tier_aware_batch() {
     )]);
     let batch_id = batch.batch_id;
 
-    let outcome = sink.write_batch(batch).await.expect("valid batch should write");
+    let outcome = sink
+        .write_batch(batch)
+        .await
+        .expect("valid batch should write");
 
     assert_eq!(outcome.batch_id, batch_id);
     assert_eq!(outcome.accepted_records, 1);
@@ -59,13 +62,12 @@ async fn recording_sink_accepts_valid_tier_aware_batch() {
 #[tokio::test]
 async fn recording_sink_preserves_record_metadata_and_placement() {
     let sink = RecordingStorageSink::default();
-    let record = sample_record(
-        b"trade:binance:eth-usdt:1",
-        br#"{"price":"200.00"}"#,
-    );
+    let record = sample_record(b"trade:binance:eth-usdt:1", br#"{"price":"200.00"}"#);
     let batch = StorageWriteBatch::new(vec![record.clone()]);
 
-    sink.write_batch(batch).await.expect("valid batch should write");
+    sink.write_batch(batch)
+        .await
+        .expect("valid batch should write");
 
     let records = sink.recorded_records();
     assert_eq!(records.len(), 1);
@@ -73,17 +75,36 @@ async fn recording_sink_preserves_record_metadata_and_placement() {
     assert_eq!(records[0].collection, "trades");
     assert_eq!(records[0].key, b"trade:binance:eth-usdt:1".to_vec());
     assert_eq!(records[0].value, br#"{"price":"200.00"}"#.to_vec());
-    assert_eq!(records[0].metadata.content_type.as_deref(), Some("application/json"));
-    assert_eq!(records[0].metadata.schema.as_deref(), Some("generic.market_data.trade"));
-    assert_eq!(records[0].metadata.schema_version.as_deref(), Some("1"));
-    assert_eq!(records[0].metadata.source.as_deref(), Some("integration-test"));
     assert_eq!(
-        records[0].metadata.tags.get("asset_class").map(String::as_str),
+        records[0].metadata.content_type.as_deref(),
+        Some("application/json")
+    );
+    assert_eq!(
+        records[0].metadata.schema.as_deref(),
+        Some("generic.market_data.trade")
+    );
+    assert_eq!(records[0].metadata.schema_version.as_deref(), Some("1"));
+    assert_eq!(
+        records[0].metadata.source.as_deref(),
+        Some("integration-test")
+    );
+    assert_eq!(
+        records[0]
+            .metadata
+            .tags
+            .get("asset_class")
+            .map(String::as_str),
         Some("crypto")
     );
     assert_eq!(records[0].placement.target_tier, Some(StorageTier::L2));
-    assert_eq!(records[0].placement.access_pattern, StorageAccessPatternHint::Hot);
-    assert_eq!(records[0].placement.durability, StorageDurabilityHint::Persistent);
+    assert_eq!(
+        records[0].placement.access_pattern,
+        StorageAccessPatternHint::Hot
+    );
+    assert_eq!(
+        records[0].placement.durability,
+        StorageDurabilityHint::Persistent
+    );
     assert_eq!(
         records[0].placement.shard_key.as_deref(),
         Some(&b"binance:btc-usdt"[..])
@@ -95,7 +116,9 @@ async fn recording_sink_preserves_record_metadata_and_placement() {
 async fn empty_batch_is_rejected_without_mutating_sink_state() {
     let sink = RecordingStorageSink::default();
     let valid_batch = StorageWriteBatch::new(vec![sample_record(b"valid", b"value")]);
-    sink.write_batch(valid_batch).await.expect("seed batch should write");
+    sink.write_batch(valid_batch)
+        .await
+        .expect("seed batch should write");
 
     let empty_batch = StorageWriteBatch::new(Vec::new());
     let error = sink
@@ -103,7 +126,9 @@ async fn empty_batch_is_rejected_without_mutating_sink_state() {
         .await
         .expect_err("empty batch should be rejected");
 
-    assert!(error.to_string().contains("storage write batch must not be empty"));
+    assert!(error
+        .to_string()
+        .contains("storage write batch must not be empty"));
     assert_eq!(sink.recorded_batch_count(), 1);
     assert_eq!(sink.recorded_record_count(), 1);
 }
@@ -112,17 +137,23 @@ async fn empty_batch_is_rejected_without_mutating_sink_state() {
 async fn invalid_record_is_rejected_atomically() {
     let sink = RecordingStorageSink::default();
     let valid_seed = StorageWriteBatch::new(vec![sample_record(b"seed", b"seed-value")]);
-    sink.write_batch(valid_seed).await.expect("seed batch should write");
+    sink.write_batch(valid_seed)
+        .await
+        .expect("seed batch should write");
 
-    let invalid_record = StorageWriteRecord::new("market_data", "trades", Vec::new(), b"value".to_vec());
-    let mixed_batch = StorageWriteBatch::new(vec![sample_record(b"valid-2", b"value-2"), invalid_record]);
+    let invalid_record =
+        StorageWriteRecord::new("market_data", "trades", Vec::new(), b"value".to_vec());
+    let mixed_batch =
+        StorageWriteBatch::new(vec![sample_record(b"valid-2", b"value-2"), invalid_record]);
 
     let error = sink
         .write_batch(mixed_batch)
         .await
         .expect_err("batch with empty record key should be rejected");
 
-    assert!(error.to_string().contains("storage write record key must not be empty"));
+    assert!(error
+        .to_string()
+        .contains("storage write record key must not be empty"));
     assert_eq!(sink.recorded_batch_count(), 1);
     assert_eq!(sink.recorded_record_count(), 1);
 }
@@ -132,7 +163,10 @@ async fn sink_trait_is_usable_behind_arc_dyn_object() {
     let sink: Arc<dyn StorageWriteSink> = Arc::new(RecordingStorageSink::default());
     let batch = StorageWriteBatch::new(vec![sample_record(b"dyn-key", b"dyn-value")]);
 
-    let outcome = sink.write_batch(batch).await.expect("dyn sink should write");
+    let outcome = sink
+        .write_batch(batch)
+        .await
+        .expect("dyn sink should write");
 
     assert_eq!(outcome.accepted_records, 1);
     assert_eq!(outcome.rejected_records, 0);
@@ -143,7 +177,10 @@ fn default_placement_is_unspecified_and_engine_free() {
     let placement = StoragePlacementHint::default();
 
     assert_eq!(placement.target_tier, None);
-    assert_eq!(placement.access_pattern, StorageAccessPatternHint::Unspecified);
+    assert_eq!(
+        placement.access_pattern,
+        StorageAccessPatternHint::Unspecified
+    );
     assert_eq!(placement.durability, StorageDurabilityHint::Unspecified);
     assert_eq!(placement.shard_key, None);
     assert_eq!(placement.ttl, None);
@@ -202,7 +239,8 @@ fn workspace_root() -> PathBuf {
 
 fn collect_forbidden_references(path: &Path, forbidden: &[&str], violations: &mut Vec<String>) {
     if path.is_dir() {
-        for entry in std::fs::read_dir(path).expect("failed to read directory for dependency guard") {
+        for entry in std::fs::read_dir(path).expect("failed to read directory for dependency guard")
+        {
             let entry = entry.expect("failed to read directory entry");
             collect_forbidden_references(&entry.path(), forbidden, violations);
         }

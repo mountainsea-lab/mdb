@@ -1,8 +1,10 @@
 //! redb storage engine (L2)
 
-use crate::engine::{StorageEngine, StorageEngineType, EngineCapabilities, StorageStats, BatchOperation};
-use fdc_core::error::{Error, Result};
+use crate::engine::{
+    BatchOperation, EngineCapabilities, StorageEngine, StorageEngineType, StorageStats,
+};
 use async_trait::async_trait;
+use fdc_core::error::{Error, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -15,10 +17,11 @@ pub struct RedbEngine {
 impl RedbEngine {
     /// 创建新的redb引擎
     pub async fn new(config: HashMap<String, String>) -> Result<Self> {
-        let db_path = config.get("db_path")
+        let db_path = config
+            .get("db_path")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("./data/redb"));
-        
+
         Ok(Self {
             _db_path: db_path,
             stats: StorageStats::default(),
@@ -31,7 +34,7 @@ impl StorageEngine for RedbEngine {
     fn engine_type(&self) -> StorageEngineType {
         StorageEngineType::Redb
     }
-    
+
     fn capabilities(&self) -> EngineCapabilities {
         EngineCapabilities {
             supports_transactions: true,
@@ -46,42 +49,47 @@ impl StorageEngine for RedbEngine {
             expected_throughput_ops: 1_000_000,
         }
     }
-    
+
     async fn initialize(&mut self) -> Result<()> {
         // TODO: 实际的redb初始化
         Ok(())
     }
-    
+
     async fn shutdown(&mut self) -> Result<()> {
         // TODO: 实际的redb关闭
         Ok(())
     }
-    
+
     async fn get(&self, _key: &[u8]) -> Result<Option<Vec<u8>>> {
         // TODO: 实际的redb get实现
         Err(Error::unimplemented("redb get not implemented"))
     }
-    
+
     async fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
         // TODO: 实际的redb put实现
         Err(Error::unimplemented("redb put not implemented"))
     }
-    
+
     async fn delete(&self, _key: &[u8]) -> Result<()> {
         // TODO: 实际的redb delete实现
         Err(Error::unimplemented("redb delete not implemented"))
     }
-    
+
     async fn batch(&self, _operations: Vec<BatchOperation>) -> Result<()> {
         // TODO: 实际的redb batch实现
         Err(Error::unimplemented("redb batch not implemented"))
     }
-    
-    async fn scan(&self, _start_key: Option<&[u8]>, _end_key: Option<&[u8]>, _limit: Option<usize>) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+
+    async fn scan(
+        &self,
+        _start_key: Option<&[u8]>,
+        _end_key: Option<&[u8]>,
+        _limit: Option<usize>,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
         // TODO: 实际的redb scan实现
         Err(Error::unimplemented("redb scan not implemented"))
     }
-    
+
     async fn stats(&self) -> Result<StorageStats> {
         Ok(self.stats.clone())
     }
@@ -95,7 +103,7 @@ mod tests {
     async fn test_redb_engine_creation() {
         let engine = RedbEngine::new(HashMap::new()).await.unwrap();
         assert_eq!(engine.engine_type(), StorageEngineType::Redb);
-        
+
         let caps = engine.capabilities();
         assert!(caps.supports_transactions);
         assert!(caps.supports_acid);

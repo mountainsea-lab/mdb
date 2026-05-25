@@ -1,12 +1,12 @@
 //! Storage tier management
 
 use crate::engine::{StorageEngine, StorageEngineType, StorageStats};
+use chrono::{DateTime, Utc};
 use fdc_core::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use chrono::{DateTime, Utc};
 
 /// 存储层级
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -31,7 +31,7 @@ impl StorageTier {
             StorageTier::L4 => 4,
         }
     }
-    
+
     /// 获取默认引擎类型
     pub fn default_engine_type(&self) -> StorageEngineType {
         match self {
@@ -41,7 +41,7 @@ impl StorageTier {
             StorageTier::L4 => StorageEngineType::RocksDB,
         }
     }
-    
+
     /// 获取层级名称
     pub fn name(&self) -> &'static str {
         match self {
@@ -85,25 +85,25 @@ impl TierConfig {
             enabled: true,
         }
     }
-    
+
     /// 设置最大大小
     pub fn with_max_size(mut self, max_size: usize) -> Self {
         self.max_size = Some(max_size);
         self
     }
-    
+
     /// 设置保留时间
     pub fn with_retention(mut self, duration: chrono::Duration) -> Self {
         self.retention_duration = Some(duration);
         self
     }
-    
+
     /// 设置迁移阈值
     pub fn with_migration_threshold(mut self, threshold: f64) -> Self {
         self.migration_threshold = threshold;
         self
     }
-    
+
     /// 添加引擎配置
     pub fn with_engine_config(mut self, key: String, value: String) -> Self {
         self.engine_config.insert(key, value);
@@ -137,34 +137,34 @@ impl AccessPattern {
             heat_score: 1.0,
         }
     }
-    
+
     /// 记录访问
     pub fn record_access(&mut self) {
         let now = Utc::now();
         let time_diff = now.signed_duration_since(self.last_access);
-        
+
         self.access_count += 1;
         self.last_access = now;
-        
+
         // 计算访问频率（次/小时）
         if time_diff.num_hours() > 0 {
             self.access_frequency = self.access_count as f64 / time_diff.num_hours() as f64;
         }
-        
+
         // 更新热度评分
         self.update_heat_score();
     }
-    
+
     /// 更新热度评分
     fn update_heat_score(&mut self) {
         let now = Utc::now();
         let hours_since_access = now.signed_duration_since(self.last_access).num_hours() as f64;
-        
+
         // 热度评分基于访问频率和时间衰减
         let time_decay = (-hours_since_access / 24.0).exp(); // 24小时衰减
         self.heat_score = self.access_frequency * time_decay;
     }
-    
+
     /// 判断应该在哪个层级
     pub fn recommended_tier(&self) -> StorageTier {
         if self.heat_score > 10.0 {
@@ -216,72 +216,74 @@ impl TierManager {
             migration_queue: Arc::new(RwLock::new(Vec::new())),
         }
     }
-    
+
     /// 添加层级配置
     pub fn add_tier(&mut self, config: TierConfig) {
         self.tiers.insert(config.tier.clone(), config);
     }
-    
+
     /// 初始化所有层级
     pub async fn initialize(&mut self) -> Result<()> {
         for (tier, config) in &self.tiers {
             if !config.enabled {
                 continue;
             }
-            
+
             let engine = crate::engine::StorageEngineFactory::create_engine(
                 config.engine_type.clone(),
                 config.engine_config.clone(),
-            ).await?;
-            
-            self.engines.insert(tier.clone(), Arc::new(RwLock::new(engine)));
+            )
+            .await?;
+
+            self.engines
+                .insert(tier.clone(), Arc::new(RwLock::new(engine)));
         }
-        
+
         Ok(())
     }
-    
+
     /// 获取数据
     pub async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         // 按优先级顺序查找
         let mut tiers: Vec<_> = self.tiers.keys().collect();
         tiers.sort_by_key(|t| t.priority());
-        
+
         for tier in tiers {
             if let Some(engine) = self.engines.get(tier) {
                 let engine_guard = engine.read().await;
                 if let Ok(Some(value)) = engine_guard.get(key).await {
                     // 记录访问模式
                     self.record_access(key, value.len()).await;
-                    
+
                     // 如果数据在较低层级找到，考虑提升到更高层级
                     if tier.priority() > 1 {
                         self.schedule_promotion(key.to_vec(), tier.clone()).await;
                     }
-                    
+
                     return Ok(Some(value));
                 }
             }
         }
-        
+
         Ok(None)
     }
-    
+
     /// 设置数据
     pub async fn put(&self, key: &[u8], value: &[u8]) -> Result<()> {
         // 根据数据大小和访问模式决定初始层级
         let target_tier = self.determine_initial_tier(key, value.len()).await;
-        
+
         if let Some(engine) = self.engines.get(&target_tier) {
             let engine_guard = engine.read().await;
             engine_guard.put(key, value).await?;
-            
+
             // 记录访问模式
             self.record_access(key, value.len()).await;
         }
-        
+
         Ok(())
     }
-    
+
     /// 删除数据
     pub async fn delete(&self, key: &[u8]) -> Result<()> {
         // 从所有层级删除
@@ -289,31 +291,33 @@ impl TierManager {
             let engine_guard = engine.read().await;
             let _ = engine_guard.delete(key).await; // 忽略错误，因为数据可能不在所有层级
         }
-        
+
         // 清除访问模式
         self.access_patterns.write().await.remove(key);
-        
+
         Ok(())
     }
-    
+
     /// 记录访问模式
     async fn record_access(&self, key: &[u8], data_size: usize) {
         let mut patterns = self.access_patterns.write().await;
-        let pattern = patterns.entry(key.to_vec()).or_insert_with(|| AccessPattern::new(data_size));
+        let pattern = patterns
+            .entry(key.to_vec())
+            .or_insert_with(|| AccessPattern::new(data_size));
         pattern.record_access();
     }
-    
+
     /// 确定初始层级
     async fn determine_initial_tier(&self, key: &[u8], data_size: usize) -> StorageTier {
         // 检查是否有历史访问模式
         if let Some(pattern) = self.access_patterns.read().await.get(key) {
             return pattern.recommended_tier();
         }
-        
+
         // 新数据默认放在L2
         StorageTier::L2
     }
-    
+
     /// 调度提升任务
     async fn schedule_promotion(&self, key: Vec<u8>, current_tier: StorageTier) {
         let target_tier = match current_tier {
@@ -322,7 +326,7 @@ impl TierManager {
             StorageTier::L2 => StorageTier::L1,
             StorageTier::L1 => return, // 已经在最高层级
         };
-        
+
         let task = MigrationTask {
             key,
             from_tier: current_tier,
@@ -330,21 +334,21 @@ impl TierManager {
             created_at: Utc::now(),
             priority: 1,
         };
-        
+
         self.migration_queue.write().await.push(task);
     }
-    
+
     /// 执行迁移任务
     pub async fn process_migrations(&self) -> Result<()> {
         let mut queue = self.migration_queue.write().await;
-        
+
         while let Some(task) = queue.pop() {
             self.migrate_data(task).await?;
         }
-        
+
         Ok(())
     }
-    
+
     /// 迁移数据
     async fn migrate_data(&self, task: MigrationTask) -> Result<()> {
         // 从源层级读取数据
@@ -354,14 +358,14 @@ impl TierManager {
         } else {
             return Ok(()); // 源引擎不存在
         };
-        
+
         if let Some(value) = value {
             // 写入目标层级
             if let Some(target_engine) = self.engines.get(&task.to_tier) {
                 let engine_guard = target_engine.read().await;
                 engine_guard.put(&task.key, &value).await?;
             }
-            
+
             // 从源层级删除（可选，取决于策略）
             if task.to_tier.priority() < task.from_tier.priority() {
                 if let Some(source_engine) = self.engines.get(&task.from_tier) {
@@ -370,28 +374,28 @@ impl TierManager {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// 获取层级统计
     pub async fn get_tier_stats(&self) -> Result<HashMap<StorageTier, StorageStats>> {
         let mut stats = HashMap::new();
-        
+
         for (tier, engine) in &self.engines {
             let engine_guard = engine.read().await;
             let tier_stats = engine_guard.stats().await?;
             stats.insert(tier.clone(), tier_stats);
         }
-        
+
         Ok(stats)
     }
-    
+
     /// 获取访问模式统计
     pub async fn get_access_patterns_count(&self) -> usize {
         self.access_patterns.read().await.len()
     }
-    
+
     /// 获取迁移队列长度
     pub async fn get_migration_queue_length(&self) -> usize {
         self.migration_queue.read().await.len()
@@ -421,7 +425,7 @@ mod tests {
         let config = TierConfig::new(StorageTier::L1)
             .with_max_size(1024 * 1024 * 1024)
             .with_migration_threshold(0.9);
-        
+
         assert_eq!(config.tier, StorageTier::L1);
         assert_eq!(config.max_size, Some(1024 * 1024 * 1024));
         assert_eq!(config.migration_threshold, 0.9);
@@ -432,12 +436,15 @@ mod tests {
         let mut pattern = AccessPattern::new(1024);
         assert_eq!(pattern.access_count, 1);
         assert_eq!(pattern.data_size, 1024);
-        
+
         pattern.record_access();
         assert_eq!(pattern.access_count, 2);
-        
+
         let tier = pattern.recommended_tier();
-        assert!(matches!(tier, StorageTier::L1 | StorageTier::L2 | StorageTier::L3 | StorageTier::L4));
+        assert!(matches!(
+            tier,
+            StorageTier::L1 | StorageTier::L2 | StorageTier::L3 | StorageTier::L4
+        ));
     }
 
     #[test]

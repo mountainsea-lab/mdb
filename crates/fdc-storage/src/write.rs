@@ -60,16 +60,24 @@ impl StorageWriteRecord {
 
     pub fn validate(&self) -> Result<()> {
         if self.namespace.trim().is_empty() {
-            return Err(Error::validation("storage write record namespace must not be empty"));
+            return Err(Error::validation(
+                "storage write record namespace must not be empty",
+            ));
         }
         if self.collection.trim().is_empty() {
-            return Err(Error::validation("storage write record collection must not be empty"));
+            return Err(Error::validation(
+                "storage write record collection must not be empty",
+            ));
         }
         if self.key.is_empty() {
-            return Err(Error::validation("storage write record key must not be empty"));
+            return Err(Error::validation(
+                "storage write record key must not be empty",
+            ));
         }
         if self.value.is_empty() {
-            return Err(Error::validation("storage write record value must not be empty"));
+            return Err(Error::validation(
+                "storage write record value must not be empty",
+            ));
         }
         self.metadata.validate()
     }
@@ -89,7 +97,9 @@ impl StorageWriteMetadata {
     pub fn validate(&self) -> Result<()> {
         for key in self.tags.keys() {
             if key.trim().is_empty() {
-                return Err(Error::validation("storage write metadata tag key must not be empty"));
+                return Err(Error::validation(
+                    "storage write metadata tag key must not be empty",
+                ));
             }
         }
         Ok(())
@@ -168,7 +178,9 @@ impl StorageBatchMetadata {
     pub fn validate(&self) -> Result<()> {
         for key in self.tags.keys() {
             if key.trim().is_empty() {
-                return Err(Error::validation("storage write batch metadata tag key must not be empty"));
+                return Err(Error::validation(
+                    "storage write batch metadata tag key must not be empty",
+                ));
             }
         }
         Ok(())
@@ -224,7 +236,12 @@ mod tests {
     use super::*;
 
     fn valid_record() -> StorageWriteRecord {
-        StorageWriteRecord::new("namespace", "collection", b"key".to_vec(), b"value".to_vec())
+        StorageWriteRecord::new(
+            "namespace",
+            "collection",
+            b"key".to_vec(),
+            b"value".to_vec(),
+        )
     }
 
     #[test]
@@ -243,7 +260,8 @@ mod tests {
 
     #[test]
     fn record_validation_rejects_empty_value() {
-        let record = StorageWriteRecord::new("namespace", "collection", b"key".to_vec(), Vec::new());
+        let record =
+            StorageWriteRecord::new("namespace", "collection", b"key".to_vec(), Vec::new());
         let error = record.validate().expect_err("empty value should fail");
         assert!(error.to_string().contains("value must not be empty"));
     }
@@ -254,8 +272,12 @@ mod tests {
         metadata.tags.insert(" ".to_string(), "bad".to_string());
         let record = valid_record().with_metadata(metadata);
 
-        let error = record.validate().expect_err("blank metadata tag key should fail");
-        assert!(error.to_string().contains("metadata tag key must not be empty"));
+        let error = record
+            .validate()
+            .expect_err("blank metadata tag key should fail");
+        assert!(error
+            .to_string()
+            .contains("metadata tag key must not be empty"));
     }
 
     #[test]
@@ -264,8 +286,12 @@ mod tests {
         metadata.tags.insert("".to_string(), "bad".to_string());
         let batch = StorageWriteBatch::new(vec![valid_record()]).with_metadata(metadata);
 
-        let error = batch.validate().expect_err("blank batch tag key should fail");
-        assert!(error.to_string().contains("batch metadata tag key must not be empty"));
+        let error = batch
+            .validate()
+            .expect_err("blank batch tag key should fail");
+        assert!(error
+            .to_string()
+            .contains("batch metadata tag key must not be empty"));
     }
 
     #[test]

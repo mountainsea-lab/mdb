@@ -1,9 +1,9 @@
 //! Data sharding system
 
+use ahash::AHasher;
 use fdc_core::error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use ahash::AHasher;
 use std::hash::{Hash, Hasher};
 
 /// 分片键
@@ -18,7 +18,7 @@ impl ShardKey {
         let shard_id = Self::calculate_shard_id(&key, shard_count);
         Self { key, shard_id }
     }
-    
+
     fn calculate_shard_id(key: &[u8], shard_count: u32) -> u32 {
         let mut hasher = AHasher::default();
         key.hash(&mut hasher);
@@ -49,11 +49,11 @@ impl ShardManager {
             shard_map: HashMap::new(),
         }
     }
-    
+
     pub fn get_shard_key(&self, key: &[u8]) -> ShardKey {
         ShardKey::new(key.to_vec(), self.shard_count)
     }
-    
+
     pub fn get_shard_count(&self) -> u32 {
         self.shard_count
     }
@@ -75,7 +75,7 @@ mod tests {
     fn test_shard_manager() {
         let manager = ShardManager::new(16, ShardStrategy::Hash);
         assert_eq!(manager.get_shard_count(), 16);
-        
+
         let shard_key = manager.get_shard_key(b"test");
         assert!(shard_key.shard_id < 16);
     }

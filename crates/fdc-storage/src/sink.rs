@@ -111,8 +111,12 @@ mod tests {
         let first_id = first.batch_id;
         let second_id = second.batch_id;
 
-        sink.write_batch(first).await.expect("first batch should write");
-        sink.write_batch(second).await.expect("second batch should write");
+        sink.write_batch(first)
+            .await
+            .expect("first batch should write");
+        sink.write_batch(second)
+            .await
+            .expect("second batch should write");
 
         let batches = sink.recorded_batches();
         assert_eq!(batches.len(), 2);

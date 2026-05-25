@@ -4,39 +4,39 @@
 //! Financial Data Center, featuring L1-L4 storage tiers, data sharding,
 //! index optimization, and high-performance data access.
 
-pub mod engine;         // 存储引擎抽象
-pub mod tier;           // 存储层级管理
-pub mod shard;          // 数据分片
-pub mod index;          // 索引系统
-pub mod cache;          // 缓存管理
-pub mod compression;    // 压缩算法
-pub mod replication;    // 数据复制
-pub mod backup;         // 备份恢复
-pub mod metrics;        // 存储指标
-pub mod config;         // 配置管理
-pub mod write;          // storage-owned write records and placement hints
-pub mod sink;           // storage write sink boundary
+pub mod backup; // 备份恢复
+pub mod cache; // 缓存管理
+pub mod compression; // 压缩算法
+pub mod config; // 配置管理
+pub mod engine; // 存储引擎抽象
+pub mod index; // 索引系统
+pub mod metrics; // 存储指标
+pub mod replication; // 数据复制
+pub mod shard; // 数据分片
+pub mod sink; // storage write sink boundary
+pub mod tier; // 存储层级管理
+pub mod write; // storage-owned write records and placement hints
 
 // 具体存储引擎实现
 pub mod engines {
-    pub mod memory;     // L1: 内存存储
-    pub mod redb;       // L2: redb存储
-    pub mod duckdb;     // L3: DuckDB存储
-    pub mod rocksdb;    // L4: RocksDB存储
+    pub mod duckdb; // L3: DuckDB存储
+    pub mod memory; // L1: 内存存储
+    pub mod redb; // L2: redb存储
+    pub mod rocksdb; // L4: RocksDB存储
 }
 
 // 重新导出常用类型
-pub use engine::{StorageEngine, StorageEngineType, EngineCapabilities};
-pub use tier::{StorageTier, TierManager, TierConfig};
-pub use shard::{ShardManager, ShardKey, ShardStrategy};
-pub use index::{IndexManager, IndexType, IndexConfig};
+pub use backup::{BackupConfig, BackupManager, RestoreConfig};
 pub use cache::{CacheManager, CachePolicy, CacheStats};
-pub use compression::{CompressionManager, CompressionAlgorithm};
-pub use replication::{ReplicationManager, ReplicationConfig};
-pub use backup::{BackupManager, BackupConfig, RestoreConfig};
-pub use metrics::StorageMetrics;
+pub use compression::{CompressionAlgorithm, CompressionManager};
 pub use config::StorageConfig;
+pub use engine::{EngineCapabilities, StorageEngine, StorageEngineType};
+pub use index::{IndexConfig, IndexManager, IndexType};
+pub use metrics::StorageMetrics;
+pub use replication::{ReplicationConfig, ReplicationManager};
+pub use shard::{ShardKey, ShardManager, ShardStrategy};
 pub use sink::{RecordingStorageSink, StorageWriteOutcome, StorageWriteSink};
+pub use tier::{StorageTier, TierConfig, TierManager};
 pub use write::{
     StorageAccessPatternHint, StorageBatchMetadata, StorageDurabilityHint, StoragePlacementHint,
     StorageWriteBatch, StorageWriteMetadata, StorageWriteRecord,
