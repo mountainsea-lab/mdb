@@ -20,7 +20,7 @@ pub use ingestion::{
     BarterIngestionEnvelope, DataQualityFlags, IntoSourceEnvelope, LiveExchange,
     LiveTradeSubscription,
 };
-pub use mapper::event::map_market_event;
+pub use mapper::{event::map_market_event, IntoMarketDataDto};
 pub use model::{
     BarterCheckpoint, BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest,
     BarterMarketEvent, BarterMarketPayload, BarterSourceState, BarterSourceStatus, CandlePayload,

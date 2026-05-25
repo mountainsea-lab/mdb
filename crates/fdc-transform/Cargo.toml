@@ -12,3 +12,11 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+fdc-core = { path = "../fdc-core" }
+async-trait = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+rust_decimal = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "sync"] }

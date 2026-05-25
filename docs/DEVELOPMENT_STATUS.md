@@ -244,18 +244,49 @@ Verification:
 - `FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-barter --test live_acquisition_contract ignored_live_smoke_can_collect_one_binance_spot_trade -- --ignored --nocapture`
 - Dependency guard: no `fdc-barter` or `fdc_barter` references inside `crates/fdc-ingestion`.
 
+### fdc-transform Phase B4: Market Data Transform Boundary
+
+Implemented in `crates/fdc-transform` and `crates/fdc-adapter/barter/src/mapper/transform.rs`.
+
+Completed capabilities:
+
+- Added neutral `MarketDataDto` and market-data payload DTOs in `fdc-transform`.
+- Added `MarketDataTransformSink` and in-memory `RecordingMarketDataSink` for bounded test/demo handoff.
+- Added `fdc-barter` mapping from `BarterIngestionEnvelope` into neutral `MarketDataDto`.
+- Demonstrated validated `SourceEnvelope<BarterMarketEvent>` batches can forward into the transform sink.
+- Preserved dependency boundary: `fdc-ingestion` has no dependency on `fdc-barter` or `fdc-transform`.
+
+Contract tests:
+
+- `crates/fdc-transform/tests/market_data_boundary_contract.rs`
+- `crates/fdc-adapter/barter/tests/transform_boundary_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-25-fdc-transform-market-data-boundary-design.md`
+- `docs/superpowers/plans/2026-05-25-fdc-transform-market-data-boundary.md`
+
+Verification:
+
+- `rtk cargo fmt --package fdc-transform --package fdc-barter --check`
+- `rtk cargo test -p fdc-transform`
+- `rtk cargo test -p fdc-barter --test transform_boundary_contract`
+- `rtk cargo test -p fdc-barter --test live_acquisition_contract`
+- `rtk cargo test -p fdc-barter -p fdc-ingestion`
+
 ## Current Verification Baseline
 
-Last successful verification after B3 live exchange acquisition:
+Last successful verification after B4 market data transform boundary:
 
 ```bash
-rtk cargo fmt --package fdc-barter --check
+rtk cargo fmt --package fdc-transform --package fdc-barter --check
+rtk cargo test -p fdc-transform
+rtk cargo test -p fdc-barter --test transform_boundary_contract
 rtk cargo test -p fdc-barter --test live_acquisition_contract
 rtk cargo test -p fdc-barter -p fdc-ingestion
-! grep -R "fdc-barter\|fdc_barter" -n crates/fdc-ingestion Cargo.toml crates/fdc-ingestion/Cargo.toml
 ```
 
-Optional live smoke validation was also run with network access:
+Optional live smoke validation was previously run with network access after B3:
 
 ```bash
 FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-barter --test live_acquisition_contract ignored_live_smoke_can_collect_one_binance_spot_trade -- --ignored --nocapture
@@ -263,11 +294,13 @@ FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-barter --test live_acquisition_contrac
 
 Result:
 
-- `rtk cargo fmt --package fdc-barter --check` exit 0.
-- `rtk cargo test -p fdc-barter --test live_acquisition_contract` exit 0, 7 passed and 1 ignored.
-- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 57 passed and 1 ignored.
-- Dependency guard exit 0, no matches for `fdc-barter` / `fdc_barter` references in `fdc-ingestion`.
-- Optional live smoke test exit 0, 1 passed and collected a Binance Spot trade.
+- `rtk cargo fmt --package fdc-transform --package fdc-barter --check` exit 0.
+- `rtk cargo test -p fdc-transform` exit 0, 2 passed.
+- `rtk cargo test -p fdc-barter --test transform_boundary_contract` exit 0, 3 passed.
+- `rtk cargo test -p fdc-barter --test live_acquisition_contract` exit 0, 7 passed and 2 ignored.
+- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 60 passed and 2 ignored.
+- Dependency guard exit 0, no `fdc-barter` / `fdc_barter` / `fdc-transform` / `fdc_transform` references in `fdc-ingestion` contract scan.
+- Optional B3 live smoke test exit 0, 1 passed and collected a Binance Spot trade.
 - Existing warnings remain in older crates and are intentionally not addressed yet.
 
 ### External Local Dependency Caveat
@@ -305,20 +338,20 @@ Do not violate these without a new design review:
 
 ## Next Recommended Development Slice
 
-### Phase B4: Transform Sink Boundary
+### Phase B5: Storage Sink Boundary
 
-Goal: connect validated source batch output to a bounded transform-facing handoff without introducing real storage I/O.
+Goal: connect neutral `MarketDataDto` batches to a bounded storage-facing handoff without introducing a production database runtime.
 
 Recommended scope:
 
-- Define a small transform sink boundary that accepts validated `SourceBatchItem<BarterMarketEvent>` or a neutral market-data DTO.
-- Keep the sink bounded and test-only/demo-friendly at first.
-- Do not add database writes, real exchange networking, or checkpoint persistence in this slice.
-- Preserve dependency direction and avoid making `fdc-ingestion` depend on adapter crates.
+- Define a storage sink trait that accepts validated `MarketDataDto` batches.
+- Add an in-memory or file-free recording sink contract first.
+- Preserve dependency direction: storage-facing code should depend on neutral DTOs, not adapter crates.
+- Do not add real DB writes, checkpoint persistence, or infinite stream lifecycle management in this slice.
 
-## Later Work After B2
+## Later Work After B4
 
-These should be separate plans, not bundled into the completed B3 live acquisition. B4 should address only the transform sink boundary in a bounded, testable slice before broader runtime work:
+These should be separate plans, not bundled into the completed B4 transform boundary. B5 should address only the storage sink boundary in a bounded, testable slice before broader runtime work:
 
 1. Checkpoint persistence boundary.
 2. Storage sink boundary.
@@ -343,8 +376,8 @@ When starting the next session:
 2. Confirm branch is `mdb-mqdev` and toolchain is overridden by `rust-toolchain.toml` to Rust 1.95.
 3. Confirm the local Barter-rs checkout exists if you need to run `fdc-barter` tests.
 4. Read this file.
-5. Read the B3 live acquisition design, plan, and status before designing B4.
-6. Write a B4 implementation plan before editing code.
+5. Read the B4 transform boundary design, plan, and status before designing B5.
+6. Write a B5 implementation plan before editing code.
 7. Use TDD: create failing contract tests before implementation.
 8. Keep `fdc-ingestion` independent from `fdc-barter`.
 9. Run the verification baseline before committing, or document why the local Barter-rs dependency is unavailable.

@@ -27,4 +27,8 @@ pub enum BarterAdapterError {
     /// A requested live subscription is not supported by this adapter slice.
     #[error("unsupported live subscription: {0}")]
     UnsupportedLiveSubscription(String),
+
+    /// The adapter payload cannot be mapped to a neutral transform DTO.
+    #[error("unsupported market data payload for transform DTO mapping: {0}")]
+    UnsupportedTransformPayload(String),
 }
