@@ -1,6 +1,5 @@
 pub mod envelope;
 pub mod live;
-pub mod source_bridge;
 
 pub use envelope::{BarterIngestionEnvelope, DataQualityFlags};
 pub use live::{
@@ -8,4 +7,3 @@ pub use live::{
     init_binance_spot_public_trades, map_live_trade_result, public_trade_result_to_data_kind,
     LiveExchange, LiveTradeSubscription,
 };
-pub use source_bridge::IntoSourceEnvelope;

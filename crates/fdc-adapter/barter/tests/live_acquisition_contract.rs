@@ -15,10 +15,8 @@ use chrono::{TimeZone, Utc};
 use fdc_barter::{
     collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
     init_binance_spot_public_trades, map_live_trade_result, BarterMarketDataKind,
-    BarterMarketDataMode, BarterMarketPayload, IntoSourceEnvelope, LiveExchange,
-    LiveTradeSubscription, TradeSide,
+    BarterMarketDataMode, BarterMarketPayload, LiveExchange, LiveTradeSubscription, TradeSide,
 };
-use fdc_ingestion::SourceType;
 use futures::{stream, StreamExt};
 
 const SOURCE_ID: &str = "barter-binance-spot-live-trades";
@@ -87,35 +85,6 @@ fn live_trade_result_maps_to_ingestion_envelope() {
     assert_eq!(envelope.checkpoint, None);
     assert!(!envelope.quality.is_replay);
     assert!(!envelope.quality.is_backfill);
-}
-
-#[test]
-fn mapped_live_trade_envelope_bridges_to_market_data_source_envelope() {
-    let envelope = map_live_trade_result(SOURCE_ID, barter_trade_event("eth", "usdt", "trade-2"))
-        .unwrap()
-        .unwrap();
-
-    let source = envelope.into_source_envelope();
-
-    assert_eq!(source.source_type, SourceType::MarketData);
-    assert_eq!(source.source_id, SOURCE_ID);
-    assert_eq!(source.payload.mode, BarterMarketDataMode::Live);
-    assert_eq!(source.payload.exchange, "binance_spot");
-    assert_eq!(source.payload.symbol.to_string(), "ETHUSDT");
-    assert_eq!(source.payload.kind, BarterMarketDataKind::Trade);
-    assert_eq!(source.event_time.as_nanos(), 1_700_000_000_000_000_000);
-    assert_eq!(source.received_at.as_nanos(), 1_700_000_000_000_001_000);
-    match &source.payload.payload {
-        BarterMarketPayload::Trade(trade) => {
-            assert_eq!(trade.trade_id.as_deref(), Some("trade-2"));
-            assert_eq!(trade.price.to_f64(), 65_000.25);
-            assert_eq!(trade.quantity.to_string(), "0.5");
-            assert_eq!(trade.side, Some(TradeSide::Buy));
-        }
-        payload => panic!("expected trade payload, got {payload:?}"),
-    }
-    assert_eq!(source.metadata.adapter.as_deref(), Some("barter-rs"));
-    assert_eq!(source.metadata.exchange.as_deref(), Some("binance_spot"));
 }
 
 #[tokio::test]

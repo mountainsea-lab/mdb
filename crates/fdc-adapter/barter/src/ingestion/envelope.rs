@@ -14,7 +14,7 @@ pub struct DataQualityFlags {
     pub is_out_of_order: bool,
 }
 
-/// Stable handoff object from `fdc-barter` to the future fdc-ingestion source path.
+/// Stable adapter handoff object produced by `fdc-barter` for downstream pipeline bridges.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BarterIngestionEnvelope {
     pub envelope_id: String,

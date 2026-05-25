@@ -184,25 +184,22 @@ Important docs:
 - `docs/superpowers/specs/2026-05-20-fdc-ingestion-phase-b1c-source-pipeline-design.md`
 - `docs/superpowers/plans/2026-05-20-fdc-ingestion-phase-b1c-source-pipeline.md`
 
-### fdc-barter Phase B2: SourceEnvelope Bridge
+### fdc-barter Phase B2: SourceEnvelope Bridge (superseded)
 
-Implemented in `crates/fdc-adapter/barter/src/ingestion/source_bridge.rs`.
+This slice was implemented earlier in `crates/fdc-adapter/barter/src/ingestion/source_bridge.rs`, but it was later removed by the B4b architecture audit because adapter crates should not depend on `fdc-ingestion`.
 
-Completed capabilities:
+Superseded capabilities:
 
-- Added `IntoSourceEnvelope` for converting `BarterIngestionEnvelope` into `SourceEnvelope<BarterMarketEvent>`.
-- Preserved Barter envelope identity, source id, sequence, timing, payload, quality flags, metadata, and checkpoint hints.
-- Mapped live events to `SourceType::MarketData`.
-- Mapped historical events to `SourceType::Replay` and ensured historical events carry backfill semantics.
-- Mapped `BarterCheckpoint` into `SourceCheckpoint` without persistence.
-- Demonstrated bounded Barter fixture flow through `run_source_pipeline_once` with a recording sink.
-- Preserved the dependency boundary: `fdc-ingestion` still has no `fdc-barter` dependency.
+- Converted `BarterIngestionEnvelope` into `SourceEnvelope<BarterMarketEvent>`.
+- Demonstrated bounded Barter fixture flow through `run_source_pipeline_once`.
 
-Contract tests:
+Current status:
 
-- `crates/fdc-adapter/barter/tests/source_bridge_contract.rs`
+- The adapter-local bridge and `crates/fdc-adapter/barter/tests/source_bridge_contract.rs` have been removed.
+- Future adapter-to-ingestion bridge code should live in an orchestration/glue layer or a dedicated integration crate, not in `fdc-barter` or `fdc-transform` core.
+- `fdc-barter` now only owns Barter-rs acquisition and adapter-owned event/envelope models.
 
-Important docs:
+Historical docs:
 
 - `docs/superpowers/specs/2026-05-21-fdc-barter-source-envelope-bridge-design.md`
 - `docs/superpowers/plans/2026-05-21-fdc-barter-source-envelope-bridge.md`
@@ -223,7 +220,7 @@ Completed capabilities:
   - `public_trade_result_to_data_kind`
   - `map_live_trade_result`
   - `collect_live_trade_envelopes`
-- Live Barter market events map into `BarterIngestionEnvelope` and remain compatible with the B2 `IntoSourceEnvelope` bridge.
+- Live Barter market events map into `BarterIngestionEnvelope`; downstream source-envelope bridging is deferred to orchestration/glue.
 - Reconnect behavior is delegated to Barter-rs. `fdc-barter` does not implement a custom reconnect or lifecycle framework.
 - Historical data, persistence, transform sinks, and storage remain deferred.
 - Optional real Binance Spot smoke validation is gated behind `#[ignore]` and `FDC_BARTER_LIVE_SMOKE=1`.
@@ -244,44 +241,43 @@ Verification:
 - `FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-barter --test live_acquisition_contract ignored_live_smoke_can_collect_one_binance_spot_trade -- --ignored --nocapture`
 - Dependency guard: no `fdc-barter` or `fdc_barter` references inside `crates/fdc-ingestion`.
 
-### fdc-transform Phase B4: Market Data Transform Boundary
+### fdc-transform Phase B4/B4b: Market Data DTO Boundary and Adapter Decoupling
 
-Implemented in `crates/fdc-transform` and `crates/fdc-adapter/barter/src/mapper/transform.rs`.
+Implemented in `crates/fdc-transform`, with adapter-owned envelopes/events produced by `crates/fdc-adapter/barter`.
 
 Completed capabilities:
 
 - Added neutral `MarketDataDto` and market-data payload DTOs in `fdc-transform`.
 - Added `MarketDataTransformSink` and in-memory `RecordingMarketDataSink` for bounded test/demo handoff.
-- Added `fdc-barter` mapping from `BarterIngestionEnvelope` into neutral `MarketDataDto`.
-- Demonstrated validated `SourceEnvelope<BarterMarketEvent>` batches can forward into the transform sink.
-- Preserved dependency boundary: `fdc-ingestion` has no dependency on `fdc-barter` or `fdc-transform`.
+- Removed adapter-specific Barter bridge/mapper code from `fdc-transform` after architecture audit.
+- Preserved dependency boundaries: `fdc-barter` has no dependency on `fdc-ingestion` or `fdc-transform`; `fdc-ingestion` has no dependency on `fdc-barter` or `fdc-transform`; `fdc-transform` has no dependency on `fdc-barter` or `fdc-ingestion`.
+- Deferred adapter-to-ingestion and adapter-to-transform glue to a future orchestration/integration slice.
 
 Contract tests:
 
 - `crates/fdc-transform/tests/market_data_boundary_contract.rs`
-- `crates/fdc-adapter/barter/tests/transform_boundary_contract.rs`
 
 Important docs:
 
 - `docs/superpowers/specs/2026-05-25-fdc-transform-market-data-boundary-design.md`
 - `docs/superpowers/plans/2026-05-25-fdc-transform-market-data-boundary.md`
+- `docs/superpowers/specs/2026-05-25-b4b-ingestion-centered-transform-boundary-design.md`
+- `docs/superpowers/plans/2026-05-25-b4b-ingestion-centered-transform-boundary.md`
 
 Verification:
 
 - `rtk cargo fmt --package fdc-transform --package fdc-barter --check`
 - `rtk cargo test -p fdc-transform`
-- `rtk cargo test -p fdc-barter --test transform_boundary_contract`
 - `rtk cargo test -p fdc-barter --test live_acquisition_contract`
 - `rtk cargo test -p fdc-barter -p fdc-ingestion`
 
 ## Current Verification Baseline
 
-Last successful verification after B4 market data transform boundary:
+Last successful verification after B4b architecture audit and adapter decoupling:
 
 ```bash
 rtk cargo fmt --package fdc-transform --package fdc-barter --check
 rtk cargo test -p fdc-transform
-rtk cargo test -p fdc-barter --test transform_boundary_contract
 rtk cargo test -p fdc-barter --test live_acquisition_contract
 rtk cargo test -p fdc-barter -p fdc-ingestion
 ```
@@ -296,10 +292,9 @@ Result:
 
 - `rtk cargo fmt --package fdc-transform --package fdc-barter --check` exit 0.
 - `rtk cargo test -p fdc-transform` exit 0, 2 passed.
-- `rtk cargo test -p fdc-barter --test transform_boundary_contract` exit 0, 3 passed.
-- `rtk cargo test -p fdc-barter --test live_acquisition_contract` exit 0, 7 passed and 2 ignored.
-- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 60 passed and 2 ignored.
-- Dependency guard exit 0, no `fdc-barter` / `fdc_barter` / `fdc-transform` / `fdc_transform` references in `fdc-ingestion` contract scan.
+- `rtk cargo test -p fdc-barter --test live_acquisition_contract` exit 0, 6 passed and 2 ignored.
+- `rtk cargo test -p fdc-barter -p fdc-ingestion` exit 0, 51 passed and 2 ignored.
+- Dependency guard exit 0, no downstream crate references in `fdc-barter`, no adapter/transform references in `fdc-ingestion`, no adapter/ingestion references in `fdc-transform`.
 - Optional B3 live smoke test exit 0, 1 passed and collected a Binance Spot trade.
 - Existing warnings remain in older crates and are intentionally not addressed yet.
 
@@ -377,7 +372,7 @@ When starting the next session:
 2. Confirm branch is `mdb-mqdev` and toolchain is overridden by `rust-toolchain.toml` to Rust 1.95.
 3. Confirm the local Barter-rs checkout exists if you need to run `fdc-barter` tests.
 4. Read this file.
-5. Read the B4 transform boundary design, plan, and status before designing B5.
+5. Read the B4b ingestion-centered transform boundary design, plan, and status before designing B5.
 6. Write a B5 implementation plan before editing code.
 7. Use TDD: create failing contract tests before implementation.
 8. Keep `fdc-ingestion` independent from `fdc-barter`.

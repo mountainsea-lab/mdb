@@ -17,10 +17,9 @@ pub use error::{BarterAdapterError, Result};
 pub use ingestion::{
     collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
     init_binance_spot_public_trades, map_live_trade_result, public_trade_result_to_data_kind,
-    BarterIngestionEnvelope, DataQualityFlags, IntoSourceEnvelope, LiveExchange,
-    LiveTradeSubscription,
+    BarterIngestionEnvelope, DataQualityFlags, LiveExchange, LiveTradeSubscription,
 };
-pub use mapper::{event::map_market_event, IntoMarketDataDto};
+pub use mapper::event::map_market_event;
 pub use model::{
     BarterCheckpoint, BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest,
     BarterMarketEvent, BarterMarketPayload, BarterSourceState, BarterSourceStatus, CandlePayload,
