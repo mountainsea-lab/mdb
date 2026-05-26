@@ -12,3 +12,6 @@ categories.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+fdc-core = { path = "../fdc-core" }
+fdc-storage = { path = "../fdc-storage" }
+fdc-orchestrator = { path = "../fdc-orchestrator" }
