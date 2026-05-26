@@ -7,10 +7,8 @@ use fdc_barter::{
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_ingestion::{SourceEnvelope, SourceType};
 use fdc_orchestrator::{
-    barter::barter_envelope_to_source_envelope,
-    market_data::barter_event_to_market_data_dto,
-    pipeline::run_barter_envelopes_to_storage_once,
-    storage::market_data_dto_to_storage_record,
+    barter::barter_envelope_to_source_envelope, market_data::barter_event_to_market_data_dto,
+    pipeline::run_barter_envelopes_to_storage_once, storage::market_data_dto_to_storage_record,
 };
 use fdc_storage::{RecordingStorageSink, StorageAccessPatternHint, StorageDurabilityHint};
 use fdc_transform::{MarketDataKind, MarketDataPayload, TradeSide as DtoTradeSide};
@@ -37,7 +35,8 @@ fn sample_trade_event() -> BarterMarketEvent {
 }
 
 fn sample_envelope() -> BarterIngestionEnvelope {
-    let mut envelope = BarterIngestionEnvelope::from_event("barter:binance_spot", sample_trade_event());
+    let mut envelope =
+        BarterIngestionEnvelope::from_event("barter:binance_spot", sample_trade_event());
     envelope.envelope_id = "env-1".to_string();
     envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
     envelope.quality = DataQualityFlags {
@@ -54,7 +53,8 @@ fn sample_envelope() -> BarterIngestionEnvelope {
 fn barter_envelope_maps_to_source_envelope() {
     let envelope = sample_envelope();
 
-    let source: SourceEnvelope<BarterMarketEvent> = barter_envelope_to_source_envelope(envelope.clone());
+    let source: SourceEnvelope<BarterMarketEvent> =
+        barter_envelope_to_source_envelope(envelope.clone());
 
     assert_eq!(source.envelope_id, "env-1");
     assert_eq!(source.source_id, "barter:binance_spot");
@@ -106,15 +106,34 @@ fn market_data_dto_maps_to_storage_write_record() {
 
     assert_eq!(record.namespace, "market_data");
     assert_eq!(record.collection, "trades");
-    assert_eq!(record.key, b"barter:binance_spot:BTCUSDT:trade:1700000000000000001".to_vec());
-    assert_eq!(record.metadata.content_type.as_deref(), Some("application/json"));
+    assert_eq!(
+        record.key,
+        b"barter:binance_spot:BTCUSDT:trade:1700000000000000001".to_vec()
+    );
+    assert_eq!(
+        record.metadata.content_type.as_deref(),
+        Some("application/json")
+    );
     assert_eq!(record.metadata.schema.as_deref(), Some("market_data.trade"));
-    assert_eq!(record.metadata.source.as_deref(), Some("barter:binance_spot"));
-    assert_eq!(record.placement.access_pattern, StorageAccessPatternHint::Hot);
-    assert_eq!(record.placement.durability, StorageDurabilityHint::Persistent);
-    assert_eq!(record.placement.shard_key.as_deref(), Some(&b"barter:binance_spot:BTCUSDT"[..]));
+    assert_eq!(
+        record.metadata.source.as_deref(),
+        Some("barter:binance_spot")
+    );
+    assert_eq!(
+        record.placement.access_pattern,
+        StorageAccessPatternHint::Hot
+    );
+    assert_eq!(
+        record.placement.durability,
+        StorageDurabilityHint::Persistent
+    );
+    assert_eq!(
+        record.placement.shard_key.as_deref(),
+        Some(&b"barter:binance_spot:BTCUSDT"[..])
+    );
 
-    let json: serde_json::Value = serde_json::from_slice(&record.value).expect("record value should be JSON");
+    let json: serde_json::Value =
+        serde_json::from_slice(&record.value).expect("record value should be JSON");
     assert_eq!(json["kind"], "Trade");
     assert_eq!(json["symbol"], "BTCUSDT");
 }
@@ -151,10 +170,17 @@ fn dependency_guard_core_crates_do_not_reference_orchestrator() {
 
     let mut violations = Vec::new();
     for path in checked_paths {
-        collect_forbidden_references(&path, &["fdc-orchestrator", "fdc_orchestrator"], &mut violations);
+        collect_forbidden_references(
+            &path,
+            &["fdc-orchestrator", "fdc_orchestrator"],
+            &mut violations,
+        );
     }
 
-    assert!(violations.is_empty(), "core crates must not depend on orchestrator: {violations:#?}");
+    assert!(
+        violations.is_empty(),
+        "core crates must not depend on orchestrator: {violations:#?}"
+    );
 }
 
 fn workspace_root() -> PathBuf {
@@ -168,7 +194,11 @@ fn workspace_root() -> PathBuf {
 fn collect_forbidden_references(path: &Path, forbidden: &[&str], violations: &mut Vec<String>) {
     if path.is_dir() {
         for entry in std::fs::read_dir(path).expect("failed to read directory") {
-            collect_forbidden_references(&entry.expect("failed to read entry").path(), forbidden, violations);
+            collect_forbidden_references(
+                &entry.expect("failed to read entry").path(),
+                forbidden,
+                violations,
+            );
         }
         return;
     }
