@@ -15,6 +15,7 @@ members = [
     "crates/fdc-proto",
     "crates/fdc-cli",
     "crates/fdc-server",
+    "crates/fdc-orchestrator",
 ]
 
 [workspace.package]
