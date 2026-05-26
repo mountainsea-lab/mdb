@@ -1,14 +1,13 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Application assembly boundary for Financial Data Center.
+//!
+//! `fdc-server` composes application-level components. It does not own adapter,
+//! ingestion, transform, or storage mapping logic; that remains in
+//! `fdc-orchestrator` and lower-level crates.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub mod app;
+pub mod components;
+pub mod config;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use app::{FdcServerApp, ServerLifecycleState};
+pub use components::{MarketDataOrchestratorResult, ServerComponents};
+pub use config::{FdcServerConfig, ServerEnvironment};
