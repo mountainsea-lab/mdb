@@ -273,7 +273,16 @@ Verification:
 
 ## Current Verification Baseline
 
-Last successful verification after B5 tier-aware storage sink boundary implementation on branch `mdb-mqdev` at pushed commit `610fb1d`:
+Last successful verification after B6 orchestration glue boundary implementation on branch `mdb-mqdev` at local commit `603c519` before status-doc commit:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-orchestrator --check
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-orchestrator
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter -p fdc-ingestion -p fdc-transform -p fdc-storage
+```
+
+Previous B5 tier-aware storage sink boundary baseline also passed:
 
 ```bash
 rtk cargo fmt --package fdc-storage --check
@@ -346,7 +355,8 @@ Do not violate these without a new design review:
 - `fdc-storage` write boundary must remain storage-owned and generic; no `MarketDataDto`, adapter event, or `SourceEnvelope` types inside storage core.
 - B5 `StoragePlacementHint` is advisory only; do not add production `TierManager` / `ShardManager` / engine routing without a new design review.
 - B5 `RecordingStorageSink` is file-free and database-free; do not hide real DB writes behind it.
-- Concrete `MarketDataDto -> StorageWriteRecord` mapping belongs in future orchestration/integration glue, not in `fdc-storage`.
+- Concrete `MarketDataDto -> StorageWriteRecord` mapping belongs in `fdc-orchestrator`, not in `fdc-storage`.
+- `fdc-orchestrator` currently implements Barter market-data glue only, but its crate boundary must remain extensible for future adapter data sources; do not bake Barter-only assumptions into crate-wide APIs.
 
 ## Completed Development Slice
 
@@ -388,18 +398,49 @@ Verification:
 - `rtk cargo test -p fdc-storage`
 - Dependency guard: no `fdc-transform`, `fdc_transform`, `fdc-ingestion`, `fdc_ingestion`, `fdc-barter`, or `fdc_barter` references in `crates/fdc-storage/Cargo.toml` or `crates/fdc-storage/src`.
 
+### Phase B6: Orchestration Glue Boundary
+
+Implemented in `crates/fdc-orchestrator`.
+
+Completed capabilities:
+
+- Added a dedicated integration/orchestration crate for bounded cross-layer glue.
+- Registered `fdc-orchestrator` as a workspace member without adding reverse dependencies from core crates.
+- Mapped `BarterIngestionEnvelope` to `SourceEnvelope<BarterMarketEvent>` without adding downstream dependencies to `fdc-barter`.
+- Mapped Barter market events to neutral `MarketDataDto` values without adding adapter dependencies to `fdc-transform`.
+- Mapped `MarketDataDto` to generic `StorageWriteRecord` values without adding transform dependencies to `fdc-storage`.
+- Added a finite in-memory helper that validates source envelopes and writes storage records to any `StorageWriteSink`.
+- Verified the bounded fixture path with `RecordingStorageSink` and dependency guard tests.
+- Kept B6 market-data-only while preserving the `fdc-orchestrator` crate boundary for future non-Barter adapter data sources.
+
+Contract tests:
+
+- `crates/fdc-orchestrator/tests/orchestrator_boundary_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-26-fdc-orchestration-glue-boundary-design.md`
+- `docs/superpowers/plans/2026-05-26-fdc-orchestration-glue-boundary.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-orchestrator --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-orchestrator` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter -p fdc-ingestion -p fdc-transform -p fdc-storage` exit 0, 98 passed and 2 ignored.
+
 ## Next Recommended Development Slice
 
-### Phase B6: Orchestration Glue Boundary Design
+### Phase B7: Server Assembly Boundary
 
-Goal: define where cross-layer glue lives without violating crate dependency direction.
+Goal: make `fdc-server` consume `fdc-orchestrator` APIs as the application assembly layer without moving mapping logic into server lifecycle code.
 
 Recommended scope:
 
-- Decide whether glue belongs in `fdc-server`, a new integration crate, or a dedicated orchestrator module.
-- Define bounded mapping responsibilities such as adapter envelope to ingestion source envelope, transform DTO to storage write record, and runtime wiring.
-- Do not move adapter-specific mapping into `fdc-storage`, `fdc-transform`, or `fdc-ingestion` core.
-- Keep production infinite stream lifecycle, checkpoint persistence, and real database writes as separate follow-up slices.
+- Add a real `fdc-server` application module or main entry shell.
+- Wire configuration/tracing placeholders and an orchestrator service handle.
+- Keep API integration, production live runners, checkpoint persistence, and real database writes as later slices.
+- Keep adapter-specific mapping inside `fdc-orchestrator` modules so future adapters can be added beside Barter glue.
 
 ## Later Work After B5
 
@@ -429,8 +470,8 @@ When starting the next session:
 3. Confirm the local Barter-rs checkout exists if you need to run `fdc-barter` tests.
 4. Read this file.
 5. Read the B5 storage sink boundary design, plan, and status before designing B6.
-6. Start B6 with architecture review and design/spec before editing code.
-7. Keep storage/transform/ingestion/adapter core crates decoupled; concrete cross-layer mappings belong in orchestration/integration glue.
-8. Use TDD for any implementation after the B6 design/spec is approved.
+6. Start B7 with architecture review and design/spec before editing code.
+7. Keep storage/transform/ingestion/adapter core crates decoupled; concrete cross-layer mappings belong in `fdc-orchestrator` modules.
+8. Use TDD for any implementation after the B7 design/spec is approved.
 9. Run the relevant verification baseline before committing, or document why a local dependency is unavailable.
 10. Update this file at the end of the session with completed work, verification evidence, pushed commit, and next recommended slice.
