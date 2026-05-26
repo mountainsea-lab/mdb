@@ -273,7 +273,16 @@ Verification:
 
 ## Current Verification Baseline
 
-Last successful verification after B6 orchestration glue boundary implementation on branch `mdb-mqdev` at local commit `603c519` before status-doc commit:
+Last successful verification after B7 server assembly boundary implementation on branch `mdb-mqdev` at local commit `28c247c` before status-doc commit:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-server --check
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test server_assembly_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server -p fdc-orchestrator -p fdc-storage
+```
+
+Previous B6 orchestration glue boundary baseline also passed:
 
 ```bash
 CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-orchestrator --check
@@ -429,18 +438,47 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-orchestrator` exit 0, 5 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter -p fdc-ingestion -p fdc-transform -p fdc-storage` exit 0, 98 passed and 2 ignored.
 
-## Next Recommended Development Slice
-
 ### Phase B7: Server Assembly Boundary
 
-Goal: make `fdc-server` consume `fdc-orchestrator` APIs as the application assembly layer without moving mapping logic into server lifecycle code.
+Implemented in `crates/fdc-server`.
+
+Completed capabilities:
+
+- Replaced the template `fdc-server` crate with a real application assembly boundary.
+- Added `FdcServerConfig` and `ServerEnvironment` for server-level assembly configuration.
+- Added `ServerComponents` with an injectable `Arc<dyn StorageWriteSink>` market-data storage sink.
+- Added default database-free assembly using `RecordingStorageSink`.
+- Added `FdcServerApp` and `ServerLifecycleState` for deterministic lifecycle transitions.
+- Verified that `fdc-server` can consume `fdc-orchestrator` public types without moving orchestration glue into server code.
+- Preserved dependency direction: lower-level crates and `fdc-api` do not reference `fdc-server`.
+
+Contract tests:
+
+- `crates/fdc-server/tests/server_assembly_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-26-fdc-server-assembly-boundary-design.md`
+- `docs/superpowers/plans/2026-05-26-fdc-server-assembly-boundary.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-server --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test server_assembly_contract` exit 0, 7 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server` exit 0, 7 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server -p fdc-orchestrator -p fdc-storage` exit 0, 57 passed.
+
+## Next Recommended Development Slice
+
+### Phase B8: API State Boundary
+
+Goal: define how `fdc-api` receives application state assembled by `fdc-server` without owning orchestrator mapping logic.
 
 Recommended scope:
 
-- Add a real `fdc-server` application module or main entry shell.
-- Wire configuration/tracing placeholders and an orchestrator service handle.
-- Keep API integration, production live runners, checkpoint persistence, and real database writes as later slices.
-- Keep adapter-specific mapping inside `fdc-orchestrator` modules so future adapters can be added beside Barter glue.
+- Define API-facing state handles and readiness projection.
+- Keep HTTP handlers simulated unless a separate B8 implementation plan explicitly wires one bounded endpoint.
+- Do not start real network services or production storage writes yet.
 
 ## Later Work After B5
 
@@ -469,9 +507,9 @@ When starting the next session:
 2. Confirm branch is `mdb-mqdev` and toolchain is overridden by `rust-toolchain.toml` to Rust 1.95.
 3. Confirm the local Barter-rs checkout exists if you need to run `fdc-barter` tests.
 4. Read this file.
-5. Read the B5 storage sink boundary design, plan, and status before designing B6.
-6. Start B7 with architecture review and design/spec before editing code.
-7. Keep storage/transform/ingestion/adapter core crates decoupled; concrete cross-layer mappings belong in `fdc-orchestrator` modules.
-8. Use TDD for any implementation after the B7 design/spec is approved.
+5. Read the B7 server assembly boundary design, plan, and status before designing B8.
+6. Start B8 with architecture review and design/spec before editing code.
+7. Keep storage/transform/ingestion/adapter/server boundaries decoupled; concrete cross-layer mappings belong in `fdc-orchestrator` modules.
+8. Use TDD for any implementation after the B8 design/spec is approved.
 9. Run the relevant verification baseline before committing, or document why a local dependency is unavailable.
 10. Update this file at the end of the session with completed work, verification evidence, pushed commit, and next recommended slice.
