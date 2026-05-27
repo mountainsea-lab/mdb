@@ -9,6 +9,7 @@ pub mod errors; // API错误处理
 pub mod graphql; // GraphQL API实现
 pub mod grpc; // gRPC API实现
 pub mod handlers; // 请求处理器
+pub mod market_data; // bounded market-data query route
 pub mod metrics; // API指标
 pub mod middleware; // 中间件
 pub mod models; // API数据模型
@@ -20,6 +21,10 @@ pub mod websocket; // WebSocket API实现 // API应用状态边界
 // 重新导出常用类型
 pub use config::ApiConfig;
 pub use errors::{ApiError, ApiResult};
+pub use market_data::{
+    build_market_data_router, query_market_data_trades, MarketDataTradeQueryParams,
+    MarketDataTradeRecord, MarketDataTradesResponse,
+};
 pub use models::{ApiResponse, QueryRequest, QueryResponse};
 pub use server::{ApiServer, ServerConfig};
 pub use state::{

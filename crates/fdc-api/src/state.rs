@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use fdc_server::{FdcServerApp, ServerEnvironment, ServerLifecycleState};
+use fdc_storage::QueryableMarketDataStore;
 use serde::{Deserialize, Serialize};
 
 use crate::models::ApiResponse;
@@ -8,17 +9,30 @@ use crate::models::ApiResponse;
 #[derive(Clone)]
 pub struct ApiAppState {
     server_app: Arc<FdcServerApp>,
+    market_data_store: Arc<QueryableMarketDataStore>,
 }
 
 impl ApiAppState {
     pub fn new(server_app: FdcServerApp) -> Self {
         Self {
             server_app: Arc::new(server_app),
+            market_data_store: Arc::new(QueryableMarketDataStore::new()),
         }
     }
 
     pub fn from_shared(server_app: Arc<FdcServerApp>) -> Self {
-        Self { server_app }
+        Self {
+            server_app,
+            market_data_store: Arc::new(QueryableMarketDataStore::new()),
+        }
+    }
+
+    pub fn with_market_data_store(
+        mut self,
+        market_data_store: Arc<QueryableMarketDataStore>,
+    ) -> Self {
+        self.market_data_store = market_data_store;
+        self
     }
 
     pub fn server_app(&self) -> &FdcServerApp {
@@ -27,6 +41,10 @@ impl ApiAppState {
 
     pub fn shared_server_app(&self) -> Arc<FdcServerApp> {
         Arc::clone(&self.server_app)
+    }
+
+    pub fn market_data_store(&self) -> Arc<QueryableMarketDataStore> {
+        Arc::clone(&self.market_data_store)
     }
 
     pub fn readiness_projection(&self) -> ApiReadinessProjection {

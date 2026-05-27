@@ -529,19 +529,47 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-orchestrator --test orchestrator_queryable_storage_contract` exit 0, 1 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-storage -p fdc-orchestrator` exit 0, 56 passed.
 
-## Next Recommended Development Slice
-
 ### Phase B10: Bounded API Market Data Query Route
 
-Goal: expose the B9 queryable market-data store through one bounded in-memory API/router path without starting real network listeners.
+Implemented in `crates/fdc-api`.
+
+Completed capabilities:
+
+- Extended `ApiAppState` with an injectable shared `QueryableMarketDataStore`.
+- Added API market-data DTOs for trade query responses.
+- Added `query_market_data_trades` pure helper for storage-backed API responses.
+- Added `build_market_data_router` with bounded in-memory route `GET /market-data/trades`.
+- Verified in-memory Axum route querying seeded B9 store data without starting real listeners.
+- Kept acquisition, orchestrator mapping, SQL query engine integration, and production persistence out of `fdc-api`.
+
+Contract tests:
+
+- `crates/fdc-api/tests/market_data_route_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-27-fdc-api-market-data-query-route-design.md`
+- `docs/superpowers/plans/2026-05-27-fdc-api-market-data-query-route.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-api --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test market_data_route_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 31 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-storage` exit 0, 81 passed.
+
+## Next Recommended Development Slice
+
+### Phase B11: Bounded Acquisition-to-API MVP Runner
+
+Goal: populate the B9 queryable store through a bounded acquisition/orchestration helper so the MVP can demonstrate acquisition -> storage -> API query in one controlled flow.
 
 Recommended scope:
 
-- Extend server/API state to carry a shared `QueryableMarketDataStore` or narrow reader handle.
-- Build an Axum router factory that accepts API state.
-- Wire only a bounded market-data trades query route, such as `/market-data/trades?symbol=BTCUSDT&limit=10`.
-- Test the route in memory with `tower::ServiceExt` and fixture data written through the B9 store.
-- Do not start listeners, add production persistence, or move orchestrator mapping logic into `fdc-api`.
+- Add a bounded runner/helper that accepts N `BarterIngestionEnvelope` fixtures or collects N live trades behind an ignored/network-gated test.
+- Write those envelopes through `fdc-orchestrator::run_barter_envelopes_to_storage_once` into the shared `QueryableMarketDataStore`.
+- Query them through the B10 in-memory API route.
+- Keep real long-running service lifecycle, production persistence, and ungated network tests out of scope.
 
 ## Later Work After B5
 

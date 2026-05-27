@@ -18,10 +18,11 @@ fdc-query = { path = "../fdc-query" }
 fdc-ingestion = { path = "../fdc-ingestion" }
 fdc-types = { path = "../fdc-types" }
 fdc-server = { path = "../fdc-server" }
+fdc-storage = { path = "../fdc-storage" }
 
 # Web框架
 axum = "0.7"
-tower = "0.4"
+tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 hyper = "1.0"
 
