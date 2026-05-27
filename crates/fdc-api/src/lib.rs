@@ -3,24 +3,29 @@
 //! This crate provides comprehensive API interfaces for the Financial Data Center,
 //! including REST, gRPC, GraphQL, and WebSocket APIs for data access and management.
 
-pub mod rest;           // REST API实现
-pub mod grpc;           // gRPC API实现
-pub mod graphql;        // GraphQL API实现
-pub mod websocket;      // WebSocket API实现
-pub mod auth;           // 认证和授权
-pub mod middleware;     // 中间件
-pub mod config;         // API配置
-pub mod server;         // 服务器管理
-pub mod handlers;       // 请求处理器
-pub mod models;         // API数据模型
-pub mod errors;         // API错误处理
-pub mod metrics;        // API指标
+pub mod auth; // 认证和授权
+pub mod config; // API配置
+pub mod errors; // API错误处理
+pub mod graphql; // GraphQL API实现
+pub mod grpc; // gRPC API实现
+pub mod handlers; // 请求处理器
+pub mod metrics; // API指标
+pub mod middleware; // 中间件
+pub mod models; // API数据模型
+pub mod rest; // REST API实现
+pub mod server; // 服务器管理
+pub mod state;
+pub mod websocket; // WebSocket API实现 // API应用状态边界
 
 // 重新导出常用类型
-pub use server::{ApiServer, ServerConfig};
 pub use config::ApiConfig;
 pub use errors::{ApiError, ApiResult};
 pub use models::{ApiResponse, QueryRequest, QueryResponse};
+pub use server::{ApiServer, ServerConfig};
+pub use state::{
+    readiness_response_from_state, server_environment_label, server_lifecycle_state_label,
+    ApiAppState, ApiReadinessProjection, ApiReadinessStatus,
+};
 
 /// 库版本信息
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

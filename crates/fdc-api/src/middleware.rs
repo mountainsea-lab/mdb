@@ -12,12 +12,12 @@ impl MiddlewareManager {
     pub fn new(config: MiddlewareConfig) -> Self {
         Self { config }
     }
-    
+
     /// 检查是否启用日志中间件
     pub fn is_logging_enabled(&self) -> bool {
         self.config.logging_enabled
     }
-    
+
     /// 检查是否启用指标中间件
     pub fn is_metrics_enabled(&self) -> bool {
         self.config.metrics_enabled

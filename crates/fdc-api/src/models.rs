@@ -33,7 +33,7 @@ impl<T> ApiResponse<T> {
             metadata: None,
         }
     }
-    
+
     /// 创建带消息的成功响应
     pub fn success_with_message(data: T, message: String) -> Self {
         Self {
@@ -45,13 +45,13 @@ impl<T> ApiResponse<T> {
             metadata: None,
         }
     }
-    
+
     /// 设置请求ID
     pub fn with_request_id(mut self, request_id: String) -> Self {
         self.request_id = request_id;
         self
     }
-    
+
     /// 设置元数据
     pub fn with_metadata(mut self, metadata: HashMap<String, serde_json::Value>) -> Self {
         self.metadata = Some(metadata);
@@ -285,7 +285,7 @@ impl ComponentStatus {
             details: None,
         }
     }
-    
+
     /// 创建不健康状态
     pub fn unhealthy(error: String) -> Self {
         Self {
@@ -325,7 +325,7 @@ mod tests {
         let healthy = ComponentStatus::healthy();
         assert_eq!(healthy.status, "healthy");
         assert!(healthy.error.is_none());
-        
+
         let unhealthy = ComponentStatus::unhealthy("Connection failed".to_string());
         assert_eq!(unhealthy.status, "unhealthy");
         assert_eq!(unhealthy.error, Some("Connection failed".to_string()));

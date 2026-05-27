@@ -12,7 +12,7 @@ impl GrpcServer {
     pub fn new(config: GrpcConfig) -> Self {
         Self { config }
     }
-    
+
     /// 启动gRPC服务器
     pub async fn start(&self) -> ApiResult<()> {
         // 简化实现

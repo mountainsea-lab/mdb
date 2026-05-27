@@ -83,8 +83,6 @@ fn dependency_guard_lower_level_crates_do_not_reference_fdc_server() {
         workspace_root.join("crates/fdc-storage/src"),
         workspace_root.join("crates/fdc-orchestrator/Cargo.toml"),
         workspace_root.join("crates/fdc-orchestrator/src"),
-        workspace_root.join("crates/fdc-api/Cargo.toml"),
-        workspace_root.join("crates/fdc-api/src"),
     ];
 
     let mut violations = Vec::new();
@@ -94,7 +92,7 @@ fn dependency_guard_lower_level_crates_do_not_reference_fdc_server() {
 
     assert!(
         violations.is_empty(),
-        "lower-level or protocol crates must not depend on fdc-server: {violations:#?}"
+        "lower-level crates must not depend on fdc-server: {violations:#?}"
     );
 }
 

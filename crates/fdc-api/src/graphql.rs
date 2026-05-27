@@ -12,11 +12,14 @@ impl GraphQLServer {
     pub fn new(config: GraphQLConfig) -> Self {
         Self { config }
     }
-    
+
     /// 启动GraphQL服务器
     pub async fn start(&self) -> ApiResult<()> {
         // 简化实现
-        tracing::info!("GraphQL server would start on endpoint {}", self.config.endpoint);
+        tracing::info!(
+            "GraphQL server would start on endpoint {}",
+            self.config.endpoint
+        );
         Ok(())
     }
 }

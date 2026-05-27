@@ -48,47 +48,52 @@ impl MetricsCollector {
             metrics: Arc::new(RwLock::new(ApiMetrics::default())),
         }
     }
-    
+
     /// 记录请求
     pub async fn record_request(&self, endpoint: &str, status_code: u16, response_time_ms: u64) {
         if !self.config.enabled {
             return;
         }
-        
+
         let mut metrics = self.metrics.write().await;
         metrics.requests_total += 1;
-        
+
         if status_code < 400 {
             metrics.requests_success += 1;
         } else {
             metrics.requests_failed += 1;
         }
-        
+
         // 更新端点统计
-        let endpoint_stats = metrics.endpoint_stats.entry(endpoint.to_string()).or_default();
+        let endpoint_stats = metrics
+            .endpoint_stats
+            .entry(endpoint.to_string())
+            .or_default();
         endpoint_stats.requests += 1;
-        endpoint_stats.avg_response_time_ms = 
-            (endpoint_stats.avg_response_time_ms * (endpoint_stats.requests - 1) as f64 + response_time_ms as f64) 
+        endpoint_stats.avg_response_time_ms = (endpoint_stats.avg_response_time_ms
+            * (endpoint_stats.requests - 1) as f64
+            + response_time_ms as f64)
             / endpoint_stats.requests as f64;
-        
+
         if status_code >= 400 {
             endpoint_stats.errors += 1;
         }
-        
+
         // 更新状态码统计
         *metrics.status_code_stats.entry(status_code).or_insert(0) += 1;
-        
+
         // 更新平均响应时间
-        metrics.avg_response_time_ms = 
-            (metrics.avg_response_time_ms * (metrics.requests_total - 1) as f64 + response_time_ms as f64) 
+        metrics.avg_response_time_ms = (metrics.avg_response_time_ms
+            * (metrics.requests_total - 1) as f64
+            + response_time_ms as f64)
             / metrics.requests_total as f64;
     }
-    
+
     /// 获取指标
     pub async fn get_metrics(&self) -> ApiMetrics {
         self.metrics.read().await.clone()
     }
-    
+
     /// 重置指标
     pub async fn reset_metrics(&self) {
         let mut metrics = self.metrics.write().await;
@@ -104,10 +109,10 @@ mod tests {
     async fn test_metrics_collector() {
         let config = MetricsConfig::default();
         let collector = MetricsCollector::new(config);
-        
+
         collector.record_request("/health", 200, 10).await;
         collector.record_request("/query", 400, 50).await;
-        
+
         let metrics = collector.get_metrics().await;
         assert_eq!(metrics.requests_total, 2);
         assert_eq!(metrics.requests_success, 1);

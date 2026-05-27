@@ -13,12 +13,11 @@ impl RestRouter {
     pub fn new(config: RestConfig) -> Self {
         Self { _config: config }
     }
-    
+
     /// 构建路由
     pub fn build_routes(&self) -> ApiResult<Router> {
-        let router = Router::new()
-            .route("/", get(|| async { "FDC REST API" }));
-        
+        let router = Router::new().route("/", get(|| async { "FDC REST API" }));
+
         Ok(router)
     }
 }

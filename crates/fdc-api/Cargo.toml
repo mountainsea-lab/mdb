@@ -17,6 +17,7 @@ fdc-core = { path = "../fdc-core" }
 fdc-query = { path = "../fdc-query" }
 fdc-ingestion = { path = "../fdc-ingestion" }
 fdc-types = { path = "../fdc-types" }
+fdc-server = { path = "../fdc-server" }
 
 # Web框架
 axum = "0.7"

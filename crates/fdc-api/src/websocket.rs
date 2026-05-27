@@ -12,11 +12,14 @@ impl WebSocketServer {
     pub fn new(config: WebSocketConfig) -> Self {
         Self { config }
     }
-    
+
     /// 启动WebSocket服务器
     pub async fn start(&self) -> ApiResult<()> {
         // 简化实现
-        tracing::info!("WebSocket server would start on endpoint {}", self.config.endpoint);
+        tracing::info!(
+            "WebSocket server would start on endpoint {}",
+            self.config.endpoint
+        );
         Ok(())
     }
 }

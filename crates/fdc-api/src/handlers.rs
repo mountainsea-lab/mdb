@@ -9,7 +9,7 @@ impl QueryHandler {
     /// 处理查询请求
     pub async fn handle_query(_request: QueryRequest) -> ApiResult<QueryResponse> {
         // 简化实现
-        
+
         let response = QueryResponse {
             results: vec![],
             columns: vec![],
@@ -22,7 +22,7 @@ impl QueryHandler {
             },
             plan: None,
         };
-        
+
         Ok(response)
     }
 }
@@ -44,7 +44,7 @@ impl InsertHandler {
                 write_time_ms: 0,
             },
         };
-        
+
         Ok(response)
     }
 }
@@ -61,7 +61,7 @@ mod tests {
             parameters: None,
             options: None,
         };
-        
+
         let result = QueryHandler::handle_query(request).await;
         assert!(result.is_ok());
     }
@@ -73,7 +73,7 @@ mod tests {
             data: vec![HashMap::new()],
             options: None,
         };
-        
+
         let result = InsertHandler::handle_insert(request).await;
         assert!(result.is_ok());
     }

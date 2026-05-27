@@ -333,28 +333,28 @@ impl ApiConfig {
         let config: Self = toml::from_str(&content)?;
         Ok(config)
     }
-    
+
     /// 保存配置到文件
     pub fn save_to_file(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
         let content = toml::to_string_pretty(self)?;
         std::fs::write(path, content)?;
         Ok(())
     }
-    
+
     /// 验证配置
     pub fn validate(&self) -> Result<(), String> {
         if self.server.workers == 0 {
             return Err("workers must be greater than 0".to_string());
         }
-        
+
         if self.server.max_connections == 0 {
             return Err("max_connections must be greater than 0".to_string());
         }
-        
+
         if self.rest.max_body_size == 0 {
             return Err("max_body_size must be greater than 0".to_string());
         }
-        
+
         Ok(())
     }
 }
@@ -374,11 +374,11 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let mut config = ApiConfig::default();
-        
+
         // 测试无效的workers
         config.server.workers = 0;
         assert!(config.validate().is_err());
-        
+
         // 恢复有效值
         config.server.workers = 4;
         assert!(config.validate().is_ok());

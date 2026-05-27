@@ -17,55 +17,55 @@ pub enum ApiError {
     /// 内部服务器错误
     #[error("Internal server error: {message}")]
     Internal { message: String },
-    
+
     /// 请求验证错误
     #[error("Validation error: {message}")]
     Validation { message: String },
-    
+
     /// 认证错误
     #[error("Authentication error: {message}")]
     Authentication { message: String },
-    
+
     /// 授权错误
     #[error("Authorization error: {message}")]
     Authorization { message: String },
-    
+
     /// 资源未找到
     #[error("Resource not found: {resource}")]
     NotFound { resource: String },
-    
+
     /// 资源冲突
     #[error("Resource conflict: {message}")]
     Conflict { message: String },
-    
+
     /// 请求过于频繁
     #[error("Too many requests")]
     TooManyRequests,
-    
+
     /// 请求体过大
     #[error("Request body too large")]
     PayloadTooLarge,
-    
+
     /// 不支持的媒体类型
     #[error("Unsupported media type")]
     UnsupportedMediaType,
-    
+
     /// 查询错误
     #[error("Query error: {message}")]
     Query { message: String },
-    
+
     /// 数据库错误
     #[error("Database error: {message}")]
     Database { message: String },
-    
+
     /// 网络错误
     #[error("Network error: {message}")]
     Network { message: String },
-    
+
     /// 超时错误
     #[error("Timeout error")]
     Timeout,
-    
+
     /// 服务不可用
     #[error("Service unavailable")]
     ServiceUnavailable,
@@ -78,63 +78,63 @@ impl ApiError {
             message: message.into(),
         }
     }
-    
+
     /// 创建验证错误
     pub fn validation(message: impl Into<String>) -> Self {
         Self::Validation {
             message: message.into(),
         }
     }
-    
+
     /// 创建认证错误
     pub fn authentication(message: impl Into<String>) -> Self {
         Self::Authentication {
             message: message.into(),
         }
     }
-    
+
     /// 创建授权错误
     pub fn authorization(message: impl Into<String>) -> Self {
         Self::Authorization {
             message: message.into(),
         }
     }
-    
+
     /// 创建未找到错误
     pub fn not_found(resource: impl Into<String>) -> Self {
         Self::NotFound {
             resource: resource.into(),
         }
     }
-    
+
     /// 创建冲突错误
     pub fn conflict(message: impl Into<String>) -> Self {
         Self::Conflict {
             message: message.into(),
         }
     }
-    
+
     /// 创建查询错误
     pub fn query(message: impl Into<String>) -> Self {
         Self::Query {
             message: message.into(),
         }
     }
-    
+
     /// 创建数据库错误
     pub fn database(message: impl Into<String>) -> Self {
         Self::Database {
             message: message.into(),
         }
     }
-    
+
     /// 创建网络错误
     pub fn network(message: impl Into<String>) -> Self {
         Self::Network {
             message: message.into(),
         }
     }
-    
+
     /// 获取HTTP状态码
     pub fn status_code(&self) -> StatusCode {
         match self {
@@ -154,7 +154,7 @@ impl ApiError {
             ApiError::ServiceUnavailable => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
-    
+
     /// 获取错误代码
     pub fn error_code(&self) -> &'static str {
         match self {
@@ -199,7 +199,7 @@ impl ErrorResponse {
             request_id: None,
         }
     }
-    
+
     /// 设置请求ID
     pub fn with_request_id(mut self, request_id: String) -> Self {
         self.request_id = Some(request_id);
@@ -210,11 +210,8 @@ impl ErrorResponse {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status_code();
-        let error_response = ErrorResponse::new(
-            self.error_code().to_string(),
-            self.to_string(),
-        );
-        
+        let error_response = ErrorResponse::new(self.error_code().to_string(), self.to_string());
+
         (status, Json(error_response)).into_response()
     }
 }
@@ -257,11 +254,8 @@ mod tests {
 
     #[test]
     fn test_error_response() {
-        let response = ErrorResponse::new(
-            "TEST_ERROR".to_string(),
-            "Test message".to_string(),
-        );
-        
+        let response = ErrorResponse::new("TEST_ERROR".to_string(), "Test message".to_string());
+
         assert_eq!(response.error, "TEST_ERROR");
         assert_eq!(response.message, "Test message");
         assert!(response.request_id.is_none());
@@ -269,11 +263,9 @@ mod tests {
 
     #[test]
     fn test_error_response_with_request_id() {
-        let response = ErrorResponse::new(
-            "TEST_ERROR".to_string(),
-            "Test message".to_string(),
-        ).with_request_id("req-123".to_string());
-        
+        let response = ErrorResponse::new("TEST_ERROR".to_string(), "Test message".to_string())
+            .with_request_id("req-123".to_string());
+
         assert_eq!(response.request_id, Some("req-123".to_string()));
     }
 
@@ -281,7 +273,7 @@ mod tests {
     fn test_from_fdc_core_error() {
         let core_error = fdc_core::error::Error::validation("Core validation error");
         let api_error: ApiError = core_error.into();
-        
+
         match api_error {
             ApiError::Validation { message } => {
                 assert_eq!(message, "Core validation error");

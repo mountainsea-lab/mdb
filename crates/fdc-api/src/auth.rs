@@ -12,12 +12,12 @@ impl AuthManager {
     pub fn new(config: AuthConfig) -> Self {
         Self { config }
     }
-    
+
     /// 验证API密钥
     pub fn validate_api_key(&self, key: &str) -> bool {
         self.config.api_keys.contains(&key.to_string())
     }
-    
+
     /// 验证JWT令牌
     pub fn validate_jwt(&self, _token: &str) -> ApiResult<bool> {
         // 简化实现

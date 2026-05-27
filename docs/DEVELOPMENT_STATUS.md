@@ -468,17 +468,49 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server` exit 0, 7 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server -p fdc-orchestrator -p fdc-storage` exit 0, 57 passed.
 
-## Next Recommended Development Slice
-
 ### Phase B8: API State Boundary
 
-Goal: define how `fdc-api` receives application state assembled by `fdc-server` without owning orchestrator mapping logic.
+Implemented in `crates/fdc-api`.
+
+Completed capabilities:
+
+- Added `ApiAppState` as a shared API-facing handle around `FdcServerApp`.
+- Added serializable readiness projection types:
+  - `ApiReadinessStatus`
+  - `ApiReadinessProjection`
+- Added stable API labels for server environment and lifecycle state.
+- Added `readiness_response_from_state` as a pure readiness response helper that does not start network services.
+- Preserved dependency direction: `fdc-api` consumes `fdc-server`; lower-level/application assembly crates do not reference `fdc-api`.
+- Kept orchestrator mapping logic, network startup, and production storage writes out of `fdc-api`.
+
+Contract tests:
+
+- `crates/fdc-api/tests/api_state_boundary_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-27-fdc-api-state-boundary-design.md`
+- `docs/superpowers/plans/2026-05-27-fdc-api-state-boundary.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-api --package fdc-server --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test api_state_boundary_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 27 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 34 passed.
+
+## Next Recommended Development Slice
+
+### Phase B9: Bounded API Router State Integration
+
+Goal: wire the B8 API state boundary into one bounded Axum readiness route without starting real network services or expanding into full API runtime work.
 
 Recommended scope:
 
-- Define API-facing state handles and readiness projection.
-- Keep HTTP handlers simulated unless a separate B8 implementation plan explicitly wires one bounded endpoint.
-- Do not start real network services or production storage writes yet.
+- Build a router factory that accepts `ApiAppState`.
+- Wire only `/ready` or a versioned equivalent to return the B8 readiness projection.
+- Test the route in memory with `tower::ServiceExt`.
+- Do not start listeners, add production storage writes, or add orchestrator mapping logic to `fdc-api`.
 
 ## Later Work After B5
 
