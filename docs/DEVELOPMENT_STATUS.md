@@ -499,18 +499,49 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 27 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 34 passed.
 
+### Phase B9: Queryable Market Data Storage Boundary
+
+Implemented in `crates/fdc-storage`, with an integration contract in `crates/fdc-orchestrator`.
+
+Completed capabilities:
+
+- Added `QueryableMarketDataStore`, an in-memory `StorageWriteSink` for MVP market-data reads.
+- Added `MarketDataQuery` with filters for namespace, collection, symbol, kind, and limit.
+- Preserved insertion-order reads and atomic validation before writes mutate store state.
+- Kept `fdc-storage` decoupled from `fdc-transform`, `fdc-ingestion`, `fdc-barter`, `fdc-orchestrator`, and `fdc-api`.
+- Verified the existing Barter fixture orchestration path can write into `QueryableMarketDataStore` and query the stored BTCUSDT trade record back.
+- Deferred SQL engine integration, persistence, live runner lifecycle, and API route exposure to later slices.
+
+Contract tests:
+
+- `crates/fdc-storage/tests/queryable_market_data_store_contract.rs`
+- `crates/fdc-orchestrator/tests/orchestrator_queryable_storage_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-27-fdc-queryable-market-data-storage-boundary-design.md`
+- `docs/superpowers/plans/2026-05-27-fdc-queryable-market-data-storage-boundary.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-storage --package fdc-orchestrator --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-storage --test queryable_market_data_store_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-orchestrator --test orchestrator_queryable_storage_contract` exit 0, 1 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-storage -p fdc-orchestrator` exit 0, 56 passed.
+
 ## Next Recommended Development Slice
 
-### Phase B9: Bounded API Router State Integration
+### Phase B10: Bounded API Market Data Query Route
 
-Goal: wire the B8 API state boundary into one bounded Axum readiness route without starting real network services or expanding into full API runtime work.
+Goal: expose the B9 queryable market-data store through one bounded in-memory API/router path without starting real network listeners.
 
 Recommended scope:
 
-- Build a router factory that accepts `ApiAppState`.
-- Wire only `/ready` or a versioned equivalent to return the B8 readiness projection.
-- Test the route in memory with `tower::ServiceExt`.
-- Do not start listeners, add production storage writes, or add orchestrator mapping logic to `fdc-api`.
+- Extend server/API state to carry a shared `QueryableMarketDataStore` or narrow reader handle.
+- Build an Axum router factory that accepts API state.
+- Wire only a bounded market-data trades query route, such as `/market-data/trades?symbol=BTCUSDT&limit=10`.
+- Test the route in memory with `tower::ServiceExt` and fixture data written through the B9 store.
+- Do not start listeners, add production persistence, or move orchestrator mapping logic into `fdc-api`.
 
 ## Later Work After B5
 
