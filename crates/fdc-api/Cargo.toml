@@ -73,6 +73,10 @@ num_cpus = "1.16"
 [dev-dependencies]
 tempfile = "3.8"
 criterion = "0.5"
+fdc-barter = { path = "../fdc-adapter/barter" }
+fdc-core = { path = "../fdc-core" }
+fdc-server = { path = "../fdc-server" }
+rust_decimal = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"
