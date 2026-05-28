@@ -46,6 +46,18 @@ impl<T> ApiResponse<T> {
         }
     }
 
+    /// 创建错误响应
+    pub fn error(data: T, message: String) -> Self {
+        Self {
+            data,
+            status: "error".to_string(),
+            message: Some(message),
+            timestamp: chrono::Utc::now(),
+            request_id: Uuid::new_v4().to_string(),
+            metadata: None,
+        }
+    }
+
     /// 设置请求ID
     pub fn with_request_id(mut self, request_id: String) -> Self {
         self.request_id = request_id;

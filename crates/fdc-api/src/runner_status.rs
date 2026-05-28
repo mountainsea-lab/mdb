@@ -1,5 +1,5 @@
 use axum::{extract::State, routing::get, Json, Router};
-use fdc_server::{BoundedMarketDataMvpResult, BoundedRunnerState};
+use fdc_server::{BoundedMarketDataMvpResult, BoundedMarketDataRunnerHandle, BoundedRunnerState};
 use serde::{Deserialize, Serialize};
 
 use crate::{ApiAppState, ApiResponse};
@@ -61,6 +61,12 @@ fn runner_status_projection_from_state(state: &ApiAppState) -> ApiRunnerStatusPr
         };
     };
 
+    runner_status_projection_from_runner(&runner)
+}
+
+pub fn runner_status_projection_from_runner(
+    runner: &BoundedMarketDataRunnerHandle,
+) -> ApiRunnerStatusProjection {
     ApiRunnerStatusProjection {
         configured: true,
         state: runner_lifecycle_status_label(runner.state()),

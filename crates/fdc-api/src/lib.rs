@@ -14,6 +14,7 @@ pub mod metrics; // API指标
 pub mod middleware; // 中间件
 pub mod models; // API数据模型
 pub mod rest; // REST API实现
+pub mod runner_control;
 pub mod runner_status;
 pub mod server; // 服务器管理
 pub mod state;
@@ -27,6 +28,10 @@ pub use market_data::{
     MarketDataTradeRecord, MarketDataTradesResponse,
 };
 pub use models::{ApiResponse, QueryRequest, QueryResponse};
+pub use runner_control::{
+    build_runner_control_router, cancel_runner_from_state, start_fixture_runner_from_state,
+    RunnerFixtureTradeInput, RunnerStartFixtureRequest,
+};
 pub use runner_status::{
     build_runner_status_router, runner_status_response_from_state, ApiRunnerLastResultProjection,
     ApiRunnerLifecycleStatus, ApiRunnerStatusProjection,

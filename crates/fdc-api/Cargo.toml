@@ -19,6 +19,7 @@ fdc-ingestion = { path = "../fdc-ingestion" }
 fdc-types = { path = "../fdc-types" }
 fdc-server = { path = "../fdc-server" }
 fdc-storage = { path = "../fdc-storage" }
+fdc-barter = { path = "../fdc-adapter/barter" }
 
 # Web框架
 axum = "0.7"
@@ -59,6 +60,7 @@ anyhow = "1.0"
 
 # 时间处理
 chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { workspace = true }
 
 # UUID生成
 uuid = { version = "1.0", features = ["v4", "serde"] }

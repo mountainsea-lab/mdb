@@ -5,6 +5,7 @@ use fdc_server::{
 };
 use fdc_storage::QueryableMarketDataStore;
 use serde::{Deserialize, Serialize};
+use tokio::sync::Mutex;
 
 use crate::models::ApiResponse;
 
@@ -13,6 +14,7 @@ pub struct ApiAppState {
     server_app: Arc<FdcServerApp>,
     market_data_store: Arc<QueryableMarketDataStore>,
     market_data_runner: Option<Arc<BoundedMarketDataRunnerHandle>>,
+    market_data_runner_control: Option<Arc<Mutex<BoundedMarketDataRunnerHandle>>>,
 }
 
 impl ApiAppState {
@@ -21,6 +23,7 @@ impl ApiAppState {
             server_app: Arc::new(server_app),
             market_data_store: Arc::new(QueryableMarketDataStore::new()),
             market_data_runner: None,
+            market_data_runner_control: None,
         }
     }
 
@@ -29,6 +32,7 @@ impl ApiAppState {
             server_app,
             market_data_store: Arc::new(QueryableMarketDataStore::new()),
             market_data_runner: None,
+            market_data_runner_control: None,
         }
     }
 
@@ -48,6 +52,14 @@ impl ApiAppState {
         self
     }
 
+    pub fn with_market_data_runner_control(
+        mut self,
+        market_data_runner_control: Arc<Mutex<BoundedMarketDataRunnerHandle>>,
+    ) -> Self {
+        self.market_data_runner_control = Some(market_data_runner_control);
+        self
+    }
+
     pub fn server_app(&self) -> &FdcServerApp {
         &self.server_app
     }
@@ -62,6 +74,10 @@ impl ApiAppState {
 
     pub fn market_data_runner(&self) -> Option<Arc<BoundedMarketDataRunnerHandle>> {
         self.market_data_runner.as_ref().map(Arc::clone)
+    }
+
+    pub fn market_data_runner_control(&self) -> Option<Arc<Mutex<BoundedMarketDataRunnerHandle>>> {
+        self.market_data_runner_control.as_ref().map(Arc::clone)
     }
 
     pub fn readiness_projection(&self) -> ApiReadinessProjection {
