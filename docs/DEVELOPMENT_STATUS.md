@@ -1,9 +1,9 @@
 # Development Status
 
-Last updated: 2026-05-21
+Last updated: 2026-05-28
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`docs: update live acquisition status`)
+Latest checkpoint commit when this file was written: `HEAD` (`feat: add bounded runner control api`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -670,18 +670,55 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 38 passed and 1 ignored.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 49 passed and 1 ignored.
 
-## Next Recommended Development Slice
-
 ### Phase B15: Bounded Runner Control API
 
-Goal: add explicit in-memory API controls for starting and cancelling bounded fixture runs without introducing production background runtime or live network acquisition.
+Implemented in `crates/fdc-api`.
+
+Completed capabilities:
+
+- Extended `ApiAppState` with an optional mutable `Arc<tokio::sync::Mutex<BoundedMarketDataRunnerHandle>>` control handle for demo/test use.
+- Added `RunnerStartFixtureRequest` and `RunnerFixtureTradeInput` fixture DTOs.
+- Added pure async control helpers:
+  - `start_fixture_runner_from_state`
+  - `cancel_runner_from_state`
+- Added bounded in-memory control routes:
+  - `POST /runner/start-fixture`
+  - `POST /runner/cancel`
+- Start-fixture runs finite fixture trades through the B13 runner and writes to the shared B9 queryable store, making records readable through the B10 market-data API route.
+- Control responses reuse the B14 runner status projection shape.
+- Missing control handles and invalid fixture input return structured `ApiResponse` errors with status projection data.
+- Kept live network acquisition, background daemon supervision, persistence, and SQL integration out of scope.
+
+Contract tests:
+
+- `crates/fdc-api/tests/runner_control_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-28-fdc-bounded-runner-control-api-design.md`
+- `docs/superpowers/plans/2026-05-28-fdc-bounded-runner-control-api.md`
+
+Verification:
+
+- RED check: `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test runner_control_contract` failed before implementation with missing control API symbols.
+- `rtk cargo fmt --package fdc-api` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test runner_control_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test runner_status_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 43 passed and 1 ignored.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 54 passed and 1 ignored.
+
+## Next Recommended Development Slice
+
+### Phase B16: Unified Demo API Router
+
+Goal: compose the B10 market-data query route, B14 runner status route, and B15 runner control routes into one demoable in-memory API router backed by one shared store and one shared runner control handle.
 
 Recommended scope:
 
-- Add request/response DTOs for a finite fixture-run start operation.
-- Add read-only-safe mutation helpers that operate on an injected test/demo runner handle.
-- Add an explicit cancel route or helper for pre-start cancellation.
-- Keep production live acquisition, persistence, SQL integration, and long-running task supervision out of scope.
+- Add a single demo router builder for local MVP wiring, likely under `fdc-api` or `fdc-server` depending on final ownership.
+- Ensure `POST /runner/start-fixture`, `GET /runner/status`, and `GET /market-data/trades` all observe the same in-memory runner/store state.
+- Add an end-to-end router contract test that starts fixture data, checks status, then queries trades through the unified router.
+- Keep real listener binding, live network acquisition, persistence, SQL integration, and production daemon supervision out of scope.
 
 ## Later Work After B5
 
