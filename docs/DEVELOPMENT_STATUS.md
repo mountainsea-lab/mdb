@@ -585,18 +585,47 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test market_data_route_contract` exit 0, 4 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server -p fdc-api -p fdc-orchestrator -p fdc-storage` exit 0, 96 passed.
 
-## Next Recommended Development Slice
-
 ### Phase B12: Ignored Live Acquisition Smoke to MVP Store
 
-Goal: add a network-gated smoke path that collects a tiny bounded set of live Barter trades, writes them through the B11 runner/store path, and queries them through the B10 API route.
+Implemented as an ignored, network-gated contract test in `crates/fdc-api`.
+
+Completed capabilities:
+
+- Added an opt-in live smoke test that initializes Binance Spot public trade streams via `fdc-barter`.
+- Collects one live trade envelope with a bounded timeout.
+- Writes the live envelope through the B11 `run_barter_fixture_mvp_once` helper into a shared `QueryableMarketDataStore`.
+- Queries the shared store through the B10 in-memory API route and asserts a returned trade record.
+- Keeps default test runs offline because the live smoke is `#[ignore]` and gated by `FDC_BARTER_LIVE_SMOKE=1`.
+
+Contract tests:
+
+- `crates/fdc-api/tests/acquisition_api_mvp_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-28-fdc-live-acquisition-api-smoke-design.md`
+- `docs/superpowers/plans/2026-05-28-fdc-live-acquisition-api-smoke.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-api --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test acquisition_api_mvp_contract` exit 0, 2 passed and 1 ignored.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test market_data_route_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server -p fdc-barter` exit 0, 52 passed and 3 ignored.
+- Optional live command: `FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-api --test acquisition_api_mvp_contract ignored_live_smoke_writes_binance_trade_to_store_and_reads_it_through_api -- --ignored --nocapture`.
+
+## Next Recommended Development Slice
+
+### Phase B13: Bounded Application Runner Lifecycle
+
+Goal: add a deterministic application-runner lifecycle for finite acquisition/MVP-store/API demos without introducing production persistence or SQL.
 
 Recommended scope:
 
-- Keep the test ignored by default and gated behind an explicit environment variable.
-- Reuse existing `fdc-barter` live acquisition helpers and B11 store/API path.
-- Limit collection to a small N and bounded timeout.
-- Keep production lifecycle, persistence, SQL integration, and always-on network tests out of scope.
+- Add a bounded runner handle with explicit start/stop/cancel state transitions.
+- Keep runner tests offline with fixture envelopes and short deterministic tasks.
+- Surface readiness/lifecycle status through existing server/API state projections where appropriate.
+- Keep production storage runtime routing, SQL integration, and always-on network acquisition out of scope.
 
 ## Later Work After B5
 
