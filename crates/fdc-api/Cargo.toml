@@ -77,6 +77,7 @@ fdc-barter = { path = "../fdc-adapter/barter" }
 fdc-core = { path = "../fdc-core" }
 fdc-server = { path = "../fdc-server" }
 rust_decimal = { workspace = true }
+futures = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"
