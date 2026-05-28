@@ -8,6 +8,7 @@ pub mod app;
 pub mod components;
 pub mod config;
 pub mod mvp;
+pub mod runner;
 
 pub use app::{FdcServerApp, ServerLifecycleState};
 pub use components::{MarketDataOrchestratorResult, ServerComponents};
@@ -15,3 +16,4 @@ pub use config::{FdcServerConfig, ServerEnvironment};
 pub use mvp::{
     run_barter_fixture_mvp_once, BoundedMarketDataMvpResult, BoundedMarketDataMvpRunner,
 };
+pub use runner::{BoundedMarketDataRunnerHandle, BoundedRunnerFailure, BoundedRunnerState};

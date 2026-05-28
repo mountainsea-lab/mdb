@@ -16,3 +16,7 @@ fdc-core = { path = "../fdc-core" }
 fdc-storage = { path = "../fdc-storage" }
 fdc-orchestrator = { path = "../fdc-orchestrator" }
 fdc-barter = { path = "../fdc-adapter/barter" }
+
+[dev-dependencies]
+rust_decimal = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread"] }
