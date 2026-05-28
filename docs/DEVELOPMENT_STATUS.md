@@ -642,18 +642,46 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server` exit 0, 11 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server -p fdc-api -p fdc-storage` exit 0, 94 passed and 1 ignored.
 
-## Next Recommended Development Slice
-
 ### Phase B14: Runner Status API Projection
 
-Goal: expose bounded runner lifecycle state through API/server readiness projections without introducing production background runtime.
+Implemented in `crates/fdc-api`.
+
+Completed capabilities:
+
+- Extended `ApiAppState` with an optional shared `BoundedMarketDataRunnerHandle`.
+- Added serializable runner status projection types for configured state, lifecycle state, last result counts, and failure message.
+- Added `runner_status_response_from_state` pure helper.
+- Added bounded in-memory `GET /runner/status` route.
+- Kept runner mutation, background runtime, live acquisition, persistence, and SQL integration out of scope.
+
+Contract tests:
+
+- `crates/fdc-api/tests/runner_status_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-28-fdc-runner-status-api-projection-design.md`
+- `docs/superpowers/plans/2026-05-28-fdc-runner-status-api-projection.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-api --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test runner_status_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 38 passed and 1 ignored.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 49 passed and 1 ignored.
+
+## Next Recommended Development Slice
+
+### Phase B15: Bounded Runner Control API
+
+Goal: add explicit in-memory API controls for starting and cancelling bounded fixture runs without introducing production background runtime or live network acquisition.
 
 Recommended scope:
 
-- Add serializable runner status projection types in the API boundary.
-- Map `BoundedRunnerState`, last result counts, and failure message into a stable API-friendly shape.
-- Add pure helper tests and optionally an in-memory route for runner status.
-- Keep long-running task supervision, persistence, SQL integration, and live network acquisition out of scope.
+- Add request/response DTOs for a finite fixture-run start operation.
+- Add read-only-safe mutation helpers that operate on an injected test/demo runner handle.
+- Add an explicit cancel route or helper for pre-start cancellation.
+- Keep production live acquisition, persistence, SQL integration, and long-running task supervision out of scope.
 
 ## Later Work After B5
 
