@@ -614,18 +614,46 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server -p fdc-barter` exit 0, 52 passed and 3 ignored.
 - Optional live command: `FDC_BARTER_LIVE_SMOKE=1 cargo test -p fdc-api --test acquisition_api_mvp_contract ignored_live_smoke_writes_binance_trade_to_store_and_reads_it_through_api -- --ignored --nocapture`.
 
-## Next Recommended Development Slice
-
 ### Phase B13: Bounded Application Runner Lifecycle
 
-Goal: add a deterministic application-runner lifecycle for finite acquisition/MVP-store/API demos without introducing production persistence or SQL.
+Implemented in `crates/fdc-server`.
+
+Completed capabilities:
+
+- Added `BoundedMarketDataRunnerHandle` for fixture-only finite market-data MVP runs.
+- Added `BoundedRunnerState` with `Created`, `Running`, `Completed`, `Cancelled`, and `Failed` states.
+- Added deterministic pre-start cancellation and invalid transition validation.
+- Stored successful B11 MVP results and failure messages for later status projection work.
+- Kept production background tasks, live stream supervision, persistence, SQL integration, and API status routes out of scope.
+
+Contract tests:
+
+- `crates/fdc-server/tests/bounded_runner_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-28-fdc-bounded-application-runner-lifecycle-design.md`
+- `docs/superpowers/plans/2026-05-28-fdc-bounded-application-runner-lifecycle.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-server --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test bounded_runner_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server` exit 0, 11 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server -p fdc-api -p fdc-storage` exit 0, 94 passed and 1 ignored.
+
+## Next Recommended Development Slice
+
+### Phase B14: Runner Status API Projection
+
+Goal: expose bounded runner lifecycle state through API/server readiness projections without introducing production background runtime.
 
 Recommended scope:
 
-- Add a bounded runner handle with explicit start/stop/cancel state transitions.
-- Keep runner tests offline with fixture envelopes and short deterministic tasks.
-- Surface readiness/lifecycle status through existing server/API state projections where appropriate.
-- Keep production storage runtime routing, SQL integration, and always-on network acquisition out of scope.
+- Add serializable runner status projection types in the API boundary.
+- Map `BoundedRunnerState`, last result counts, and failure message into a stable API-friendly shape.
+- Add pure helper tests and optionally an in-memory route for runner status.
+- Keep long-running task supervision, persistence, SQL integration, and live network acquisition out of scope.
 
 ## Later Work After B5
 
