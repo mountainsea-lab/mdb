@@ -3,7 +3,7 @@
 Last updated: 2026-05-29
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`feat: add unified demo api router`)
+Latest checkpoint commit when this file was written: `HEAD` (`feat: add local demo flow helper`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -742,16 +742,53 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 47 passed and 1 ignored.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 58 passed and 1 ignored.
 
+### Phase B17: Local Demo Flow Helper
+
+Implemented in `crates/fdc-api/src/demo_flow.rs`.
+
+Completed capabilities:
+
+- Added `default_demo_flow_request` with deterministic BTCUSDT fixture input.
+- Added `run_demo_flow_once` for no-listener in-memory demo execution.
+- Added typed demo DTOs:
+  - `DemoFixtureTrade`
+  - `DemoFlowRequest`
+  - `DemoFlowSummary`
+- Exercised the B16 unified router through Axum/Tower `oneshot` calls rather than direct helper shortcuts.
+- Verified ready -> start-fixture -> status -> market-data query returns one typed summary.
+- Verified multiple fixture trades can be filtered by query symbol.
+- Preserved dependency boundaries: lower-level crates do not reference `fdc-api`.
+- Kept real listener binding, CLI/binary startup, live network acquisition, persistence, SQL integration, and production daemon supervision out of scope.
+
+Contract tests:
+
+- `crates/fdc-api/tests/demo_flow_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-29-fdc-local-demo-flow-helper-design.md`
+- `docs/superpowers/plans/2026-05-29-fdc-local-demo-flow-helper.md`
+
+Verification:
+
+- RED check: `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_flow_contract` failed before implementation with missing demo flow API symbols.
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-api --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_flow_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_router_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 52 passed and 1 ignored.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 63 passed and 1 ignored.
+
 ## Next Recommended Development Slice
 
-### Phase B17: Local Demo Entrypoint or Demo Documentation
+### Phase B18: Demo Documentation or Gated HTTP Demo Entrypoint
 
-Goal: make the B16 unified in-memory router easy to exercise from a local binary, example, or documented curl flow while keeping production service startup separate.
+Goal: make the B17 no-listener demo flow understandable and optionally runnable by humans outside tests, without turning it into production service startup.
 
 Recommended scope:
 
-- Decide whether B17 should be a no-listener example/test helper, a gated local HTTP demo binary, or documentation-first curl workflow.
-- Reuse `build_demo_router(state)` and B15 fixture JSON shape.
+- Option A: documentation-first guide that explains `run_demo_flow_once`, expected request/summary shape, and how it relates to B16 routes.
+- Option B: a gated local HTTP demo binary/example that starts `build_demo_router(state)` only behind an explicit demo command or env gate.
+- Prefer documentation first unless interactive HTTP testing is now needed.
 - Keep authentication, production middleware, persistence, SQL integration, live network acquisition, and daemon supervision out of scope unless a new design explicitly approves them.
 
 ## Later Work After B5
