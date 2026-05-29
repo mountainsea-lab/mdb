@@ -12,7 +12,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let router = build_demo_router(state);
     let listener = tokio::net::TcpListener::bind(addr).await?;
 
-    eprintln!("fdc demo API listening on http://{}", listener.local_addr()?);
+    eprintln!(
+        "fdc demo API listening on http://{}",
+        listener.local_addr()?
+    );
     axum::serve(listener, router).await?;
     Ok(())
 }
