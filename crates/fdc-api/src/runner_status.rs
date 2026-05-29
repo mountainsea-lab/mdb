@@ -39,6 +39,17 @@ pub fn runner_status_response_from_state(
     ApiResponse::success(runner_status_projection_from_state(state))
 }
 
+pub async fn runner_status_response_from_state_async(
+    state: &ApiAppState,
+) -> ApiResponse<ApiRunnerStatusProjection> {
+    if let Some(runner) = state.market_data_runner_control() {
+        let runner = runner.lock().await;
+        return ApiResponse::success(runner_status_projection_from_runner(&runner));
+    }
+
+    runner_status_response_from_state(state)
+}
+
 pub fn build_runner_status_router(state: ApiAppState) -> Router {
     Router::new()
         .route("/runner/status", get(runner_status_handler))
@@ -48,7 +59,7 @@ pub fn build_runner_status_router(state: ApiAppState) -> Router {
 async fn runner_status_handler(
     State(state): State<ApiAppState>,
 ) -> Json<ApiResponse<ApiRunnerStatusProjection>> {
-    Json(runner_status_response_from_state(&state))
+    Json(runner_status_response_from_state_async(&state).await)
 }
 
 fn runner_status_projection_from_state(state: &ApiAppState) -> ApiRunnerStatusProjection {

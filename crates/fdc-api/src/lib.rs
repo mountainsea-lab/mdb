@@ -5,6 +5,7 @@
 
 pub mod auth; // 认证和授权
 pub mod config; // API配置
+pub mod demo; // unified bounded demo API router
 pub mod errors; // API错误处理
 pub mod graphql; // GraphQL API实现
 pub mod grpc; // gRPC API实现
@@ -22,6 +23,7 @@ pub mod websocket; // WebSocket API实现 // API应用状态边界
 
 // 重新导出常用类型
 pub use config::ApiConfig;
+pub use demo::build_demo_router;
 pub use errors::{ApiError, ApiResult};
 pub use market_data::{
     build_market_data_router, query_market_data_trades, MarketDataTradeQueryParams,
@@ -33,7 +35,8 @@ pub use runner_control::{
     RunnerFixtureTradeInput, RunnerStartFixtureRequest,
 };
 pub use runner_status::{
-    build_runner_status_router, runner_status_response_from_state, ApiRunnerLastResultProjection,
+    build_runner_status_router, runner_status_response_from_state,
+    runner_status_response_from_state_async, ApiRunnerLastResultProjection,
     ApiRunnerLifecycleStatus, ApiRunnerStatusProjection,
 };
 pub use server::{ApiServer, ServerConfig};

@@ -115,7 +115,10 @@ async fn demo_router_runs_fixture_then_status_and_market_data_queries_share_stat
         .expect("status body should read");
     let status: ApiResponse<ApiRunnerStatusProjection> =
         serde_json::from_slice(&status_body).expect("status response should decode");
-    assert_eq!(status.data.state, fdc_api::ApiRunnerLifecycleStatus::Completed);
+    assert_eq!(
+        status.data.state,
+        fdc_api::ApiRunnerLifecycleStatus::Completed
+    );
     assert_eq!(
         status
             .data
@@ -145,7 +148,10 @@ async fn demo_router_runs_fixture_then_status_and_market_data_queries_share_stat
 
     assert_eq!(market_data.status, "success");
     assert_eq!(market_data.data.returned_records, 1);
-    assert_eq!(market_data.data.records[0].symbol.as_deref(), Some("BTCUSDT"));
+    assert_eq!(
+        market_data.data.records[0].symbol.as_deref(),
+        Some("BTCUSDT")
+    );
 }
 
 #[tokio::test]
@@ -171,7 +177,10 @@ async fn demo_router_cancel_route_uses_same_control_surface() {
         serde_json::from_slice(&body).expect("cancel response should decode");
 
     assert_eq!(cancel.status, "success");
-    assert_eq!(cancel.data.state, fdc_api::ApiRunnerLifecycleStatus::Cancelled);
+    assert_eq!(
+        cancel.data.state,
+        fdc_api::ApiRunnerLifecycleStatus::Cancelled
+    );
 }
 
 #[test]
