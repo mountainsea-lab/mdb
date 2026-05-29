@@ -1030,3 +1030,87 @@ When starting the next session:
 8. Use TDD for any implementation after the B8 design/spec is approved.
 9. Run the relevant verification baseline before committing, or document why a local dependency is unavailable.
 10. Update this file at the end of the session with completed work, verification evidence, pushed commit, and next recommended slice.
+
+## Session Checkpoint: Production Live Supervisor Enabled Mode
+
+Last updated: 2026-05-29 session checkpoint
+Checkpoint commit before this note: `feat: enable production live market data start`
+
+Current active work: production live supervisor enabled mode in `fdc-server`.
+
+Design and plan committed:
+
+- `docs/superpowers/specs/2026-05-29-fdc-production-live-supervisor-enabled-design.md`
+- `docs/superpowers/plans/2026-05-29-fdc-production-live-supervisor-enabled.md`
+
+Completed in code and committed:
+
+- `MarketDataSupervisor` state transitions:
+  - `try_start()`
+  - `complete(result)`
+  - `fail(message)`
+  - `status()`
+- Supervisor now rejects concurrent starts while already starting/running/stopping.
+- `fdc-server::market_data::service::start_live(...)` now supports enabled production live acquisition when `ServerRuntimeConfig.live_enabled == true`.
+- Production service migrated the proven live path from the `fdc-api` demo route:
+  - `init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())`
+  - `streams.select_all().map(public_trade_result_to_data_kind)`
+  - `collect_live_trade_envelopes(...)`
+  - `run_realtime_barter_envelope_stream(...)`
+- Because Barter stream types are not safe to hold across Axum's Send handler future, production service uses `tokio::task::spawn_blocking` plus a current-thread Tokio runtime for collection/write.
+- `POST /market-data/live/start` now calls the production service when live is enabled instead of always returning the disabled gate.
+- Added ignored enabled-config route test placeholder in `production_server_router_contract.rs`.
+
+Latest verification before stopping:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-server
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_server_router_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --bin fdc_server
+```
+
+Result:
+
+```text
+production_server_router_contract: 4 passed, 1 ignored
+fdc_server bin: 0 passed
+```
+
+Immediate resume steps:
+
+1. Add ignored/gated production live smoke test:
+   - file: `crates/fdc-server/tests/production_live_smoke.rs`
+   - test name: `ignored_production_live_start_writes_real_trades_and_query_reads_them`
+2. Verify default behavior:
+
+   ```bash
+   CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_live_smoke
+   ```
+
+   Expected: pass with 1 ignored.
+
+3. If public internet is available, run real production live smoke:
+
+   ```bash
+   FDC_LIVE_ENABLED=1 cargo test -p fdc-server --test production_live_smoke ignored_production_live_start_writes_real_trades_and_query_reads_them -- --ignored --nocapture
+   ```
+
+4. Optionally verify actual production HTTP server:
+
+   ```bash
+   FDC_LIVE_ENABLED=1 FDC_SERVER_ADDR=127.0.0.1:18083 cargo run -p fdc-server --bin fdc_server
+   curl -X POST http://127.0.0.1:18083/market-data/live/start \
+     -H 'content-type: application/json' \
+     -d '{"timeout_secs":20,"max_envelopes":20}'
+   curl 'http://127.0.0.1:18083/market-data/live/status'
+   curl 'http://127.0.0.1:18083/market-data/trades?limit=5'
+   ```
+
+5. Update this file with real production live smoke evidence and commit:
+
+   ```bash
+   rtk git add docs/DEVELOPMENT_STATUS.md
+   rtk git commit -m "docs: record production live supervisor enabled mode"
+   ```
+
+Next recommended development slice after production live smoke is verified: true background live runner plus `/market-data/live/stop`.
