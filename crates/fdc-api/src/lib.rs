@@ -6,6 +6,7 @@
 pub mod auth; // 认证和授权
 pub mod config; // API配置
 pub mod demo; // unified bounded demo API router
+pub mod demo_server; // local demo HTTP listener state helpers
 pub mod demo_flow; // no-listener local demo flow helper
 pub mod errors; // API错误处理
 pub mod graphql; // GraphQL API实现
@@ -25,6 +26,7 @@ pub mod websocket; // WebSocket API实现 // API应用状态边界
 // 重新导出常用类型
 pub use config::ApiConfig;
 pub use demo::build_demo_router;
+pub use demo_server::initialized_demo_app_state_with_control_runner;
 pub use demo_flow::{
     default_demo_flow_request, run_demo_flow_once, DemoFixtureTrade, DemoFlowRequest,
     DemoFlowSummary,
