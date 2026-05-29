@@ -117,3 +117,39 @@ async fn production_trade_query_reads_shared_store_after_fixture_ingest_helper()
     assert_eq!(json["status"], "success");
     assert_eq!(json["data"]["returned_records"], 2);
 }
+
+#[test]
+fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start() {
+    use fdc_server::market_data::{
+        model::{MarketDataLiveState, StartLiveMarketDataResponse},
+        supervisor::MarketDataSupervisor,
+    };
+
+    let supervisor = MarketDataSupervisor::new();
+    assert_eq!(supervisor.status().state, MarketDataLiveState::Idle);
+
+    supervisor
+        .try_start()
+        .expect("idle supervisor should start");
+    assert_eq!(supervisor.status().state, MarketDataLiveState::Starting);
+
+    let error = supervisor
+        .try_start()
+        .expect_err("concurrent start should be rejected");
+    assert!(error.to_string().contains("already starting"));
+
+    supervisor.complete(StartLiveMarketDataResponse {
+        state: MarketDataLiveState::Completed,
+        envelopes_received: 2,
+        storage_records_written: 2,
+        market_data_store_records: 2,
+    });
+
+    let status = supervisor.status();
+    assert_eq!(status.state, MarketDataLiveState::Completed);
+    assert_eq!(
+        status.last_result.as_ref().unwrap().storage_records_written,
+        2
+    );
+    assert!(status.failure_message.is_none());
+}
