@@ -1,18 +1,23 @@
+use std::{sync::Arc, time::Duration};
+
 use fdc_barter::{
-    BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
-    BarterMarketPayload, DataQualityFlags, TradePayload, TradeSide,
+    collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
+    init_binance_spot_public_trades, public_trade_result_to_data_kind, BarterIngestionEnvelope,
+    BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
+    DataQualityFlags, TradePayload, TradeSide,
 };
 use fdc_core::{
     types::{Price, Symbol, TimestampNs},
     Result,
 };
-use fdc_storage::{MarketDataQuery, StorageWriteRecord};
+use fdc_storage::{MarketDataQuery, QueryableMarketDataStore, StorageWriteRecord};
+use futures::{stream, StreamExt};
 use rust_decimal::Decimal;
 
 use crate::{
     market_data::model::{
         MarketDataLiveState, MarketDataTradeRecord, MarketDataTradesResponse,
-        StartLiveMarketDataResponse,
+        StartLiveMarketDataRequest, StartLiveMarketDataResponse,
     },
     run_realtime_barter_envelope_stream, ProductionServerState, RealtimeMarketDataMvpConfig,
 };
@@ -34,6 +39,44 @@ pub fn start_live_disabled(state: &ProductionServerState) -> (StartLiveMarketDat
         },
         "live market-data acquisition requires FDC_LIVE_ENABLED=1".to_string(),
     )
+}
+
+pub async fn start_live(
+    state: &ProductionServerState,
+    request: StartLiveMarketDataRequest,
+) -> std::result::Result<StartLiveMarketDataResponse, String> {
+    if !state.config().live_enabled {
+        let (_, message) = start_live_disabled(state);
+        return Err(message);
+    }
+
+    let supervisor = state.market_data_supervisor();
+    if let Err(error) = supervisor.try_start() {
+        let message = error.to_string();
+        supervisor.fail(message.clone());
+        return Err(message);
+    }
+
+    let timeout_secs = request
+        .timeout_secs
+        .unwrap_or(state.config().live_default_timeout_secs)
+        .max(1);
+    let max_envelopes = request
+        .max_envelopes
+        .unwrap_or(state.config().live_default_max_envelopes)
+        .max(1);
+    let store = state.market_data_store();
+
+    match run_live_collection_and_storage(store, timeout_secs, max_envelopes).await {
+        Ok(result) => {
+            supervisor.complete(result.clone());
+            Ok(result)
+        }
+        Err(message) => {
+            supervisor.fail(message.clone());
+            Err(message)
+        }
+    }
 }
 
 pub fn query_trades(
@@ -74,6 +117,102 @@ pub async fn ingest_test_trade(
         RealtimeMarketDataMvpConfig::default(),
     )
     .await?;
+
+    Ok(StartLiveMarketDataResponse {
+        state: MarketDataLiveState::Completed,
+        envelopes_received: summary.envelopes_received,
+        storage_records_written: summary.storage_records_written,
+        market_data_store_records: summary.market_data_store_records,
+    })
+}
+
+async fn run_live_collection_and_storage(
+    store: Arc<QueryableMarketDataStore>,
+    timeout_secs: u64,
+    max_envelopes: usize,
+) -> std::result::Result<StartLiveMarketDataResponse, String> {
+    tokio::task::spawn_blocking(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| format!("failed to create production live runner runtime: {error}"))?;
+
+        runtime.block_on(run_live_collection_and_storage_on_current_thread(
+            store,
+            timeout_secs,
+            max_envelopes,
+        ))
+    })
+    .await
+    .map_err(|error| format!("production live runner task failed to join: {error}"))?
+}
+
+async fn run_live_collection_and_storage_on_current_thread(
+    store: Arc<QueryableMarketDataStore>,
+    timeout_secs: u64,
+    max_envelopes: usize,
+) -> std::result::Result<StartLiveMarketDataResponse, String> {
+    eprintln!(
+        "fdc production live runner: starting Binance Spot public trades timeout_secs={timeout_secs} max_envelopes={max_envelopes}"
+    );
+
+    let streams = init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())
+        .await
+        .map_err(|error| {
+            eprintln!("fdc production live runner: failed to initialize stream: {error}");
+            format!("failed to initialize Binance Spot live stream: {error}")
+        })?;
+
+    let stream = streams.select_all().map(public_trade_result_to_data_kind);
+    let envelopes = match tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        collect_live_trade_envelopes("barter-binance-spot-live-trades", stream, max_envelopes),
+    )
+    .await
+    {
+        Ok(Ok(envelopes)) => envelopes,
+        Ok(Err(error)) => {
+            eprintln!("fdc production live runner: stream item error: {error}");
+            return Err(format!("failed while collecting live trades: {error}"));
+        }
+        Err(_) => {
+            eprintln!("fdc production live runner: timed out while collecting live trades");
+            return Err(format!(
+                "timed out after {timeout_secs}s while collecting live trades"
+            ));
+        }
+    };
+
+    eprintln!(
+        "fdc production live runner: collected {} live envelopes, writing to queryable store",
+        envelopes.len()
+    );
+
+    if envelopes.is_empty() {
+        return Err("live stream returned no trade envelopes".to_string());
+    }
+
+    let summary = run_realtime_barter_envelope_stream(
+        stream::iter(envelopes),
+        store,
+        RealtimeMarketDataMvpConfig {
+            runtime_window: Duration::from_secs(timeout_secs.max(1)),
+            idle_timeout: Duration::from_millis(100),
+            max_errors: 0,
+        },
+    )
+    .await
+    .map_err(|error| {
+        eprintln!("fdc production live runner: failed to write live envelopes: {error}");
+        format!("failed to write live envelopes: {error}")
+    })?;
+
+    eprintln!(
+        "fdc production live runner: completed envelopes_received={} storage_records_written={} market_data_store_records={}",
+        summary.envelopes_received,
+        summary.storage_records_written,
+        summary.market_data_store_records
+    );
 
     Ok(StartLiveMarketDataResponse {
         state: MarketDataLiveState::Completed,

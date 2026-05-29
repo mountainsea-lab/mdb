@@ -11,7 +11,7 @@ use crate::{
             LiveMarketDataStatusResponse, MarketDataTradesResponse, StartLiveMarketDataRequest,
             StartLiveMarketDataResponse,
         },
-        service::{live_status, query_trades, start_live_disabled},
+        service::{live_status, query_trades, start_live, start_live_disabled},
     },
     ProductionServerState,
 };
@@ -57,15 +57,34 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
 
 async fn start_live_handler(
     State(state): State<ProductionServerState>,
-    Json(_request): Json<StartLiveMarketDataRequest>,
+    Json(request): Json<StartLiveMarketDataRequest>,
 ) -> Json<ServerApiResponse<StartLiveMarketDataResponse>> {
     if !state.config().live_enabled {
         let (data, message) = start_live_disabled(&state);
         return Json(ServerApiResponse::error(data, message));
     }
 
-    let (data, message) = start_live_disabled(&state);
-    Json(ServerApiResponse::error(data, message))
+    match start_live(&state, request).await {
+        Ok(data) => Json(ServerApiResponse::success(data)),
+        Err(message) => {
+            let status = state.market_data_supervisor().status();
+            let data = StartLiveMarketDataResponse {
+                state: status.state,
+                envelopes_received: status
+                    .last_result
+                    .as_ref()
+                    .map(|result| result.envelopes_received)
+                    .unwrap_or(0),
+                storage_records_written: status
+                    .last_result
+                    .as_ref()
+                    .map(|result| result.storage_records_written)
+                    .unwrap_or(0),
+                market_data_store_records: state.market_data_store().record_count(),
+            };
+            Json(ServerApiResponse::error(data, message))
+        }
+    }
 }
 
 async fn live_status_handler(

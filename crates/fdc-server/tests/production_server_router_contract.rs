@@ -153,3 +153,57 @@ fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start
     );
     assert!(status.failure_message.is_none());
 }
+
+#[tokio::test]
+#[ignore = "enabled config may touch public internet; covered by production_live_smoke"]
+async fn production_live_start_with_enabled_config_updates_status_on_failure() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_LIVE_ENABLED", "1"),
+        ("FDC_LIVE_DEFAULT_TIMEOUT_SECS", "1"),
+        ("FDC_LIVE_DEFAULT_MAX_ENVELOPES", "1"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/start")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"timeout_secs":1,"max_envelopes":1}"#))
+                .expect("request should build"),
+        )
+        .await
+        .expect("start should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+
+    assert!(json["status"] == "success" || json["status"] == "error");
+    assert!(json["data"]["state"].is_string());
+
+    let status_response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/live/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("status should respond");
+    let status_body = axum::body::to_bytes(status_response.into_body(), usize::MAX)
+        .await
+        .expect("status body should read");
+    let status_json: serde_json::Value = serde_json::from_slice(&status_body).expect("json");
+
+    assert!(matches!(
+        status_json["data"]["state"].as_str().unwrap(),
+        "completed" | "failed"
+    ));
+}
