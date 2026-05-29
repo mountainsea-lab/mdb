@@ -894,12 +894,15 @@ Completed capabilities:
 - Updated MVP demo and acceptance docs to define the first MVP as realtime acquisition -> storage -> query.
 - Added a runnable demo API listener binary: `cargo run -p fdc-api --bin fdc_demo_api`.
 - Added `fdc_api::initialized_demo_app_state_with_control_runner` so the listener and tests share the initialized app/store/runner-control setup.
+- Added `POST /runner/start-live`, gated by `FDC_BARTER_LIVE_SMOKE=1`, to trigger real Binance Spot public trade acquisition and write results to the shared queryable store.
+- Added live acquisition progress logs for stream start, envelope collection, and storage completion.
 
 Contract tests:
 
 - `crates/fdc-server/tests/realtime_mvp_contract.rs`
 - `crates/fdc-api/tests/acquisition_api_mvp_contract.rs`
 - `crates/fdc-api/tests/demo_http_listener_contract.rs`
+- `crates/fdc-api/tests/live_runner_route_contract.rs`
 
 Important docs:
 
@@ -919,6 +922,10 @@ Verification:
   - `POST /runner/start-fixture` with 3 trades returned `state=completed`, `storage_records_written=3`, `market_data_store_records=3`.
   - `GET /runner/status` returned the same completed runner result.
   - `GET /market-data/trades?symbol=BTCUSDT&limit=10` returned 2 BTCUSDT records with trade IDs `http-demo-btc-1` and `http-demo-btc-2`.
+- Actual gated live HTTP verification on `http://127.0.0.1:18082` with `FDC_BARTER_LIVE_SMOKE=1 target/debug/fdc_demo_api`:
+  - `POST /runner/start-live` with `timeout_secs=20`, `max_envelopes=20` returned `status=success`, `started=true`, `envelopes_received=20`, `storage_records_written=20`, `market_data_store_records=20`.
+  - `GET /market-data/trades?limit=5` returned 5 real Binance Spot trade records across BTCUSDT/ETHUSDT.
+  - Service logs included `fdc live runner: starting Binance Spot public trades`, `collected 20 live envelopes`, and `completed envelopes_received=20 storage_records_written=20 market_data_store_records=20`.
 
 ## Next Recommended Development Slice
 
