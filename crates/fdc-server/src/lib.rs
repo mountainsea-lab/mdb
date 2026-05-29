@@ -7,6 +7,7 @@
 pub mod app;
 pub mod components;
 pub mod config;
+pub mod health;
 pub mod mvp;
 pub mod realtime;
 pub mod runner;
@@ -22,4 +23,6 @@ pub use realtime::{
     run_realtime_barter_envelope_stream, RealtimeMarketDataMvpConfig, RealtimeMarketDataMvpSummary,
 };
 pub use runner::{BoundedMarketDataRunnerHandle, BoundedRunnerFailure, BoundedRunnerState};
-pub use runtime::{ServerRuntimeConfig, ServerRuntimeEnvironment};
+pub use runtime::{
+    build_production_router, ProductionServerState, ServerRuntimeConfig, ServerRuntimeEnvironment,
+};
