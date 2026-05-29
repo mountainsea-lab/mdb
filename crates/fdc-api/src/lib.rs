@@ -6,12 +6,13 @@
 pub mod auth; // 认证和授权
 pub mod config; // API配置
 pub mod demo; // unified bounded demo API router
-pub mod demo_server; // local demo HTTP listener state helpers
 pub mod demo_flow; // no-listener local demo flow helper
+pub mod demo_server; // local demo HTTP listener state helpers
 pub mod errors; // API错误处理
 pub mod graphql; // GraphQL API实现
 pub mod grpc; // gRPC API实现
 pub mod handlers; // 请求处理器
+pub mod live_runner_control; // gated live market-data runner route
 pub mod market_data; // bounded market-data query route
 pub mod metrics; // API指标
 pub mod middleware; // 中间件
@@ -26,12 +27,16 @@ pub mod websocket; // WebSocket API实现 // API应用状态边界
 // 重新导出常用类型
 pub use config::ApiConfig;
 pub use demo::build_demo_router;
-pub use demo_server::initialized_demo_app_state_with_control_runner;
 pub use demo_flow::{
     default_demo_flow_request, run_demo_flow_once, DemoFixtureTrade, DemoFlowRequest,
     DemoFlowSummary,
 };
+pub use demo_server::initialized_demo_app_state_with_control_runner;
 pub use errors::{ApiError, ApiResult};
+pub use live_runner_control::{
+    build_live_runner_router, start_live_runner_from_state, LiveRunnerStartRequest,
+    LiveRunnerStartResponse,
+};
 pub use market_data::{
     build_market_data_router, query_market_data_trades, MarketDataTradeQueryParams,
     MarketDataTradeRecord, MarketDataTradesResponse,
