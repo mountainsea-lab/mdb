@@ -3,7 +3,7 @@
 Last updated: 2026-05-29
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`feat: add demo api listener entrypoint`)
+Latest checkpoint commit when this file was written: `HEAD` (`feat: add production server binary`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -927,16 +927,66 @@ Verification:
   - `GET /market-data/trades?limit=5` returned 5 real Binance Spot trade records across BTCUSDT/ETHUSDT.
   - Service logs included `fdc live runner: starting Binance Spot public trades`, `collected 20 live envelopes`, and `completed envelopes_received=20 storage_records_written=20 market_data_store_records=20`.
 
+### Production Server Runtime Slice
+
+Implemented in `crates/fdc-server/src/runtime`, `crates/fdc-server/src/health`, `crates/fdc-server/src/market_data`, and `crates/fdc-server/src/bin/fdc_server.rs`.
+
+Completed capabilities:
+
+- Added formal production startup entrypoint:
+
+  ```bash
+  cargo run -p fdc-server --bin fdc_server
+  ```
+
+- Added `ServerRuntimeConfig` and `ServerRuntimeEnvironment` with env/default parsing:
+  - `FDC_SERVER_ADDR`, default `127.0.0.1:18080`.
+  - `FDC_SERVER_ENV`, default `development`.
+  - `FDC_LIVE_ENABLED`, default disabled.
+  - `FDC_LIVE_DEFAULT_TIMEOUT_SECS`, default `30`.
+  - `FDC_LIVE_DEFAULT_MAX_ENVELOPES`, default `100`.
+- Added business-module layout under `fdc-server`:
+  - `runtime/config.rs`, `runtime/app.rs`, `runtime/shutdown.rs`.
+  - `health/model.rs`, `health/service.rs`, `health/router.rs`.
+  - `market_data/model.rs`, `market_data/service.rs`, `market_data/router.rs`, `market_data/supervisor.rs`.
+- Added production HTTP routes:
+  - `GET /health`.
+  - `GET /ready`.
+  - `POST /market-data/live/start`.
+  - `GET /market-data/live/status`.
+  - `GET /market-data/trades`.
+- Added disabled-by-default live acquisition gate for the production route with explicit `FDC_LIVE_ENABLED=1` message.
+- Added shared in-memory market-data store in `ProductionServerState` and verified query after test ingestion.
+- Added graceful shutdown helper for the production binary.
+
+Contract tests:
+
+- `crates/fdc-server/tests/runtime_config_contract.rs`
+- `crates/fdc-server/tests/production_server_router_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-29-fdc-production-server-runtime-design.md`
+- `docs/superpowers/plans/2026-05-29-fdc-production-server-runtime.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test runtime_config_contract` exit 0, 3 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_server_router_contract` exit 0, 3 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --bin fdc_server` exit 0, 0 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server` exit 0, 19 passed.
+
 ## Next Recommended Development Slice
 
-### Phase B21: Real Live Stream HTTP Runner
+### Phase B22: Production Live Supervisor Enabled Mode
 
 Recommended scope:
 
-- Add an HTTP route or background lifecycle command that starts `run_realtime_barter_envelope_stream` from a real Binance Spot stream.
-- Keep the mode gated by an explicit env var or request flag so default local/CI flows stay offline.
-- Add cancellation/status for the live runner so a long-running stream can be stopped safely.
-- Reuse existing query routes and storage; do not duplicate mapping or storage logic.
+- Move the already validated real Binance live route behavior from `fdc-api` demo route into `fdc-server::market_data::service`.
+- Add `FDC_LIVE_ENABLED=1` production live start support behind `/market-data/live/start`.
+- Update `MarketDataSupervisor` to track starting/running/completed/failed states and prevent concurrent starts.
+- Add explicit stop route behavior for active/background live runs.
+- Keep default tests offline; add ignored live HTTP smoke for `fdc-server --bin fdc_server`.
 
 ### Phase B20b: Warning Cleanup by Crate
 
