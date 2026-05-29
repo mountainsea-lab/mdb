@@ -3,7 +3,7 @@
 Last updated: 2026-05-29
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`feat: add local demo flow helper`)
+Latest checkpoint commit when this file was written: `HEAD` (`docs: add first mvp demo guide`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -778,18 +778,48 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 52 passed and 1 ignored.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 63 passed and 1 ignored.
 
+### Phase B18: MVP Demo Documentation
+
+Implemented in `docs/mvp/first-mvp-demo.md`, with a documentation contract in `crates/fdc-api/tests/demo_documentation_contract.rs`.
+
+Completed capabilities:
+
+- Added a human-facing first MVP demo guide.
+- Documented the no-listener, in-memory, deterministic MVP scope.
+- Documented the exact demo-flow verification command.
+- Documented programmatic usage of `default_demo_flow_request` and `run_demo_flow_once`.
+- Documented default fixture request shape and expected `DemoFlowSummary` highlights.
+- Mapped B16 routes to B17 summary fields.
+- Documented optional live smoke validation as outside the default MVP.
+- Added a documentation contract test to keep the guide anchored to real APIs, routes, and scope boundaries.
+
+Contract tests:
+
+- `crates/fdc-api/tests/demo_documentation_contract.rs`
+
+Important docs:
+
+- `docs/mvp/first-mvp-demo.md`
+- `docs/superpowers/specs/2026-05-29-fdc-mvp-demo-documentation-design.md`
+- `docs/superpowers/plans/2026-05-29-fdc-mvp-demo-documentation.md`
+
+Verification:
+
+- RED check: `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_documentation_contract` failed before implementation because `docs/mvp/first-mvp-demo.md` did not exist.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_documentation_contract` exit 0, 2 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_flow_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_router_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 54 passed and 1 ignored.
+
 ## Next Recommended Development Slice
 
-### Phase B18: Demo Documentation or Gated HTTP Demo Entrypoint
+### Phase B19: MVP Acceptance Report or Gated HTTP Demo Entrypoint
 
-Goal: make the B17 no-listener demo flow understandable and optionally runnable by humans outside tests, without turning it into production service startup.
+Recommended decision:
 
-Recommended scope:
-
-- Option A: documentation-first guide that explains `run_demo_flow_once`, expected request/summary shape, and how it relates to B16 routes.
-- Option B: a gated local HTTP demo binary/example that starts `build_demo_router(state)` only behind an explicit demo command or env gate.
-- Prefer documentation first unless interactive HTTP testing is now needed.
-- Keep authentication, production middleware, persistence, SQL integration, live network acquisition, and daemon supervision out of scope unless a new design explicitly approves them.
+- If the goal is to declare the first internal MVP complete, add a short MVP acceptance report that summarizes B1-B18, lists verification commands, and freezes current non-goals.
+- If the goal is an interactive external demo, add a gated local HTTP demo entrypoint that reuses `build_demo_router` without changing route behavior.
+- Prefer the MVP acceptance report first, because B18 already makes the internal no-listener MVP reproducible.
 
 ## Later Work After B5
 
