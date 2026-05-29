@@ -6,6 +6,7 @@
 pub mod auth; // 认证和授权
 pub mod config; // API配置
 pub mod demo; // unified bounded demo API router
+pub mod demo_flow; // no-listener local demo flow helper
 pub mod errors; // API错误处理
 pub mod graphql; // GraphQL API实现
 pub mod grpc; // gRPC API实现
@@ -24,6 +25,10 @@ pub mod websocket; // WebSocket API实现 // API应用状态边界
 // 重新导出常用类型
 pub use config::ApiConfig;
 pub use demo::build_demo_router;
+pub use demo_flow::{
+    default_demo_flow_request, run_demo_flow_once, DemoFixtureTrade, DemoFlowRequest,
+    DemoFlowSummary,
+};
 pub use errors::{ApiError, ApiResult};
 pub use market_data::{
     build_market_data_router, query_market_data_trades, MarketDataTradeQueryParams,

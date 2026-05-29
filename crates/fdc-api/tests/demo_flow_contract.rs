@@ -1,8 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use fdc_api::{
-    default_demo_flow_request, run_demo_flow_once, DemoFixtureTrade, DemoFlowRequest,
-};
+use fdc_api::{default_demo_flow_request, run_demo_flow_once, DemoFixtureTrade, DemoFlowRequest};
 
 #[test]
 fn default_demo_flow_request_is_deterministic_btcusdt_fixture() {
@@ -42,7 +40,10 @@ async fn demo_flow_default_request_returns_ready_completed_and_queryable_trade()
         1
     );
     assert_eq!(summary.market_data.returned_records, 1);
-    assert_eq!(summary.market_data.records[0].symbol.as_deref(), Some("BTCUSDT"));
+    assert_eq!(
+        summary.market_data.records[0].symbol.as_deref(),
+        Some("BTCUSDT")
+    );
 }
 
 #[tokio::test]
@@ -78,7 +79,10 @@ async fn demo_flow_can_query_one_symbol_from_multiple_fixture_trades() {
         2
     );
     assert_eq!(summary.market_data.returned_records, 1);
-    assert_eq!(summary.market_data.records[0].symbol.as_deref(), Some("ETHUSDT"));
+    assert_eq!(
+        summary.market_data.records[0].symbol.as_deref(),
+        Some("ETHUSDT")
+    );
 }
 
 #[tokio::test]
