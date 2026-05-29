@@ -10,6 +10,7 @@ pub mod config;
 pub mod mvp;
 pub mod realtime;
 pub mod runner;
+pub mod runtime;
 
 pub use app::{FdcServerApp, ServerLifecycleState};
 pub use components::{MarketDataOrchestratorResult, ServerComponents};
@@ -21,3 +22,4 @@ pub use realtime::{
     run_realtime_barter_envelope_stream, RealtimeMarketDataMvpConfig, RealtimeMarketDataMvpSummary,
 };
 pub use runner::{BoundedMarketDataRunnerHandle, BoundedRunnerFailure, BoundedRunnerState};
+pub use runtime::{ServerRuntimeConfig, ServerRuntimeEnvironment};
