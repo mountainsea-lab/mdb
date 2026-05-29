@@ -25,5 +25,6 @@ pub use realtime::{
 };
 pub use runner::{BoundedMarketDataRunnerHandle, BoundedRunnerFailure, BoundedRunnerState};
 pub use runtime::{
-    build_production_router, ProductionServerState, ServerRuntimeConfig, ServerRuntimeEnvironment,
+    build_production_router, shutdown_signal, ProductionServerState, ServerRuntimeConfig,
+    ServerRuntimeEnvironment,
 };
