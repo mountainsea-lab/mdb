@@ -3,7 +3,7 @@
 Last updated: 2026-05-29
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`docs: add post-mvp stabilization baseline`)
+Latest checkpoint commit when this file was written: `HEAD` (`test: verify realtime mvp data is queryable through api`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -878,11 +878,53 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_documentation_contract` exit 0, 2 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 58 passed and 1 ignored.
 
+### Realtime Market Data MVP Scope Reset
+
+Implemented in `crates/fdc-server/src/realtime.rs`, with API-facing validation in `crates/fdc-api/tests/acquisition_api_mvp_contract.rs`.
+
+Completed capabilities:
+
+- Paused warning cleanup and reset the MVP target to realtime market data acquisition -> storage -> query.
+- Added `fdc_server::RealtimeMarketDataMvpConfig` for runtime-window and idle-timeout bounded stream processing.
+- Added `fdc_server::RealtimeMarketDataMvpSummary` with observed envelope, pipeline, storage, queryable-record, and timestamp counts.
+- Added `fdc_server::run_realtime_barter_envelope_stream`, which consumes a stream of `BarterIngestionEnvelope` values until the runtime/idle boundary and does not stop after exactly one record.
+- Added offline realtime contract tests proving multiple live-style events are written and queryable.
+- Added API-facing realtime contract coverage proving data written by the realtime runner is returned through `/market-data/trades`.
+- Updated ignored live smoke semantics so real Binance Spot validation remains opt-in with `FDC_BARTER_LIVE_SMOKE=1` and asserts at least one real queryable record, not exactly one.
+- Updated MVP demo and acceptance docs to define the first MVP as realtime acquisition -> storage -> query.
+
+Contract tests:
+
+- `crates/fdc-server/tests/realtime_mvp_contract.rs`
+- `crates/fdc-api/tests/acquisition_api_mvp_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-29-fdc-realtime-market-data-mvp-design.md`
+- `docs/superpowers/plans/2026-05-29-fdc-realtime-market-data-mvp.md`
+- `docs/mvp/first-mvp-demo.md`
+- `docs/mvp/first-mvp-acceptance-report.md`
+
+Verification:
+
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test realtime_mvp_contract` exit 0, 2 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server` exit 0, 13 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test acquisition_api_mvp_contract` exit 0, 3 passed and 1 ignored.
+
 ## Next Recommended Development Slice
+
+### Phase B21: Realtime MVP Interactive HTTP Demo
+
+Recommended scope:
+
+- Add a gated local HTTP demo entrypoint that starts the realtime runner and exposes the existing query routes.
+- Reuse `build_demo_router` and `run_realtime_barter_envelope_stream`; do not duplicate mapping or storage logic.
+- Keep live network mode explicitly gated, for example with `FDC_BARTER_LIVE_SMOKE=1` or a demo-specific env var.
+- Add lifecycle/cancellation controls only as far as needed for demo safety.
 
 ### Phase B20b: Warning Cleanup by Crate
 
-Recommended scope:
+Warning cleanup is intentionally paused until the realtime MVP path is accepted. When resumed, suggested scope remains:
 
 - Start with one crate only, preferably `fdc-wasm` because it appears first in the current warning baseline.
 - Remove unused imports, unused variables, and unnecessary mutability only when behavior is clearly unaffected.
