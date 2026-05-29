@@ -1,9 +1,9 @@
 # Development Status
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`feat: add bounded runner control api`)
+Latest checkpoint commit when this file was written: `HEAD` (`feat: add unified demo api router`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -707,18 +707,52 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 43 passed and 1 ignored.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 54 passed and 1 ignored.
 
-## Next Recommended Development Slice
-
 ### Phase B16: Unified Demo API Router
 
-Goal: compose the B10 market-data query route, B14 runner status route, and B15 runner control routes into one demoable in-memory API router backed by one shared store and one shared runner control handle.
+Implemented in `crates/fdc-api/src/demo.rs`.
+
+Completed capabilities:
+
+- Added `build_demo_router(state)` for in-memory bounded MVP demos.
+- Combined typed readiness, runner status, runner control, and market-data query routes into one shared-state Axum router.
+- Verified `POST /runner/start-fixture` writes records that are immediately readable through `GET /market-data/trades` on the same demo router.
+- Verified `GET /runner/status` observes the mutable B15 control handle when present, so start/status/query use the same runner state.
+- Verified `POST /runner/cancel` works through the unified router for a fresh created runner.
+- Preserved dependency boundaries: lower-level crates do not reference `fdc-api`.
+- Kept real listener binding, live network acquisition, persistence, SQL integration, and production daemon supervision out of scope.
+
+Contract tests:
+
+- `crates/fdc-api/tests/demo_router_contract.rs`
+
+Important docs:
+
+- `docs/superpowers/specs/2026-05-29-fdc-unified-demo-api-router-design.md`
+- `docs/superpowers/plans/2026-05-29-fdc-unified-demo-api-router.md`
+
+Verification:
+
+- RED check: `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_router_contract` failed before implementation with missing `build_demo_router`.
+- Root-cause fix during implementation: runner status route now prefers the B15 mutable control handle when present; otherwise it falls back to the B14 read-only handle.
+- `CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-api --check` exit 0.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_router_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test runner_control_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test runner_status_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test market_data_route_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 47 passed and 1 ignored.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api -p fdc-server` exit 0, 58 passed and 1 ignored.
+
+## Next Recommended Development Slice
+
+### Phase B17: Local Demo Entrypoint or Demo Documentation
+
+Goal: make the B16 unified in-memory router easy to exercise from a local binary, example, or documented curl flow while keeping production service startup separate.
 
 Recommended scope:
 
-- Add a single demo router builder for local MVP wiring, likely under `fdc-api` or `fdc-server` depending on final ownership.
-- Ensure `POST /runner/start-fixture`, `GET /runner/status`, and `GET /market-data/trades` all observe the same in-memory runner/store state.
-- Add an end-to-end router contract test that starts fixture data, checks status, then queries trades through the unified router.
-- Keep real listener binding, live network acquisition, persistence, SQL integration, and production daemon supervision out of scope.
+- Decide whether B17 should be a no-listener example/test helper, a gated local HTTP demo binary, or documentation-first curl workflow.
+- Reuse `build_demo_router(state)` and B15 fixture JSON shape.
+- Keep authentication, production middleware, persistence, SQL integration, live network acquisition, and daemon supervision out of scope unless a new design explicitly approves them.
 
 ## Later Work After B5
 
