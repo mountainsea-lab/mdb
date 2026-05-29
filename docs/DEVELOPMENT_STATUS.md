@@ -3,7 +3,7 @@
 Last updated: 2026-05-29
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`docs: add first mvp demo guide`)
+Latest checkpoint commit when this file was written: `HEAD` (`docs: add first mvp acceptance report`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -811,15 +811,52 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_router_contract` exit 0, 4 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 54 passed and 1 ignored.
 
+### Phase B19: MVP Acceptance Report
+
+Implemented in `docs/mvp/first-mvp-acceptance-report.md`, with a documentation contract in `crates/fdc-api/tests/mvp_acceptance_report_contract.rs`.
+
+Completed capabilities:
+
+- Declared the first internal MVP accepted.
+- Froze the accepted MVP as a no-listener, in-memory market-data demo.
+- Summarized included capabilities from Barter fixture models through API-readable market-data records.
+- Listed exact verification commands and expected pass counts.
+- Linked the first MVP demo guide.
+- Froze non-goals: persistence, SQL integration, auth, production daemon supervision, default live network acquisition, and performance claims.
+- Listed residual risks and recommended post-MVP tracks.
+- Added a documentation contract test to keep the acceptance report anchored to real APIs, commands, and scope boundaries.
+
+Contract tests:
+
+- `crates/fdc-api/tests/mvp_acceptance_report_contract.rs`
+
+Important docs:
+
+- `docs/mvp/first-mvp-acceptance-report.md`
+- `docs/mvp/first-mvp-demo.md`
+- `docs/superpowers/specs/2026-05-29-fdc-mvp-acceptance-report-design.md`
+- `docs/superpowers/plans/2026-05-29-fdc-mvp-acceptance-report.md`
+
+Verification:
+
+- RED check: `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test mvp_acceptance_report_contract` failed before implementation because `docs/mvp/first-mvp-acceptance-report.md` did not exist.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test mvp_acceptance_report_contract` exit 0, 2 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_documentation_contract` exit 0, 2 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_flow_contract` exit 0, 5 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_router_contract` exit 0, 4 passed.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api` exit 0, 56 passed and 1 ignored.
+
 ## Next Recommended Development Slice
 
-### Phase B19: MVP Acceptance Report or Gated HTTP Demo Entrypoint
+### Phase B20: Choose Post-MVP Track
 
-Recommended decision:
+Recommended options:
 
-- If the goal is to declare the first internal MVP complete, add a short MVP acceptance report that summarizes B1-B18, lists verification commands, and freezes current non-goals.
-- If the goal is an interactive external demo, add a gated local HTTP demo entrypoint that reuses `build_demo_router` without changing route behavior.
-- Prefer the MVP acceptance report first, because B18 already makes the internal no-listener MVP reproducible.
+1. `B20: Gated Local HTTP Demo Entrypoint` if the next audience needs interactive curl/browser testing.
+2. `B20: Stabilization Cleanup` if the next goal is hardening before broader feature work.
+3. `B20: Persistence Boundary` if the next product capability should move beyond in-memory demo storage.
+
+Recommendation: choose `B20: Stabilization Cleanup` before adding more features, unless an external demo is urgently needed.
 
 ## Later Work After B5
 
