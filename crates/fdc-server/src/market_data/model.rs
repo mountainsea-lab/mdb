@@ -1,0 +1,50 @@
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarketDataLiveState {
+    Idle,
+    Starting,
+    Running,
+    Completed,
+    Stopping,
+    Stopped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartLiveMarketDataRequest {
+    pub timeout_secs: Option<u64>,
+    pub max_envelopes: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StartLiveMarketDataResponse {
+    pub state: MarketDataLiveState,
+    pub envelopes_received: usize,
+    pub storage_records_written: usize,
+    pub market_data_store_records: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveMarketDataStatusResponse {
+    pub state: MarketDataLiveState,
+    pub last_result: Option<StartLiveMarketDataResponse>,
+    pub failure_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataTradesResponse {
+    pub returned_records: usize,
+    pub records: Vec<MarketDataTradeRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataTradeRecord {
+    pub key: String,
+    pub symbol: Option<String>,
+    pub kind: Option<String>,
+    pub source: Option<String>,
+    pub payload: Value,
+}

@@ -8,6 +8,7 @@ pub mod app;
 pub mod components;
 pub mod config;
 pub mod health;
+pub mod market_data;
 pub mod mvp;
 pub mod realtime;
 pub mod runner;
