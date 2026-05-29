@@ -3,7 +3,7 @@
 Last updated: 2026-05-29
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`test: verify realtime mvp data is queryable through api`)
+Latest checkpoint commit when this file was written: `HEAD` (`feat: add demo api listener entrypoint`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -892,11 +892,14 @@ Completed capabilities:
 - Added API-facing realtime contract coverage proving data written by the realtime runner is returned through `/market-data/trades`.
 - Updated ignored live smoke semantics so real Binance Spot validation remains opt-in with `FDC_BARTER_LIVE_SMOKE=1` and asserts at least one real queryable record, not exactly one.
 - Updated MVP demo and acceptance docs to define the first MVP as realtime acquisition -> storage -> query.
+- Added a runnable demo API listener binary: `cargo run -p fdc-api --bin fdc_demo_api`.
+- Added `fdc_api::initialized_demo_app_state_with_control_runner` so the listener and tests share the initialized app/store/runner-control setup.
 
 Contract tests:
 
 - `crates/fdc-server/tests/realtime_mvp_contract.rs`
 - `crates/fdc-api/tests/acquisition_api_mvp_contract.rs`
+- `crates/fdc-api/tests/demo_http_listener_contract.rs`
 
 Important docs:
 
@@ -910,17 +913,23 @@ Verification:
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test realtime_mvp_contract` exit 0, 2 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server` exit 0, 13 passed.
 - `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test acquisition_api_mvp_contract` exit 0, 3 passed and 1 ignored.
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test demo_http_listener_contract` exit 0, 1 passed.
+- Actual local HTTP verification on `http://127.0.0.1:18080` with `target/debug/fdc_demo_api`:
+  - `GET /ready` returned `status=success`, `data.status=ready`, `server_lifecycle_state=initialized`.
+  - `POST /runner/start-fixture` with 3 trades returned `state=completed`, `storage_records_written=3`, `market_data_store_records=3`.
+  - `GET /runner/status` returned the same completed runner result.
+  - `GET /market-data/trades?symbol=BTCUSDT&limit=10` returned 2 BTCUSDT records with trade IDs `http-demo-btc-1` and `http-demo-btc-2`.
 
 ## Next Recommended Development Slice
 
-### Phase B21: Realtime MVP Interactive HTTP Demo
+### Phase B21: Real Live Stream HTTP Runner
 
 Recommended scope:
 
-- Add a gated local HTTP demo entrypoint that starts the realtime runner and exposes the existing query routes.
-- Reuse `build_demo_router` and `run_realtime_barter_envelope_stream`; do not duplicate mapping or storage logic.
-- Keep live network mode explicitly gated, for example with `FDC_BARTER_LIVE_SMOKE=1` or a demo-specific env var.
-- Add lifecycle/cancellation controls only as far as needed for demo safety.
+- Add an HTTP route or background lifecycle command that starts `run_realtime_barter_envelope_stream` from a real Binance Spot stream.
+- Keep the mode gated by an explicit env var or request flag so default local/CI flows stay offline.
+- Add cancellation/status for the live runner so a long-running stream can be stopped safely.
+- Reuse existing query routes and storage; do not duplicate mapping or storage logic.
 
 ### Phase B20b: Warning Cleanup by Crate
 
