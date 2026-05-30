@@ -263,6 +263,22 @@ async fn production_live_fake_background_start_stop_updates_status() {
 }
 
 #[tokio::test]
+async fn production_live_autostart_does_not_run_when_disabled_by_default() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    );
+
+    state
+        .start_live_autostart_if_enabled()
+        .await
+        .expect("disabled autostart should be ok");
+    assert_eq!(
+        state.market_data_supervisor().status().state,
+        fdc_server::market_data::model::MarketDataLiveState::Idle
+    );
+}
+
+#[tokio::test]
 #[ignore = "enabled config may touch public internet; covered by production_live_smoke"]
 async fn production_live_start_with_enabled_config_updates_status_on_failure() {
     let config = ServerRuntimeConfig::from_env_pairs([

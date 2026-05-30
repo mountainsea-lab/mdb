@@ -41,6 +41,22 @@ impl ProductionServerState {
     pub async fn ingest_test_trade(&self, symbol: &str, trade_id: &str) -> Result<()> {
         ingest_test_trade(self, symbol, trade_id).await.map(|_| ())
     }
+
+    pub async fn start_live_autostart_if_enabled(&self) -> Result<()> {
+        if !(self.config.live_enabled && self.config.live_autostart) {
+            return Ok(());
+        }
+        crate::market_data::service::start_background_live(
+            self,
+            crate::market_data::model::StartLiveMarketDataRequest {
+                timeout_secs: None,
+                max_envelopes: None,
+            },
+        )
+        .await
+        .map(|_| ())
+        .map_err(fdc_core::error::Error::internal)
+    }
 }
 
 pub fn build_production_router(state: ProductionServerState) -> Router {

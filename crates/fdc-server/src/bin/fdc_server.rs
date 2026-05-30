@@ -7,6 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = ServerRuntimeConfig::from_env()?;
     let bind_addr = config.bind_addr;
     let state = ProductionServerState::new(config);
+    state.start_live_autostart_if_enabled().await?;
     let router = build_production_router(state);
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
 

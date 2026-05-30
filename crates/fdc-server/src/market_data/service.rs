@@ -46,18 +46,26 @@ pub async fn start_live(
     state: &ProductionServerState,
     request: StartLiveMarketDataRequest,
 ) -> std::result::Result<StartLiveMarketDataResponse, String> {
+    start_background_live(state, request).await
+}
+
+pub async fn start_background_live(
+    state: &ProductionServerState,
+    request: StartLiveMarketDataRequest,
+) -> std::result::Result<StartLiveMarketDataResponse, String> {
     if !state.config().live_enabled {
         let (_, message) = start_live_disabled(state);
         return Err(message);
     }
 
+    let subscriptions = vec![
+        "binance_spot:BTCUSDT:public_trades".to_string(),
+        "binance_spot:ETHUSDT:public_trades".to_string(),
+    ];
     let supervisor = state.market_data_supervisor();
-    if let Err(error) = supervisor.try_start() {
-        let message = error.to_string();
-        supervisor.fail(message.clone());
-        return Err(message);
-    }
-
+    let task_id = supervisor
+        .start_background(subscriptions)
+        .map_err(|error| error.to_string())?;
     let timeout_secs = request
         .timeout_secs
         .unwrap_or(state.config().live_default_timeout_secs)
@@ -67,17 +75,28 @@ pub async fn start_live(
         .unwrap_or(state.config().live_default_max_envelopes)
         .max(1);
     let store = state.market_data_store();
+    let supervisor_for_task = state.market_data_supervisor();
 
-    match run_live_collection_and_storage(store, timeout_secs, max_envelopes).await {
-        Ok(result) => {
-            supervisor.complete(result.clone());
-            Ok(result)
+    tokio::spawn(async move {
+        if let Err(message) = run_background_live_collection(
+            supervisor_for_task.clone(),
+            store,
+            timeout_secs,
+            max_envelopes,
+        )
+        .await
+        {
+            supervisor_for_task.fail(message);
         }
-        Err(message) => {
-            supervisor.fail(message.clone());
-            Err(message)
-        }
-    }
+    });
+
+    Ok(StartLiveMarketDataResponse {
+        state: MarketDataLiveState::Running,
+        task_id: Some(task_id),
+        envelopes_received: 0,
+        storage_records_written: 0,
+        market_data_store_records: state.market_data_store().record_count(),
+    })
 }
 
 pub fn stop_live(state: &ProductionServerState) -> StopLiveMarketDataResponse {
@@ -178,6 +197,31 @@ pub async fn ingest_test_trade(
         storage_records_written: summary.storage_records_written,
         market_data_store_records: summary.market_data_store_records,
     })
+}
+
+async fn run_background_live_collection(
+    supervisor: Arc<crate::market_data::supervisor::MarketDataSupervisor>,
+    store: Arc<QueryableMarketDataStore>,
+    timeout_secs: u64,
+    max_envelopes: usize,
+) -> std::result::Result<(), String> {
+    while !supervisor.stop_requested() {
+        let before = store.record_count();
+        let result =
+            run_live_collection_and_storage(store.clone(), timeout_secs, max_envelopes).await?;
+        let after = store.record_count();
+        supervisor.record_progress(
+            result.envelopes_received,
+            result.storage_records_written,
+            after,
+            Some(TimestampNs::now().as_nanos().max(0) as u64),
+        );
+        if after == before && supervisor.stop_requested() {
+            break;
+        }
+    }
+    supervisor.stopped("requested");
+    Ok(())
 }
 
 async fn run_live_collection_and_storage(
