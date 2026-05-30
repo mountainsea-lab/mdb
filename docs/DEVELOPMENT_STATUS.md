@@ -1093,3 +1093,57 @@ Real production live smoke evidence:
 Known warnings remain from older crates (`fdc-wasm`, `fdc-types`, `fdc-storage`, `fdc-ingestion`) and match the existing post-MVP warning-cleanup backlog.
 
 Next recommended development slice: true background live runner plus `/market-data/live/stop`.
+
+## Session Checkpoint: Production Background Live Runner and Autostart
+
+Last updated: 2026-05-30 implementation checkpoint
+Checkpoint commit before this note: `feat: add production background live autostart`
+
+Current active work: production background live runner and autostart in `fdc-server`.
+
+Design and plan committed:
+
+- `docs/superpowers/specs/2026-05-30-fdc-production-background-live-runner-design.md`
+- `docs/superpowers/plans/2026-05-30-fdc-production-background-live-runner.md`
+
+Completed in code:
+
+- Added `FDC_LIVE_AUTOSTART` runtime config, default false.
+- Extended live status DTOs with task id, timestamps, stop reason, subscriptions, last record timestamp, and cumulative counters.
+- Extended `MarketDataSupervisor` with background task reservation, progress recording, stop requests, stopped transition, and status snapshots.
+- Added `POST /market-data/live/stop` and idempotent inactive stop behavior.
+- Added offline fake background runner helper for route/supervisor contract tests.
+- Changed enabled `POST /market-data/live/start` to spawn a background runner and return promptly with `state=running`.
+- Added `ProductionServerState::start_live_autostart_if_enabled()` and wired `fdc_server` binary to call it before serving.
+- Added ignored/gated background live smoke test:
+  - file: `crates/fdc-server/tests/production_background_live_smoke.rs`
+  - test name: `ignored_background_live_autostart_writes_trades_and_stop_finishes`
+
+Default verification on 2026-05-30:
+
+```bash
+rtk cargo fmt --package fdc-server --check
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test runtime_config_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_server_router_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_background_live_smoke
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server
+```
+
+Result:
+
+```text
+runtime_config_contract: 3 passed
+production_server_router_contract: 8 passed, 1 ignored
+production_background_live_smoke default: 0 passed, 1 ignored
+fdc-server package: 24 passed, 3 ignored
+```
+
+Optional real background smoke command:
+
+```bash
+FDC_LIVE_ENABLED=1 FDC_LIVE_AUTOSTART=1 cargo test -p fdc-server --test production_background_live_smoke ignored_background_live_autostart_writes_trades_and_stop_finishes -- --ignored --nocapture
+```
+
+Known warnings remain from older crates (`fdc-wasm`, `fdc-types`, `fdc-storage`, `fdc-ingestion`) and match the existing post-MVP warning-cleanup backlog.
+
+Next recommended development slice: replace repeated bounded background cycles with an actor/event-loop direct stream supervisor that owns continuous stream processing, richer command handling, and dynamic subscription evolution.
