@@ -14,6 +14,7 @@ pub struct ServerRuntimeConfig {
     pub bind_addr: SocketAddr,
     pub environment: ServerRuntimeEnvironment,
     pub live_enabled: bool,
+    pub live_autostart: bool,
     pub live_default_timeout_secs: u64,
     pub live_default_max_envelopes: usize,
 }
@@ -32,6 +33,7 @@ impl ServerRuntimeConfig {
         let mut bind_addr = "127.0.0.1:18080".to_string();
         let mut environment = ServerRuntimeEnvironment::Development;
         let mut live_enabled = false;
+        let mut live_autostart = false;
         let mut live_default_timeout_secs = 30_u64;
         let mut live_default_max_envelopes = 100_usize;
 
@@ -53,6 +55,9 @@ impl ServerRuntimeConfig {
                 "FDC_LIVE_ENABLED" => {
                     live_enabled = matches!(value.as_ref(), "1" | "true" | "yes" | "on");
                 }
+                "FDC_LIVE_AUTOSTART" => {
+                    live_autostart = matches!(value.as_ref(), "1" | "true" | "yes" | "on");
+                }
                 "FDC_LIVE_DEFAULT_TIMEOUT_SECS" => {
                     live_default_timeout_secs =
                         parse_positive_u64("FDC_LIVE_DEFAULT_TIMEOUT_SECS", value.as_ref())?;
@@ -73,6 +78,7 @@ impl ServerRuntimeConfig {
             bind_addr,
             environment,
             live_enabled,
+            live_autostart,
             live_default_timeout_secs,
             live_default_max_envelopes,
         })
