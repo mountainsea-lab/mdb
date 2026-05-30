@@ -28,7 +28,7 @@
 
 ### 🗄️ **多引擎存储架构**
 - **L1**: 超热缓存 (自定义格式 + WASM优化) - <1μs
-- **L2**: 热数据缓存 (redb + Apache Arrow) - <5μs  
+- **L2**: 热数据缓存 (redb + Apache Arrow) - <5μs
 - **L3**: 温数据存储 (DuckDB + WASM UDF) - <100μs
 - **L4**: 冷数据存储 (RocksDB + WASM压缩) - <10ms
 
@@ -108,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let volume = Volume::new(1000);
     let exchange_id = ExchangeId::new(1);
     let sequence_number = SequenceNumber::new(12345);
-    
+
     let tick_data = TickData::new(
         symbol,
         price,
@@ -117,13 +117,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         MessageType::Trade,
         sequence_number,
     );
-    
+
     println!("Created tick: {} @ ${}", tick_data.symbol, tick_data.price);
-    
+
     // 指标收集
     let metrics = Metrics::new();
     metrics.increment_counter("trades_processed", 1);
-    
+
     Ok(())
 }
 ```
@@ -206,3 +206,16 @@ cargo tarpaulin --out Html
 ---
 
 **Financial Data Center** - 让金融数据处理更快、更强、更智能 🚀
+
+
+你可以按这个顺序试：
+
+FDC_LIVE_ENABLED=1 FDC_LIVE_AUTOSTART=1 FDC_SERVER_ADDR=127.0.0.1:18080 cargo run -p fdc-server --bin fdc_server
+
+curl -X POST http://127.0.0.1:18080/market-data/live/start \
+  -H 'content-type: application/json' \
+ -d '{"timeout_secs":10,"max_envelopes":5}'
+
+curl http://127.0.0.1:18080/market-data/live/status
+
+curl 'http://127.0.0.1:18080/market-data/trades?limit=5'
