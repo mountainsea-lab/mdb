@@ -1155,3 +1155,61 @@ FDC_LIVE_ENABLED=1 FDC_LIVE_AUTOSTART=1 cargo test -p fdc-server --test producti
 Known warnings remain from older crates (`fdc-wasm`, `fdc-types`, `fdc-storage`, `fdc-ingestion`) and match the existing post-MVP warning-cleanup backlog.
 
 Next recommended development slice: replace repeated bounded background cycles with an actor/event-loop direct stream supervisor that owns continuous stream processing, richer command handling, and dynamic subscription evolution.
+
+## Resume Note: Realtime Collection Acceptance and Next Analysis Slice
+
+Last updated: 2026-05-30 resume checkpoint
+Checkpoint commit before this note: `docs: record production background live smoke`
+
+Current accepted capability:
+
+- `fdc-server` can collect realtime Binance Spot market data and expose it through the production query route.
+- Server module now has production-shaped live controls:
+  - `FDC_LIVE_ENABLED=1` enables live acquisition.
+  - `FDC_LIVE_AUTOSTART=1` starts acquisition when the server starts.
+  - `POST /market-data/live/start` manually starts the background runner when autostart is off.
+  - `GET /market-data/live/status` exposes task id, running state, subscriptions, counters, timestamps, stop reason, and failure message.
+  - `GET /market-data/trades?limit=5` reads queryable market-data records from the shared in-memory store.
+  - `POST /market-data/live/stop` requests background runner stop and returns the current stop state.
+
+Operational reminder discovered during manual validation:
+
+- If `/ready` returns `"live_enabled": false`, the process was not started with `FDC_LIVE_ENABLED=1`; manual `/market-data/live/start` cannot collect real data.
+- Correct manual-start command:
+
+  ```bash
+  FDC_LIVE_ENABLED=1 FDC_SERVER_ADDR=127.0.0.1:18080 cargo run -p fdc-server --bin fdc_server
+  ```
+
+- Correct autostart command:
+
+  ```bash
+  FDC_LIVE_ENABLED=1 FDC_LIVE_AUTOSTART=1 FDC_SERVER_ADDR=127.0.0.1:18080 cargo run -p fdc-server --bin fdc_server
+  ```
+
+- After manual `/market-data/live/start`, the response returns promptly with `state=running`; data appears after the first background collection cycle. Wait about 8-15 seconds before querying `/market-data/trades`.
+
+Useful manual check sequence:
+
+```bash
+curl -s http://127.0.0.1:18080/ready | jq
+curl -s -X POST http://127.0.0.1:18080/market-data/live/start \
+  -H 'content-type: application/json' \
+  -d '{"timeout_secs":10,"max_envelopes":5}' | jq
+sleep 12
+curl -s http://127.0.0.1:18080/market-data/live/status | jq
+curl -s 'http://127.0.0.1:18080/market-data/trades?limit=5' | jq
+```
+
+Recommended next work: analysis before further development.
+
+Suggested analysis questions:
+
+1. Production architecture: whether to keep repeated bounded background cycles or replace them with a direct actor/event-loop stream supervisor.
+2. Runtime semantics: start/stop/autostart behavior, restart behavior after failures, and whether `stop` should await final `stopped` state or remain asynchronous.
+3. Data semantics: dedupe keys, repeated trade timestamp handling, source sequence handling, and whether query ordering should be by receive time or event time.
+4. Storage path: when to move from in-memory `QueryableMarketDataStore` to durable storage or tier-aware routing.
+5. Observability: metrics, structured logs, health/readiness semantics while live runner is failed/stopping, and operator-facing error messages.
+6. Configuration: default subscriptions, exchange/symbol configuration, backoff/reconnect policy, and whether live is enabled in production by default.
+
+Next session should start by writing a short analysis/design document for the next production live supervisor evolution before coding.
