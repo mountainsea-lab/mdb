@@ -1136,7 +1136,15 @@ runtime_config_contract: 3 passed
 production_server_router_contract: 8 passed, 1 ignored
 production_background_live_smoke default: 0 passed, 1 ignored
 fdc-server package: 24 passed, 3 ignored
+real background live smoke: 1 passed
 ```
+
+Real background live smoke evidence:
+
+- `FDC_LIVE_ENABLED=1 FDC_LIVE_AUTOSTART=1` spawned the background runner before serving the router.
+- Status reached `state=running` with `task_id=market-data-live-1`, Binance Spot BTCUSDT/ETHUSDT subscriptions, and `envelopes_received=5`.
+- `GET /market-data/trades?limit=5` returned `status=success`, `returned_records=5`, with real Binance Spot BTCUSDT/ETHUSDT trade payloads.
+- `POST /market-data/live/stop` returned `status=success`, `state=stopping`, `stop_reason=requested`.
 
 Optional real background smoke command:
 
