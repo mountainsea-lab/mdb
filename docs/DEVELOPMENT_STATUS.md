@@ -1033,10 +1033,10 @@ When starting the next session:
 
 ## Session Checkpoint: Production Live Supervisor Enabled Mode
 
-Last updated: 2026-05-29 session checkpoint
-Checkpoint commit before this note: `feat: enable production live market data start`
+Last updated: 2026-05-30 session completion
+Checkpoint commit before this note: `test: add production live market data smoke`
 
-Current active work: production live supervisor enabled mode in `fdc-server`.
+Current active work: production live supervisor enabled mode in `fdc-server` is complete for the bounded enabled-mode slice.
 
 Design and plan committed:
 
@@ -1060,57 +1060,36 @@ Completed in code and committed:
 - Because Barter stream types are not safe to hold across Axum's Send handler future, production service uses `tokio::task::spawn_blocking` plus a current-thread Tokio runtime for collection/write.
 - `POST /market-data/live/start` now calls the production service when live is enabled instead of always returning the disabled gate.
 - Added ignored enabled-config route test placeholder in `production_server_router_contract.rs`.
+- Added ignored/gated production live smoke test:
+  - file: `crates/fdc-server/tests/production_live_smoke.rs`
+  - test name: `ignored_production_live_start_writes_real_trades_and_query_reads_them`
 
-Latest verification before stopping:
+Final verification on 2026-05-30:
 
 ```bash
-CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-server
+rtk cargo fmt --package fdc-server --check
 CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_server_router_contract
-CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --bin fdc_server
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_live_smoke
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server
+FDC_LIVE_ENABLED=1 cargo test -p fdc-server --test production_live_smoke ignored_production_live_start_writes_real_trades_and_query_reads_them -- --ignored --nocapture
 ```
 
 Result:
 
 ```text
 production_server_router_contract: 4 passed, 1 ignored
-fdc_server bin: 0 passed
+production_live_smoke default: 0 passed, 1 ignored
+fdc-server package: 20 passed, 2 ignored
+real production live smoke: 1 passed
 ```
 
-Immediate resume steps:
+Real production live smoke evidence:
 
-1. Add ignored/gated production live smoke test:
-   - file: `crates/fdc-server/tests/production_live_smoke.rs`
-   - test name: `ignored_production_live_start_writes_real_trades_and_query_reads_them`
-2. Verify default behavior:
+- `POST /market-data/live/start` with `timeout_secs=20`, `max_envelopes=20` returned `status=success`.
+- Live service logs showed `collected 20 live envelopes` and `completed envelopes_received=20 storage_records_written=20 market_data_store_records=20`.
+- Start response returned `state=completed`, `envelopes_received=20`, `storage_records_written=20`, and `market_data_store_records=20`.
+- `GET /market-data/trades?limit=5` returned `status=success`, `returned_records=5`, with real Binance Spot BTCUSDT trade payloads.
 
-   ```bash
-   CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server --test production_live_smoke
-   ```
+Known warnings remain from older crates (`fdc-wasm`, `fdc-types`, `fdc-storage`, `fdc-ingestion`) and match the existing post-MVP warning-cleanup backlog.
 
-   Expected: pass with 1 ignored.
-
-3. If public internet is available, run real production live smoke:
-
-   ```bash
-   FDC_LIVE_ENABLED=1 cargo test -p fdc-server --test production_live_smoke ignored_production_live_start_writes_real_trades_and_query_reads_them -- --ignored --nocapture
-   ```
-
-4. Optionally verify actual production HTTP server:
-
-   ```bash
-   FDC_LIVE_ENABLED=1 FDC_SERVER_ADDR=127.0.0.1:18083 cargo run -p fdc-server --bin fdc_server
-   curl -X POST http://127.0.0.1:18083/market-data/live/start \
-     -H 'content-type: application/json' \
-     -d '{"timeout_secs":20,"max_envelopes":20}'
-   curl 'http://127.0.0.1:18083/market-data/live/status'
-   curl 'http://127.0.0.1:18083/market-data/trades?limit=5'
-   ```
-
-5. Update this file with real production live smoke evidence and commit:
-
-   ```bash
-   rtk git add docs/DEVELOPMENT_STATUS.md
-   rtk git commit -m "docs: record production live supervisor enabled mode"
-   ```
-
-Next recommended development slice after production live smoke is verified: true background live runner plus `/market-data/live/stop`.
+Next recommended development slice: true background live runner plus `/market-data/live/stop`.
