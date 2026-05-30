@@ -22,6 +22,7 @@ pub struct StartLiveMarketDataRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StartLiveMarketDataResponse {
     pub state: MarketDataLiveState,
+    pub task_id: Option<String>,
     pub envelopes_received: usize,
     pub storage_records_written: usize,
     pub market_data_store_records: usize,
@@ -30,8 +31,25 @@ pub struct StartLiveMarketDataResponse {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveMarketDataStatusResponse {
     pub state: MarketDataLiveState,
+    pub task_id: Option<String>,
+    pub started_at_ns: Option<u64>,
+    pub stopped_at_ns: Option<u64>,
+    pub stop_reason: Option<String>,
+    pub subscriptions: Vec<String>,
+    pub last_record_at_ns: Option<u64>,
+    pub envelopes_received: usize,
+    pub storage_records_written: usize,
+    pub market_data_store_records: usize,
     pub last_result: Option<StartLiveMarketDataResponse>,
     pub failure_message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StopLiveMarketDataResponse {
+    pub state: MarketDataLiveState,
+    pub task_id: Option<String>,
+    pub stopped_at_ns: Option<u64>,
+    pub stop_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -140,6 +140,7 @@ fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start
 
     supervisor.complete(StartLiveMarketDataResponse {
         state: MarketDataLiveState::Completed,
+        task_id: None,
         envelopes_received: 2,
         storage_records_written: 2,
         market_data_store_records: 2,
@@ -152,6 +153,39 @@ fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start
         2
     );
     assert!(status.failure_message.is_none());
+}
+
+#[test]
+fn production_live_supervisor_tracks_background_task_snapshot_and_stop() {
+    use fdc_server::market_data::{model::MarketDataLiveState, supervisor::MarketDataSupervisor};
+
+    let supervisor = MarketDataSupervisor::new();
+    let task_id = supervisor
+        .start_background(vec!["binance_spot:BTCUSDT:trades".to_string()])
+        .expect("background task should reserve");
+
+    let running = supervisor.status();
+    assert_eq!(running.state, MarketDataLiveState::Running);
+    assert_eq!(running.task_id.as_deref(), Some(task_id.as_str()));
+    assert!(running.started_at_ns.is_some());
+    assert!(running.stopped_at_ns.is_none());
+    assert_eq!(running.subscriptions, vec!["binance_spot:BTCUSDT:trades"]);
+
+    supervisor.record_progress(2, 2, 2, Some(123));
+    let progressed = supervisor.status();
+    assert_eq!(progressed.envelopes_received, 2);
+    assert_eq!(progressed.storage_records_written, 2);
+    assert_eq!(progressed.market_data_store_records, 2);
+    assert_eq!(progressed.last_record_at_ns, Some(123));
+
+    assert!(supervisor.request_stop("requested"));
+    assert_eq!(supervisor.status().state, MarketDataLiveState::Stopping);
+
+    supervisor.stopped("requested");
+    let stopped = supervisor.status();
+    assert_eq!(stopped.state, MarketDataLiveState::Stopped);
+    assert_eq!(stopped.stop_reason.as_deref(), Some("requested"));
+    assert!(stopped.stopped_at_ns.is_some());
 }
 
 #[tokio::test]

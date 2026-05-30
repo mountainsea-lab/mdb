@@ -70,6 +70,7 @@ async fn start_live_handler(
             let status = state.market_data_supervisor().status();
             let data = StartLiveMarketDataResponse {
                 state: status.state,
+                task_id: status.task_id.clone(),
                 envelopes_received: status
                     .last_result
                     .as_ref()

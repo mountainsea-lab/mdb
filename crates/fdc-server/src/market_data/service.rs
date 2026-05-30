@@ -33,6 +33,7 @@ pub fn start_live_disabled(state: &ProductionServerState) -> (StartLiveMarketDat
     (
         StartLiveMarketDataResponse {
             state: status.state,
+            task_id: status.task_id,
             envelopes_received: 0,
             storage_records_written: 0,
             market_data_store_records: state.market_data_store().record_count(),
@@ -120,6 +121,7 @@ pub async fn ingest_test_trade(
 
     Ok(StartLiveMarketDataResponse {
         state: MarketDataLiveState::Completed,
+        task_id: None,
         envelopes_received: summary.envelopes_received,
         storage_records_written: summary.storage_records_written,
         market_data_store_records: summary.market_data_store_records,
@@ -216,6 +218,7 @@ async fn run_live_collection_and_storage_on_current_thread(
 
     Ok(StartLiveMarketDataResponse {
         state: MarketDataLiveState::Completed,
+        task_id: None,
         envelopes_received: summary.envelopes_received,
         storage_records_written: summary.storage_records_written,
         market_data_store_records: summary.market_data_store_records,
