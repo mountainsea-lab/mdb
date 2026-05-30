@@ -17,7 +17,7 @@ use rust_decimal::Decimal;
 use crate::{
     market_data::model::{
         MarketDataLiveState, MarketDataTradeRecord, MarketDataTradesResponse,
-        StartLiveMarketDataRequest, StartLiveMarketDataResponse,
+        StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
     },
     run_realtime_barter_envelope_stream, ProductionServerState, RealtimeMarketDataMvpConfig,
 };
@@ -78,6 +78,58 @@ pub async fn start_live(
             Err(message)
         }
     }
+}
+
+pub fn stop_live(state: &ProductionServerState) -> StopLiveMarketDataResponse {
+    let supervisor = state.market_data_supervisor();
+    supervisor.request_stop("requested");
+    let status = supervisor.status();
+    StopLiveMarketDataResponse {
+        state: status.state,
+        task_id: status.task_id,
+        stopped_at_ns: status.stopped_at_ns,
+        stop_reason: status.stop_reason,
+    }
+}
+
+pub async fn start_fake_background_live_for_test(
+    state: &ProductionServerState,
+    ticks: usize,
+    interval: Duration,
+) -> std::result::Result<StartLiveMarketDataResponse, String> {
+    let supervisor = state.market_data_supervisor();
+    let task_id = supervisor
+        .start_background(vec!["test:fake:trades".to_string()])
+        .map_err(|error| error.to_string())?;
+    let supervisor_for_task = state.market_data_supervisor();
+    let store = state.market_data_store();
+    tokio::spawn(async move {
+        for index in 0..ticks {
+            if supervisor_for_task.stop_requested() {
+                supervisor_for_task.stopped("requested");
+                return;
+            }
+            tokio::time::sleep(interval).await;
+            supervisor_for_task.record_progress(
+                1,
+                1,
+                store.record_count() + index + 1,
+                Some(TimestampNs::now().as_nanos().max(0) as u64),
+            );
+        }
+        while !supervisor_for_task.stop_requested() {
+            tokio::time::sleep(interval).await;
+        }
+        supervisor_for_task.stopped("requested");
+    });
+
+    Ok(StartLiveMarketDataResponse {
+        state: MarketDataLiveState::Running,
+        task_id: Some(task_id),
+        envelopes_received: 0,
+        storage_records_written: 0,
+        market_data_store_records: state.market_data_store().record_count(),
+    })
 }
 
 pub fn query_trades(

@@ -189,6 +189,80 @@ fn production_live_supervisor_tracks_background_task_snapshot_and_stop() {
 }
 
 #[tokio::test]
+async fn production_live_stop_is_idempotent_when_no_runner_is_active() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    );
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/stop")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("stop should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["state"], "idle");
+}
+
+#[tokio::test]
+async fn production_live_fake_background_start_stop_updates_status() {
+    use fdc_server::market_data::service::start_fake_background_live_for_test;
+
+    let config = ServerRuntimeConfig::from_env_pairs([("FDC_LIVE_ENABLED", "1")])
+        .expect("config should parse");
+    let state = ProductionServerState::new(config);
+
+    let started =
+        start_fake_background_live_for_test(&state, 3, std::time::Duration::from_millis(10))
+            .await
+            .expect("fake runner should start");
+    assert_eq!(
+        started.state,
+        fdc_server::market_data::model::MarketDataLiveState::Running
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let status = state.market_data_supervisor().status();
+    assert_eq!(
+        status.state,
+        fdc_server::market_data::model::MarketDataLiveState::Running
+    );
+    assert!(status.envelopes_received >= 1);
+
+    let router = build_production_router(state.clone());
+    let stop = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/stop")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("stop should respond");
+    let stop_body = axum::body::to_bytes(stop.into_body(), usize::MAX)
+        .await
+        .expect("body");
+    let stop_json: serde_json::Value = serde_json::from_slice(&stop_body).expect("json");
+    assert_eq!(stop_json["status"], "success");
+    assert!(matches!(
+        stop_json["data"]["state"].as_str().unwrap(),
+        "stopping" | "stopped"
+    ));
+}
+
+#[tokio::test]
 #[ignore = "enabled config may touch public internet; covered by production_live_smoke"]
 async fn production_live_start_with_enabled_config_updates_status_on_failure() {
     let config = ServerRuntimeConfig::from_env_pairs([

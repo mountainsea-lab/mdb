@@ -9,9 +9,9 @@ use crate::{
     market_data::{
         model::{
             LiveMarketDataStatusResponse, MarketDataTradesResponse, StartLiveMarketDataRequest,
-            StartLiveMarketDataResponse,
+            StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
-        service::{live_status, query_trades, start_live, start_live_disabled},
+        service::{live_status, query_trades, start_live, start_live_disabled, stop_live},
     },
     ProductionServerState,
 };
@@ -50,6 +50,7 @@ impl<T> ServerApiResponse<T> {
 pub fn build_market_data_router(state: ProductionServerState) -> Router {
     Router::new()
         .route("/market-data/live/start", post(start_live_handler))
+        .route("/market-data/live/stop", post(stop_live_handler))
         .route("/market-data/live/status", get(live_status_handler))
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
@@ -86,6 +87,12 @@ async fn start_live_handler(
             Json(ServerApiResponse::error(data, message))
         }
     }
+}
+
+async fn stop_live_handler(
+    State(state): State<ProductionServerState>,
+) -> Json<ServerApiResponse<StopLiveMarketDataResponse>> {
+    Json(ServerApiResponse::success(stop_live(&state)))
 }
 
 async fn live_status_handler(
