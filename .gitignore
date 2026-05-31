@@ -108,3 +108,4 @@ config/production.toml
 # Core dumps
 core.*
 .claude
+.codegraph
