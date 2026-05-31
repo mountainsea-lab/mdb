@@ -95,7 +95,7 @@ pub fn public_trade_result_to_data_kind(
 /// Map one live Barter stream result into an optional ingestion envelope.
 ///
 /// Reconnect notifications are observable at this boundary but do not emit envelopes.
-pub fn map_live_trade_result(
+pub fn map_live_market_data_result(
     source_id: &str,
     result: MarketStreamResult<MarketDataInstrument, DataKind>,
 ) -> Result<Option<BarterIngestionEnvelope>> {
@@ -111,10 +111,18 @@ pub fn map_live_trade_result(
     }
 }
 
-/// Collect the next `limit` emitted live trade envelopes from a stream.
+/// Backward-compatible wrapper for the original trade-only name.
+pub fn map_live_trade_result(
+    source_id: &str,
+    result: MarketStreamResult<MarketDataInstrument, DataKind>,
+) -> Result<Option<BarterIngestionEnvelope>> {
+    map_live_market_data_result(source_id, result)
+}
+
+/// Collect the next `limit` emitted live market-data envelopes from a stream.
 ///
 /// Reconnect events are skipped. Stream item errors are returned to the caller.
-pub async fn collect_live_trade_envelopes<S>(
+pub async fn collect_live_market_data_envelopes<S>(
     source_id: &str,
     mut stream: S,
     limit: usize,
@@ -129,10 +137,22 @@ where
             break;
         };
 
-        if let Some(envelope) = map_live_trade_result(source_id, result)? {
+        if let Some(envelope) = map_live_market_data_result(source_id, result)? {
             envelopes.push(envelope);
         }
     }
 
     Ok(envelopes)
+}
+
+/// Backward-compatible wrapper for the original trade-only name.
+pub async fn collect_live_trade_envelopes<S>(
+    source_id: &str,
+    stream: S,
+    limit: usize,
+) -> Result<Vec<BarterIngestionEnvelope>>
+where
+    S: Stream<Item = MarketStreamResult<MarketDataInstrument, DataKind>> + Unpin,
+{
+    collect_live_market_data_envelopes(source_id, stream, limit).await
 }

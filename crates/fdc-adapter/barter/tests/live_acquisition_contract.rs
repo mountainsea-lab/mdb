@@ -13,9 +13,10 @@ use barter_instrument::{
 };
 use chrono::{TimeZone, Utc};
 use fdc_barter::{
-    collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
-    init_binance_spot_public_trades, map_live_trade_result, BarterMarketDataKind,
-    BarterMarketDataMode, BarterMarketPayload, LiveExchange, LiveTradeSubscription, TradeSide,
+    collect_live_market_data_envelopes, collect_live_trade_envelopes,
+    default_binance_spot_trade_subscriptions, init_binance_spot_public_trades,
+    map_live_market_data_result, map_live_trade_result, BarterMarketDataKind, BarterMarketDataMode,
+    BarterMarketPayload, LiveExchange, LiveTradeSubscription, TradeSide,
 };
 use futures::{stream, StreamExt};
 
@@ -87,6 +88,18 @@ fn live_trade_result_maps_to_ingestion_envelope() {
     assert!(!envelope.quality.is_backfill);
 }
 
+#[test]
+fn generic_live_market_data_result_mapper_preserves_trade_behavior() {
+    let envelope =
+        map_live_market_data_result(SOURCE_ID, barter_trade_event("btc", "usdt", "trade-1"))
+            .expect("trade result should map")
+            .expect("trade result should emit an envelope");
+
+    assert_eq!(envelope.source_id, SOURCE_ID);
+    assert_eq!(envelope.event.exchange, "binance_spot");
+    assert_eq!(envelope.event.kind, BarterMarketDataKind::Trade);
+}
+
 #[tokio::test]
 async fn bounded_collection_returns_requested_number_of_envelopes() {
     let input = stream::iter(vec![
@@ -97,6 +110,23 @@ async fn bounded_collection_returns_requested_number_of_envelopes() {
     ]);
 
     let envelopes = collect_live_trade_envelopes(SOURCE_ID, input, 2)
+        .await
+        .expect("bounded collection should succeed");
+
+    assert_eq!(envelopes.len(), 2);
+    assert_eq!(envelopes[0].event.symbol.to_string(), "BTCUSDT");
+    assert_eq!(envelopes[1].event.symbol.to_string(), "ETHUSDT");
+}
+
+#[tokio::test]
+async fn generic_live_market_data_collection_preserves_trade_behavior() {
+    let input = stream::iter(vec![
+        barter_trade_event("btc", "usdt", "trade-1"),
+        reconnect::Event::Reconnecting(ExchangeId::BinanceSpot),
+        barter_trade_event("eth", "usdt", "trade-2"),
+    ]);
+
+    let envelopes = collect_live_market_data_envelopes(SOURCE_ID, input, 2)
         .await
         .expect("bounded collection should succeed");
 
