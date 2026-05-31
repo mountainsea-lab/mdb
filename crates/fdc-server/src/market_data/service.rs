@@ -1,10 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use fdc_barter::{
-    collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
-    init_binance_spot_public_trades, public_trade_result_to_data_kind, BarterIngestionEnvelope,
-    BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
-    BarterMarketType, DataQualityFlags, TradePayload, TradeSide,
+    collect_live_market_data_envelopes, default_binance_spot_market_data_subscriptions,
+    init_binance_spot_market_data, BarterIngestionEnvelope, BarterMarketDataKind,
+    BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload, BarterMarketType,
+    DataQualityFlags, LiveMarketDataSubscription, TradePayload, TradeSide,
 };
 use fdc_core::{
     types::{Price, Symbol, TimestampNs},
@@ -58,10 +58,7 @@ pub async fn start_background_live(
         return Err(message);
     }
 
-    let subscriptions = vec![
-        "binance_spot:BTCUSDT:public_trades".to_string(),
-        "binance_spot:ETHUSDT:public_trades".to_string(),
-    ];
+    let subscriptions = default_live_subscription_labels();
     let supervisor = state.market_data_supervisor();
     let task_id = supervisor
         .start_background(subscriptions)
@@ -251,32 +248,36 @@ async fn run_live_collection_and_storage_on_current_thread(
     max_envelopes: usize,
 ) -> std::result::Result<StartLiveMarketDataResponse, String> {
     eprintln!(
-        "fdc production live runner: starting Binance Spot public trades timeout_secs={timeout_secs} max_envelopes={max_envelopes}"
+        "fdc production live runner: starting Binance Spot market data timeout_secs={timeout_secs} max_envelopes={max_envelopes}"
     );
 
-    let streams = init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())
+    let streams = init_binance_spot_market_data(default_binance_spot_market_data_subscriptions())
         .await
         .map_err(|error| {
             eprintln!("fdc production live runner: failed to initialize stream: {error}");
-            format!("failed to initialize Binance Spot live stream: {error}")
+            format!("failed to initialize Binance Spot live market-data stream: {error}")
         })?;
 
-    let stream = streams.select_all().map(public_trade_result_to_data_kind);
+    let stream = streams.select_all();
     let envelopes = match tokio::time::timeout(
         Duration::from_secs(timeout_secs),
-        collect_live_trade_envelopes("barter-binance-spot-live-trades", stream, max_envelopes),
+        collect_live_market_data_envelopes(
+            "barter-binance-spot-live-market-data",
+            stream,
+            max_envelopes,
+        ),
     )
     .await
     {
         Ok(Ok(envelopes)) => envelopes,
         Ok(Err(error)) => {
             eprintln!("fdc production live runner: stream item error: {error}");
-            return Err(format!("failed while collecting live trades: {error}"));
+            return Err(format!("failed while collecting live market data: {error}"));
         }
         Err(_) => {
-            eprintln!("fdc production live runner: timed out while collecting live trades");
+            eprintln!("fdc production live runner: timed out while collecting live market data");
             return Err(format!(
-                "timed out after {timeout_secs}s while collecting live trades"
+                "timed out after {timeout_secs}s while collecting live market data"
             ));
         }
     };
@@ -287,7 +288,7 @@ async fn run_live_collection_and_storage_on_current_thread(
     );
 
     if envelopes.is_empty() {
-        return Err("live stream returned no trade envelopes".to_string());
+        return Err("live stream returned no market-data envelopes".to_string());
     }
 
     let summary = run_realtime_barter_envelope_stream(
@@ -319,6 +320,36 @@ async fn run_live_collection_and_storage_on_current_thread(
         storage_records_written: summary.storage_records_written,
         market_data_store_records: summary.market_data_store_records,
     })
+}
+
+fn default_live_subscription_labels() -> Vec<String> {
+    default_binance_spot_market_data_subscriptions()
+        .into_iter()
+        .map(live_subscription_label)
+        .collect()
+}
+
+fn live_subscription_label(subscription: LiveMarketDataSubscription) -> String {
+    let exchange = match subscription.exchange {
+        fdc_barter::LiveExchange::BinanceSpot => "binance_spot",
+    };
+    format!(
+        "{}:{}{}:{}",
+        exchange,
+        subscription.base.to_ascii_uppercase(),
+        subscription.quote.to_ascii_uppercase(),
+        live_kind_label(subscription.kind)
+    )
+}
+
+fn live_kind_label(kind: BarterMarketDataKind) -> &'static str {
+    match kind {
+        BarterMarketDataKind::Trade => "trade",
+        BarterMarketDataKind::OrderBookL1 => "order_book_l1",
+        BarterMarketDataKind::OrderBook => "order_book",
+        BarterMarketDataKind::Candle => "candle",
+        BarterMarketDataKind::Liquidation => "liquidation",
+    }
 }
 
 fn record_to_trade_record(record: StorageWriteRecord) -> MarketDataTradeRecord {
@@ -356,4 +387,24 @@ fn test_trade_envelope(symbol: &str, trade_id: &str) -> BarterIngestionEnvelope 
     envelope.envelope_id = format!("env-{trade_id}");
     envelope.quality = DataQualityFlags::default();
     envelope
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_live_subscription_labels_cover_trades_l1_and_l2_for_default_symbols() {
+        assert_eq!(
+            default_live_subscription_labels(),
+            vec![
+                "binance_spot:BTCUSDT:trade".to_string(),
+                "binance_spot:BTCUSDT:order_book_l1".to_string(),
+                "binance_spot:BTCUSDT:order_book".to_string(),
+                "binance_spot:ETHUSDT:trade".to_string(),
+                "binance_spot:ETHUSDT:order_book_l1".to_string(),
+                "binance_spot:ETHUSDT:order_book".to_string(),
+            ]
+        );
+    }
 }

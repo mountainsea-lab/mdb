@@ -161,7 +161,11 @@ fn production_live_supervisor_tracks_background_task_snapshot_and_stop() {
 
     let supervisor = MarketDataSupervisor::new();
     let task_id = supervisor
-        .start_background(vec!["binance_spot:BTCUSDT:trades".to_string()])
+        .start_background(vec![
+            "binance_spot:BTCUSDT:trade".to_string(),
+            "binance_spot:BTCUSDT:order_book_l1".to_string(),
+            "binance_spot:BTCUSDT:order_book".to_string(),
+        ])
         .expect("background task should reserve");
 
     let running = supervisor.status();
@@ -169,7 +173,14 @@ fn production_live_supervisor_tracks_background_task_snapshot_and_stop() {
     assert_eq!(running.task_id.as_deref(), Some(task_id.as_str()));
     assert!(running.started_at_ns.is_some());
     assert!(running.stopped_at_ns.is_none());
-    assert_eq!(running.subscriptions, vec!["binance_spot:BTCUSDT:trades"]);
+    assert_eq!(
+        running.subscriptions,
+        vec![
+            "binance_spot:BTCUSDT:trade",
+            "binance_spot:BTCUSDT:order_book_l1",
+            "binance_spot:BTCUSDT:order_book",
+        ]
+    );
 
     supervisor.record_progress(2, 2, 2, Some(123));
     let progressed = supervisor.status();

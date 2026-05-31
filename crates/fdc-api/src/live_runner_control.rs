@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use axum::{extract::State, routing::post, Json, Router};
 use fdc_barter::{
-    collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
-    init_binance_spot_public_trades, public_trade_result_to_data_kind,
+    collect_live_market_data_envelopes, default_binance_spot_market_data_subscriptions,
+    init_binance_spot_market_data,
 };
 use fdc_server::{run_realtime_barter_envelope_stream, RealtimeMarketDataMvpConfig};
 use fdc_storage::QueryableMarketDataStore;
@@ -95,32 +95,36 @@ async fn run_live_collection_and_storage(
     max_envelopes: usize,
 ) -> Result<LiveRunnerStartResponse, String> {
     eprintln!(
-        "fdc live runner: starting Binance Spot public trades timeout_secs={timeout_secs} max_envelopes={max_envelopes}"
+        "fdc live runner: starting Binance Spot market data timeout_secs={timeout_secs} max_envelopes={max_envelopes}"
     );
 
-    let streams = init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())
+    let streams = init_binance_spot_market_data(default_binance_spot_market_data_subscriptions())
         .await
         .map_err(|error| {
             eprintln!("fdc live runner: failed to initialize stream: {error}");
-            format!("failed to initialize Binance Spot live stream: {error}")
+            format!("failed to initialize Binance Spot live market-data stream: {error}")
         })?;
 
-    let stream = streams.select_all().map(public_trade_result_to_data_kind);
+    let stream = streams.select_all();
     let envelopes = match tokio::time::timeout(
         Duration::from_secs(timeout_secs),
-        collect_live_trade_envelopes("barter-binance-spot-live-trades", stream, max_envelopes),
+        collect_live_market_data_envelopes(
+            "barter-binance-spot-live-market-data",
+            stream,
+            max_envelopes,
+        ),
     )
     .await
     {
         Ok(Ok(envelopes)) => envelopes,
         Ok(Err(error)) => {
             eprintln!("fdc live runner: stream item error: {error}");
-            return Err(format!("failed while collecting live trades: {error}"));
+            return Err(format!("failed while collecting live market data: {error}"));
         }
         Err(_) => {
-            eprintln!("fdc live runner: timed out while collecting live trades");
+            eprintln!("fdc live runner: timed out while collecting live market data");
             return Err(format!(
-                "timed out after {timeout_secs}s while collecting live trades"
+                "timed out after {timeout_secs}s while collecting live market data"
             ));
         }
     };
@@ -131,7 +135,7 @@ async fn run_live_collection_and_storage(
     );
 
     if envelopes.is_empty() {
-        return Err("live stream returned no trade envelopes".to_string());
+        return Err("live stream returned no market-data envelopes".to_string());
     }
 
     let summary = run_realtime_barter_envelope_stream(

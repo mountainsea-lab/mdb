@@ -6,10 +6,10 @@ use axum::{
 };
 use fdc_api::{build_market_data_router, ApiAppState};
 use fdc_barter::{
-    collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
-    init_binance_spot_public_trades, public_trade_result_to_data_kind, BarterIngestionEnvelope,
-    BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
-    BarterMarketType, DataQualityFlags, DecimalQuantity, TradePayload, TradeSide,
+    collect_live_market_data_envelopes, default_binance_spot_market_data_subscriptions,
+    init_binance_spot_market_data, BarterIngestionEnvelope, BarterMarketDataKind,
+    BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload, BarterMarketType,
+    DataQualityFlags, DecimalQuantity, TradePayload, TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{
@@ -204,13 +204,13 @@ async fn ignored_live_smoke_writes_binance_trade_to_store_and_reads_it_through_a
         return;
     }
 
-    let streams = init_binance_spot_public_trades(default_binance_spot_trade_subscriptions())
+    let streams = init_binance_spot_market_data(default_binance_spot_market_data_subscriptions())
         .await
-        .expect("live Binance Spot stream should initialize");
-    let stream = streams.select_all().map(public_trade_result_to_data_kind);
+        .expect("live Binance Spot market-data streams should initialize");
+    let stream = streams.select_all();
     let envelopes = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        collect_live_trade_envelopes("barter-binance-spot-live-trades", stream, 100),
+        collect_live_market_data_envelopes("barter-binance-spot-live-market-data", stream, 100),
     )
     .await
     .expect("should receive live trades within timeout")
