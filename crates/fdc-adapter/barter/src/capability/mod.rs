@@ -1,3 +1,5 @@
 pub mod exchange;
 
-pub use exchange::{BarterSourceCapabilities, RateLimitRule};
+pub use exchange::{
+    supported_crypto_market_data_capabilities, BarterSourceCapabilities, RateLimitRule,
+};

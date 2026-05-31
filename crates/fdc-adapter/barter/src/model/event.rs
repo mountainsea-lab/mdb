@@ -23,6 +23,15 @@ pub enum BarterMarketDataMode {
     Historical,
 }
 
+/// Market/instrument class associated with a Barter market event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BarterMarketType {
+    Spot,
+    Future,
+    Perpetual,
+    Option,
+}
+
 /// Decimal quantity used for crypto amounts that cannot be represented as integer volume.
 pub type DecimalQuantity = Decimal;
 

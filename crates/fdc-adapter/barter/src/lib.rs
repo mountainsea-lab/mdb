@@ -11,7 +11,9 @@ pub mod ingestion;
 pub mod mapper;
 pub mod model;
 
-pub use capability::{BarterSourceCapabilities, RateLimitRule};
+pub use capability::{
+    supported_crypto_market_data_capabilities, BarterSourceCapabilities, RateLimitRule,
+};
 pub use config::{BarterAdapterConfig, BarterDataMode};
 pub use error::{BarterAdapterError, Result};
 pub use ingestion::{
@@ -22,7 +24,7 @@ pub use ingestion::{
 pub use mapper::event::map_market_event;
 pub use model::{
     BarterCheckpoint, BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest,
-    BarterMarketEvent, BarterMarketPayload, BarterSourceState, BarterSourceStatus, CandlePayload,
-    DecimalQuantity, HistoricalCursor, HistoricalPageRequest, OrderBookL1Payload, RawPayload,
-    TradePayload, TradeSide,
+    BarterMarketEvent, BarterMarketPayload, BarterMarketType, BarterSourceState,
+    BarterSourceStatus, CandlePayload, DecimalQuantity, HistoricalCursor, HistoricalPageRequest,
+    OrderBookL1Payload, RawPayload, TradePayload, TradeSide,
 };

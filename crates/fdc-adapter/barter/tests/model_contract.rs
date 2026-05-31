@@ -1,6 +1,6 @@
 use fdc_barter::{
-    BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest, BarterSourceCapabilities,
-    BarterSourceState, BarterSourceStatus, RateLimitRule,
+    BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest, BarterMarketType,
+    BarterSourceCapabilities, BarterSourceState, BarterSourceStatus, RateLimitRule,
 };
 
 #[test]
@@ -24,6 +24,7 @@ fn request_and_source_state_types_are_public() {
 fn capabilities_describe_live_and_historical_support() {
     let capabilities = BarterSourceCapabilities::crypto_exchange(
         "binance_spot",
+        BarterMarketType::Spot,
         vec![BarterMarketDataKind::Trade, BarterMarketDataKind::Candle],
         vec![BarterMarketDataKind::Trade],
         vec![RateLimitRule::new(
@@ -37,5 +38,6 @@ fn capabilities_describe_live_and_historical_support() {
 
     assert!(capabilities.supports_live);
     assert!(capabilities.supports_historical);
+    assert_eq!(capabilities.market_type, BarterMarketType::Spot);
     assert!(capabilities.kinds.contains(&BarterMarketDataKind::Trade));
 }
