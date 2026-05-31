@@ -13,6 +13,7 @@ use crate::{
     error::{BarterAdapterError, Result},
     ingestion::BarterIngestionEnvelope,
     mapper::event::map_market_event,
+    model::BarterMarketDataKind,
 };
 
 /// Live exchange variants supported by the first acquisition slice.
@@ -39,12 +40,64 @@ impl LiveTradeSubscription {
     }
 }
 
+/// Generic market-data subscription accepted by expanded live acquisition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LiveMarketDataSubscription {
+    pub exchange: LiveExchange,
+    pub base: String,
+    pub quote: String,
+    pub instrument_kind: MarketDataInstrumentKind,
+    pub kind: BarterMarketDataKind,
+}
+
+impl LiveMarketDataSubscription {
+    pub fn new(
+        exchange: LiveExchange,
+        base: impl Into<String>,
+        quote: impl Into<String>,
+        instrument_kind: MarketDataInstrumentKind,
+        kind: BarterMarketDataKind,
+    ) -> Self {
+        Self {
+            exchange,
+            base: base.into(),
+            quote: quote.into(),
+            instrument_kind,
+            kind,
+        }
+    }
+}
+
 /// Default first-slice live subscriptions: Binance Spot BTC/USDT and ETH/USDT public trades.
 pub fn default_binance_spot_trade_subscriptions() -> Vec<LiveTradeSubscription> {
     vec![
         LiveTradeSubscription::new(LiveExchange::BinanceSpot, "btc", "usdt"),
         LiveTradeSubscription::new(LiveExchange::BinanceSpot, "eth", "usdt"),
     ]
+}
+
+/// Default first expanded subscriptions for Binance Spot BTC/USDT and ETH/USDT.
+pub fn default_binance_spot_market_data_subscriptions() -> Vec<LiveMarketDataSubscription> {
+    ["btc", "eth"]
+        .into_iter()
+        .flat_map(|base| {
+            [
+                BarterMarketDataKind::Trade,
+                BarterMarketDataKind::OrderBookL1,
+                BarterMarketDataKind::OrderBook,
+            ]
+            .into_iter()
+            .map(move |kind| {
+                LiveMarketDataSubscription::new(
+                    LiveExchange::BinanceSpot,
+                    base,
+                    "usdt",
+                    MarketDataInstrumentKind::Spot,
+                    kind,
+                )
+            })
+        })
+        .collect()
 }
 
 /// Start Barter-rs Binance Spot public trade streams.

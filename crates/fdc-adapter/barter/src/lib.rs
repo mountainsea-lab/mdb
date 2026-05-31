@@ -18,9 +18,10 @@ pub use config::{BarterAdapterConfig, BarterDataMode};
 pub use error::{BarterAdapterError, Result};
 pub use ingestion::{
     collect_live_market_data_envelopes, collect_live_trade_envelopes,
-    default_binance_spot_trade_subscriptions, init_binance_spot_public_trades,
-    map_live_market_data_result, map_live_trade_result, public_trade_result_to_data_kind,
-    BarterIngestionEnvelope, DataQualityFlags, LiveExchange, LiveTradeSubscription,
+    default_binance_spot_market_data_subscriptions, default_binance_spot_trade_subscriptions,
+    init_binance_spot_public_trades, map_live_market_data_result, map_live_trade_result,
+    public_trade_result_to_data_kind, BarterIngestionEnvelope, DataQualityFlags, LiveExchange,
+    LiveMarketDataSubscription, LiveTradeSubscription,
 };
 pub use mapper::event::map_market_event;
 pub use model::{

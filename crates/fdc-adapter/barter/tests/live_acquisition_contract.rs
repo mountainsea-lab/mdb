@@ -294,3 +294,34 @@ fn collect_fdc_barter_references(path: &PathBuf, violations: &mut Vec<String>) {
         }
     }
 }
+
+#[test]
+fn live_market_data_subscription_accepts_multiple_data_kinds() {
+    let subscription = fdc_barter::LiveMarketDataSubscription::new(
+        LiveExchange::BinanceSpot,
+        "btc",
+        "usdt",
+        MarketDataInstrumentKind::Spot,
+        BarterMarketDataKind::OrderBookL1,
+    );
+
+    assert_eq!(subscription.exchange, LiveExchange::BinanceSpot);
+    assert_eq!(subscription.base, "btc");
+    assert_eq!(subscription.quote, "usdt");
+    assert_eq!(subscription.kind, BarterMarketDataKind::OrderBookL1);
+}
+
+#[test]
+fn default_binance_spot_market_data_subscriptions_include_trade_l1_and_l2() {
+    let subscriptions = fdc_barter::default_binance_spot_market_data_subscriptions();
+
+    assert!(subscriptions
+        .iter()
+        .any(|subscription| subscription.kind == BarterMarketDataKind::Trade));
+    assert!(subscriptions
+        .iter()
+        .any(|subscription| subscription.kind == BarterMarketDataKind::OrderBookL1));
+    assert!(subscriptions
+        .iter()
+        .any(|subscription| subscription.kind == BarterMarketDataKind::OrderBook));
+}
