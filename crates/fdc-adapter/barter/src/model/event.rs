@@ -60,6 +60,38 @@ pub struct OrderBookL1Payload {
     pub ask_quantity: Option<DecimalQuantity>,
 }
 
+/// Order-book event shape emitted by Barter-rs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OrderBookUpdateKind {
+    Snapshot,
+    Update,
+}
+
+/// One price level in a normalized order book payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderBookLevelPayload {
+    pub price: Price,
+    pub quantity: DecimalQuantity,
+}
+
+/// Structured L2 order book payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OrderBookPayload {
+    pub update_kind: OrderBookUpdateKind,
+    pub bids: Vec<OrderBookLevelPayload>,
+    pub asks: Vec<OrderBookLevelPayload>,
+    pub sequence: Option<String>,
+}
+
+/// Structured liquidation payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LiquidationPayload {
+    pub side: TradeSide,
+    pub price: Price,
+    pub quantity: DecimalQuantity,
+    pub liquidation_time: TimestampNs,
+}
+
 /// Candle payload boundary for later historical and live candle mapping.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CandlePayload {
@@ -83,9 +115,9 @@ pub struct RawPayload {
 pub enum BarterMarketPayload {
     Trade(TradePayload),
     OrderBookL1(OrderBookL1Payload),
-    OrderBookDelta(RawPayload),
+    OrderBook(OrderBookPayload),
     Candle(CandlePayload),
-    Liquidation(RawPayload),
+    Liquidation(LiquidationPayload),
     Raw(RawPayload),
 }
 
@@ -94,7 +126,7 @@ impl BarterMarketPayload {
         match self {
             Self::Trade(_) => BarterMarketDataKind::Trade,
             Self::OrderBookL1(_) => BarterMarketDataKind::OrderBookL1,
-            Self::OrderBookDelta(_) => BarterMarketDataKind::OrderBook,
+            Self::OrderBook(_) => BarterMarketDataKind::OrderBook,
             Self::Candle(_) => BarterMarketDataKind::Candle,
             Self::Liquidation(_) => BarterMarketDataKind::Liquidation,
             Self::Raw(_) => BarterMarketDataKind::Trade,
@@ -113,6 +145,7 @@ pub struct BarterMarketEvent {
     pub exchange: String,
     /// mdb normalized symbol, for example BTCUSDT.
     pub symbol: Symbol,
+    pub market_type: BarterMarketType,
     /// Event kind.
     pub kind: BarterMarketDataKind,
     /// Exchange timestamp in nanoseconds.

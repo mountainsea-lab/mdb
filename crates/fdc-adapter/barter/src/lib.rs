@@ -26,5 +26,6 @@ pub use model::{
     BarterCheckpoint, BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest,
     BarterMarketEvent, BarterMarketPayload, BarterMarketType, BarterSourceState,
     BarterSourceStatus, CandlePayload, DecimalQuantity, HistoricalCursor, HistoricalPageRequest,
-    OrderBookL1Payload, RawPayload, TradePayload, TradeSide,
+    LiquidationPayload, OrderBookL1Payload, OrderBookLevelPayload, OrderBookPayload,
+    OrderBookUpdateKind, RawPayload, TradePayload, TradeSide,
 };

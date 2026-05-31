@@ -1,5 +1,12 @@
-use barter_data::event::{DataKind, MarketEvent};
-use barter_instrument::{instrument::market_data::MarketDataInstrument, Side};
+use barter_data::{
+    books::{Level, OrderBook},
+    event::{DataKind, MarketEvent},
+    subscription::book::OrderBookEvent,
+};
+use barter_instrument::{
+    instrument::market_data::{kind::MarketDataInstrumentKind, MarketDataInstrument},
+    Side,
+};
 use fdc_core::types::{Price, TimestampNs};
 use rust_decimal::Decimal;
 
@@ -7,8 +14,9 @@ use crate::{
     error::{BarterAdapterError, Result},
     mapper::{exchange::to_exchange_code, instrument::to_symbol},
     model::{
-        BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload, RawPayload, TradePayload,
-        TradeSide,
+        BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload, BarterMarketType,
+        LiquidationPayload, OrderBookL1Payload, OrderBookLevelPayload, OrderBookPayload,
+        OrderBookUpdateKind, RawPayload, TradePayload, TradeSide,
     },
 };
 
@@ -34,28 +42,41 @@ impl TryFrom<MarketEvent<MarketDataInstrument, DataKind>> for BarterMarketEvent 
             .ok_or(BarterAdapterError::InvalidTimestamp)?;
         let exchange = to_exchange_code(event.exchange);
         let symbol = to_symbol(&event.instrument);
+        let market_type = market_type_from_instrument(&event.instrument.kind);
+        let mut sequence = None;
         let payload = match event.kind {
             DataKind::Trade(trade) => BarterMarketPayload::Trade(TradePayload {
                 trade_id: Some(trade.id),
                 price: price_from_f64("price", trade.price)?,
                 quantity: decimal_from_f64("amount", trade.amount)?,
-                side: Some(match trade.side {
-                    Side::Buy => TradeSide::Buy,
-                    Side::Sell => TradeSide::Sell,
-                }),
+                side: Some(side_from_barter(trade.side)),
             }),
-            DataKind::OrderBookL1(_) => BarterMarketPayload::Raw(RawPayload {
-                description: "order_book_l1".to_string(),
+            DataKind::OrderBookL1(book) => BarterMarketPayload::OrderBookL1(OrderBookL1Payload {
+                bid_price: book.best_bid.map(|level| Price::new(level.price)),
+                bid_quantity: book.best_bid.map(|level| level.amount),
+                ask_price: book.best_ask.map(|level| Price::new(level.price)),
+                ask_quantity: book.best_ask.map(|level| level.amount),
             }),
-            DataKind::OrderBook(_) => BarterMarketPayload::OrderBookDelta(RawPayload {
-                description: "order_book".to_string(),
-            }),
+            DataKind::OrderBook(book) => {
+                let (payload, mapped_sequence) = map_order_book(book)?;
+                sequence = mapped_sequence;
+                BarterMarketPayload::OrderBook(payload)
+            }
             DataKind::Candle(_) => BarterMarketPayload::Raw(RawPayload {
                 description: "candle".to_string(),
             }),
-            DataKind::Liquidation(_) => BarterMarketPayload::Liquidation(RawPayload {
-                description: "liquidation".to_string(),
-            }),
+            DataKind::Liquidation(liquidation) => {
+                BarterMarketPayload::Liquidation(LiquidationPayload {
+                    side: side_from_barter(liquidation.side),
+                    price: price_from_f64("liquidation.price", liquidation.price)?,
+                    quantity: decimal_from_f64("liquidation.quantity", liquidation.quantity)?,
+                    liquidation_time: liquidation
+                        .time
+                        .timestamp_nanos_opt()
+                        .map(TimestampNs::from_nanos)
+                        .ok_or(BarterAdapterError::InvalidTimestamp)?,
+                })
+            }
         };
         let kind = payload.kind();
 
@@ -64,14 +85,91 @@ impl TryFrom<MarketEvent<MarketDataInstrument, DataKind>> for BarterMarketEvent 
             mode: BarterMarketDataMode::Live,
             exchange,
             symbol,
+            market_type,
             kind,
             timestamp,
             received_at,
             payload,
-            sequence: None,
+            sequence,
             checkpoint: None,
         })
     }
+}
+
+fn market_type_from_instrument(kind: &MarketDataInstrumentKind) -> BarterMarketType {
+    match kind {
+        MarketDataInstrumentKind::Spot => BarterMarketType::Spot,
+        MarketDataInstrumentKind::Future(_) => BarterMarketType::Future,
+        MarketDataInstrumentKind::Perpetual => BarterMarketType::Perpetual,
+        MarketDataInstrumentKind::Option(_) => BarterMarketType::Option,
+    }
+}
+
+fn side_from_barter(side: Side) -> TradeSide {
+    match side {
+        Side::Buy => TradeSide::Buy,
+        Side::Sell => TradeSide::Sell,
+    }
+}
+
+fn map_order_book(event: OrderBookEvent) -> Result<(OrderBookPayload, Option<String>)> {
+    let (update_kind, book) = match event {
+        OrderBookEvent::Snapshot(book) => (OrderBookUpdateKind::Snapshot, book),
+        OrderBookEvent::Update(book) => (OrderBookUpdateKind::Update, book),
+    };
+    let sequence = Some(book.sequence().to_string());
+    let (bids, asks) = order_book_levels(&book)?;
+
+    Ok((
+        OrderBookPayload {
+            update_kind,
+            bids,
+            asks,
+            sequence: sequence.clone(),
+        },
+        sequence,
+    ))
+}
+
+fn order_book_levels(
+    book: &OrderBook,
+) -> Result<(Vec<OrderBookLevelPayload>, Vec<OrderBookLevelPayload>)> {
+    let bids = book
+        .bids()
+        .levels()
+        .iter()
+        .copied()
+        .map(level_to_payload)
+        .collect::<Result<Vec<_>>>()?;
+    let asks = book
+        .asks()
+        .levels()
+        .iter()
+        .copied()
+        .map(level_to_payload)
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok((bids, asks))
+}
+
+fn level_to_payload(level: Level) -> Result<OrderBookLevelPayload> {
+    if level.price < Decimal::ZERO {
+        return Err(BarterAdapterError::InvalidNumericValue {
+            field: "order_book.price",
+            value: level.price.to_string().parse::<f64>().unwrap_or(f64::NAN),
+        });
+    }
+    if level.amount < Decimal::ZERO {
+        return Err(BarterAdapterError::InvalidNumericValue {
+            field: "order_book.amount",
+            value: level.amount.to_string().parse::<f64>().unwrap_or(f64::NAN),
+        });
+    }
+
+    Ok(OrderBookLevelPayload {
+        price: Price::new(level.price),
+        quantity: level.amount,
+    })
 }
 
 fn price_from_f64(field: &'static str, value: f64) -> Result<Price> {
