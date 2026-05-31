@@ -1,8 +1,11 @@
 use barter_data::{
     event::{DataKind, MarketEvent},
     exchange::binance::spot::BinanceSpot,
-    streams::{consumer::MarketStreamResult, reconnect, Streams},
-    subscription::trade::{PublicTrade, PublicTrades},
+    streams::{builder::multi::MultiStreamBuilder, consumer::MarketStreamResult, reconnect, Streams},
+    subscription::{
+        book::{OrderBooksL1, OrderBooksL2},
+        trade::{PublicTrade, PublicTrades},
+    },
 };
 use barter_instrument::instrument::market_data::{
     kind::MarketDataInstrumentKind, MarketDataInstrument,
@@ -127,6 +130,70 @@ pub async fn init_binance_spot_public_trades(
 
     Streams::<PublicTrades>::builder()
         .subscribe(barter_subscriptions)
+        .init()
+        .await
+        .map_err(|error| BarterAdapterError::LiveStreamInit(error.to_string()))
+}
+
+/// Start expanded Barter-rs Binance Spot market-data streams for trades, L1, and L2.
+pub async fn init_binance_spot_market_data(
+    subscriptions: impl IntoIterator<Item = LiveMarketDataSubscription>,
+) -> Result<Streams<MarketStreamResult<MarketDataInstrument, DataKind>>> {
+    let mut trade_subscriptions = Vec::new();
+    let mut l1_subscriptions = Vec::new();
+    let mut l2_subscriptions = Vec::new();
+
+    for subscription in subscriptions {
+        if subscription.exchange != LiveExchange::BinanceSpot {
+            return Err(BarterAdapterError::UnsupportedLiveSubscription(format!(
+                "{:?}:{}{}:{:?}",
+                subscription.exchange, subscription.base, subscription.quote, subscription.kind
+            )));
+        }
+
+        match subscription.kind {
+            BarterMarketDataKind::Trade => trade_subscriptions.push((
+                BinanceSpot::default(),
+                subscription.base,
+                subscription.quote,
+                subscription.instrument_kind,
+                PublicTrades,
+            )),
+            BarterMarketDataKind::OrderBookL1 => l1_subscriptions.push((
+                BinanceSpot::default(),
+                subscription.base,
+                subscription.quote,
+                subscription.instrument_kind,
+                OrderBooksL1,
+            )),
+            BarterMarketDataKind::OrderBook => l2_subscriptions.push((
+                BinanceSpot::default(),
+                subscription.base,
+                subscription.quote,
+                subscription.instrument_kind,
+                OrderBooksL2,
+            )),
+            unsupported => {
+                return Err(BarterAdapterError::UnsupportedLiveSubscription(format!(
+                    "binance_spot:{unsupported:?}"
+                )));
+            }
+        }
+    }
+
+    let mut builder = MultiStreamBuilder::<MarketStreamResult<MarketDataInstrument, DataKind>>::new();
+
+    if !trade_subscriptions.is_empty() {
+        builder = builder.add(Streams::<PublicTrades>::builder().subscribe(trade_subscriptions));
+    }
+    if !l1_subscriptions.is_empty() {
+        builder = builder.add(Streams::<OrderBooksL1>::builder().subscribe(l1_subscriptions));
+    }
+    if !l2_subscriptions.is_empty() {
+        builder = builder.add(Streams::<OrderBooksL2>::builder().subscribe(l2_subscriptions));
+    }
+
+    builder
         .init()
         .await
         .map_err(|error| BarterAdapterError::LiveStreamInit(error.to_string()))

@@ -325,3 +325,29 @@ fn default_binance_spot_market_data_subscriptions_include_trade_l1_and_l2() {
         .iter()
         .any(|subscription| subscription.kind == BarterMarketDataKind::OrderBook));
 }
+
+#[ignore = "requires public internet and FDC_BARTER_LIVE_SMOKE=1"]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ignored_live_smoke_can_initialize_expanded_binance_spot_market_data() {
+    if std::env::var("FDC_BARTER_LIVE_SMOKE").as_deref() != Ok("1") {
+        eprintln!("skipping live smoke test because FDC_BARTER_LIVE_SMOKE=1 is not set");
+        return;
+    }
+
+    let streams = fdc_barter::init_binance_spot_market_data(
+        fdc_barter::default_binance_spot_market_data_subscriptions(),
+    )
+    .await
+    .expect("expanded Binance Spot stream should initialize");
+
+    let envelopes = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        collect_live_market_data_envelopes(SOURCE_ID, streams.select_all(), 1),
+    )
+    .await
+    .expect("should receive one live event within timeout")
+    .expect("live collection should succeed");
+
+    assert_eq!(envelopes.len(), 1);
+    assert_eq!(envelopes[0].event.exchange, "binance_spot");
+}
