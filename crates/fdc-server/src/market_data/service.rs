@@ -4,7 +4,7 @@ use fdc_barter::{
     collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
     init_binance_spot_public_trades, public_trade_result_to_data_kind, BarterIngestionEnvelope,
     BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
-    DataQualityFlags, TradePayload, TradeSide,
+    BarterMarketType, DataQualityFlags, TradePayload, TradeSide,
 };
 use fdc_core::{
     types::{Price, Symbol, TimestampNs},
@@ -338,6 +338,7 @@ fn test_trade_envelope(symbol: &str, trade_id: &str) -> BarterIngestionEnvelope 
         mode: BarterMarketDataMode::Live,
         exchange: "binance_spot".to_string(),
         symbol: Symbol::new(symbol),
+        market_type: BarterMarketType::Spot,
         kind: BarterMarketDataKind::Trade,
         timestamp: TimestampNs::now(),
         received_at: TimestampNs::now(),

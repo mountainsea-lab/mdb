@@ -1,7 +1,7 @@
 use axum::{extract::State, routing::post, Json, Router};
 use fdc_barter::{
     BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
-    BarterMarketPayload, DataQualityFlags, TradePayload, TradeSide,
+    BarterMarketPayload, BarterMarketType, DataQualityFlags, TradePayload, TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use rust_decimal::Decimal;
@@ -116,6 +116,7 @@ fn fixture_trade_to_envelope(
         mode: BarterMarketDataMode::Live,
         exchange: "binance_spot".to_string(),
         symbol: Symbol::new(input.symbol),
+        market_type: BarterMarketType::Spot,
         kind: BarterMarketDataKind::Trade,
         timestamp: TimestampNs::from_nanos(timestamp),
         received_at: TimestampNs::from_nanos(timestamp + 100),

@@ -53,7 +53,7 @@ fn barter_kind_to_market_data_kind(
         (BarterMarketDataKind::OrderBookL1, BarterMarketPayload::OrderBookL1(_)) => {
             Ok(MarketDataKind::OrderBookL1)
         }
-        (BarterMarketDataKind::OrderBook, BarterMarketPayload::OrderBookDelta(_)) => {
+        (BarterMarketDataKind::OrderBook, BarterMarketPayload::OrderBook(_)) => {
             Ok(MarketDataKind::OrderBook)
         }
         (BarterMarketDataKind::Candle, BarterMarketPayload::Candle(_)) => {
@@ -88,9 +88,15 @@ fn barter_payload_to_market_data_payload(payload: &BarterMarketPayload) -> Marke
             ask_price: book.ask_price,
             ask_quantity: book.ask_quantity,
         }),
-        BarterMarketPayload::OrderBookDelta(raw) => {
+        BarterMarketPayload::OrderBook(book) => {
             MarketDataPayload::OrderBookDelta(RawMarketDataDto {
-                description: raw.description.clone(),
+                description: format!(
+                    "order_book {:?} bids={} asks={} sequence={}",
+                    book.update_kind,
+                    book.bids.len(),
+                    book.asks.len(),
+                    book.sequence.as_deref().unwrap_or("none")
+                ),
             })
         }
         BarterMarketPayload::Candle(candle) => MarketDataPayload::Candle(CandleDto {
@@ -102,9 +108,17 @@ fn barter_payload_to_market_data_payload(payload: &BarterMarketPayload) -> Marke
             close: candle.close,
             volume: candle.volume,
         }),
-        BarterMarketPayload::Liquidation(raw) => MarketDataPayload::Liquidation(RawMarketDataDto {
-            description: raw.description.clone(),
-        }),
+        BarterMarketPayload::Liquidation(liquidation) => {
+            MarketDataPayload::Liquidation(RawMarketDataDto {
+                description: format!(
+                    "liquidation side={:?} price={} quantity={} liquidation_time={}",
+                    liquidation.side,
+                    liquidation.price,
+                    liquidation.quantity,
+                    liquidation.liquidation_time.as_nanos()
+                ),
+            })
+        }
         BarterMarketPayload::Raw(raw) => MarketDataPayload::Raw(RawMarketDataDto {
             description: raw.description.clone(),
         }),

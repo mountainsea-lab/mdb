@@ -9,7 +9,7 @@ use fdc_barter::{
     collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
     init_binance_spot_public_trades, public_trade_result_to_data_kind, BarterIngestionEnvelope,
     BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
-    DataQualityFlags, DecimalQuantity, TradePayload, TradeSide,
+    BarterMarketType, DataQualityFlags, DecimalQuantity, TradePayload, TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{
@@ -27,6 +27,7 @@ fn sample_trade_event(symbol: &str, trade_id: &str, sequence: &str) -> BarterMar
         mode: BarterMarketDataMode::Live,
         exchange: "binance_spot".to_string(),
         symbol: Symbol::new(symbol),
+        market_type: BarterMarketType::Spot,
         kind: BarterMarketDataKind::Trade,
         timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_001),
         received_at: TimestampNs::from_nanos(1_700_000_000_000_000_010),

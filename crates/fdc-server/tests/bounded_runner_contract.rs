@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use fdc_barter::{
     BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
-    BarterMarketPayload, DataQualityFlags, DecimalQuantity, TradePayload, TradeSide,
+    BarterMarketPayload, BarterMarketType, DataQualityFlags, DecimalQuantity, TradePayload,
+    TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{BoundedMarketDataRunnerHandle, BoundedRunnerState};
@@ -15,6 +16,7 @@ fn sample_trade_event(symbol: &str, trade_id: &str, sequence: &str) -> BarterMar
         mode: BarterMarketDataMode::Live,
         exchange: "binance_spot".to_string(),
         symbol: Symbol::new(symbol),
+        market_type: BarterMarketType::Spot,
         kind: BarterMarketDataKind::Trade,
         timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_001),
         received_at: TimestampNs::from_nanos(1_700_000_000_000_000_010),
