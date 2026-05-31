@@ -5,6 +5,7 @@ This directory contains module-level design notes for `crates/fdc-adapter/barter
 Documents:
 
 - [Market Data Collection Requirements Design](./market-data-collection-requirements.md)
+- [Market Data Collection Implementation Plan](./market-data-collection-implementation-plan.md)
 
 Guideline:
 
