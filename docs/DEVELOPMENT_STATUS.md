@@ -1414,3 +1414,35 @@ Result:
 historical_ohlcv_contract: 2 passed
 fdc-barter: 30 passed, 4 ignored
 ```
+
+## Worktree Checkpoint: fdc-barter Historical Trades Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 4: Historical trades boundary.
+
+Completed capabilities:
+
+- Confirmed historical trade requests do not require candle intervals.
+- Added `historical_trade_dedupe_key()` for historical public trade records.
+- Dedupe key uses `(exchange, symbol, trade_id)` when trade id exists.
+- Dedupe key falls back to `(exchange, symbol, event_time, price, quantity)` when trade id is missing.
+- Added offline historical trades contract coverage.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test historical_trades_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test historical_ohlcv_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+historical_trades_contract: 3 passed
+historical_ohlcv_contract: 2 passed
+fdc-barter: 33 passed, 4 ignored
+```

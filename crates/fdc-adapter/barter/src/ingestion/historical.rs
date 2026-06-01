@@ -88,3 +88,22 @@ pub fn validate_historical_backfill_request(request: &HistoricalBackfillRequest)
 
     Ok(())
 }
+
+/// Build a stable dedupe key for historical public trade records.
+pub fn historical_trade_dedupe_key(event: &crate::model::BarterMarketEvent) -> Option<String> {
+    let crate::model::BarterMarketPayload::Trade(trade) = &event.payload else {
+        return None;
+    };
+
+    Some(match &trade.trade_id {
+        Some(trade_id) => format!("{}:{}:{}", event.exchange, event.symbol.as_str(), trade_id),
+        None => format!(
+            "{}:{}:{}:{}:{}",
+            event.exchange,
+            event.symbol.as_str(),
+            event.timestamp.as_nanos(),
+            trade.price.to_f64(),
+            trade.quantity
+        ),
+    })
+}

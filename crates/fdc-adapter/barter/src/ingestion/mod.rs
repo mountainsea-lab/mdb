@@ -4,7 +4,8 @@ pub mod live;
 
 pub use envelope::{BarterIngestionEnvelope, DataQualityFlags};
 pub use historical::{
-    validate_historical_backfill_request, HistoricalBackfillPage, HistoricalBackfillRequest,
+    historical_trade_dedupe_key, validate_historical_backfill_request, HistoricalBackfillPage,
+    HistoricalBackfillRequest,
     HistoricalBackfillSource, HistoricalPageOutcome,
 };
 pub use live::{

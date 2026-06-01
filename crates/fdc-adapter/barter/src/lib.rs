@@ -23,7 +23,8 @@ pub use ingestion::{
     init_binance_futures_usd_market_data, init_binance_spot_market_data,
     init_binance_spot_public_trades,
     map_live_market_data_result, map_live_trade_result, public_trade_result_to_data_kind,
-    validate_historical_backfill_request, BarterIngestionEnvelope, DataQualityFlags,
+    historical_trade_dedupe_key, validate_historical_backfill_request, BarterIngestionEnvelope,
+    DataQualityFlags,
     HistoricalBackfillPage, HistoricalBackfillRequest, HistoricalBackfillSource,
     HistoricalPageOutcome, LiveExchange, LiveMarketDataSubscription, LiveTradeSubscription,
 };
