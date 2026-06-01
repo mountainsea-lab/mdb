@@ -1346,3 +1346,37 @@ candle_mapper_contract: 2 passed
 mapper_market_data_contract: 4 passed
 fdc-barter: 27 passed, 3 ignored
 ```
+
+## Worktree Checkpoint: fdc-barter Binance Futures USD Live Initializer
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 2: Binance Futures USD live market-data initializer.
+
+Completed capabilities:
+
+- Added `LiveExchange::BinanceFuturesUsd`.
+- Added `default_binance_futures_usd_market_data_subscriptions()` for BTC/USDT and ETH/USDT derivatives streams.
+- Added `init_binance_futures_usd_market_data()` for Binance Futures USD trades, L1, L2, and liquidations.
+- Added offline normal contract coverage and ignored/gated live smoke coverage in `crates/fdc-adapter/barter/tests/binance_futures_live_contract.rs`.
+- Preserved existing Binance Spot live APIs and tests.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test binance_futures_live_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test binance_futures_live_contract -- --ignored --list
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test live_acquisition_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+binance_futures_live_contract: 1 passed, 1 ignored
+ignored compile/list check: passed
+live_acquisition_contract: passed
+fdc-barter: 28 passed, 4 ignored
+```
