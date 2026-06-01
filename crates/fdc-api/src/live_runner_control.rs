@@ -7,7 +7,7 @@ use fdc_barter::{
 };
 use fdc_server::{run_realtime_barter_envelope_stream, RealtimeMarketDataMvpConfig};
 use fdc_storage::QueryableMarketDataStore;
-use futures::{stream, StreamExt};
+use futures::stream;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

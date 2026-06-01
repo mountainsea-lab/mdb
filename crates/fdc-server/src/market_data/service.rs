@@ -11,7 +11,7 @@ use fdc_core::{
     Result,
 };
 use fdc_storage::{MarketDataQuery, QueryableMarketDataStore, StorageWriteRecord};
-use futures::{stream, StreamExt};
+use futures::stream;
 use rust_decimal::Decimal;
 
 use crate::{
@@ -332,6 +332,7 @@ fn default_live_subscription_labels() -> Vec<String> {
 fn live_subscription_label(subscription: LiveMarketDataSubscription) -> String {
     let exchange = match subscription.exchange {
         fdc_barter::LiveExchange::BinanceSpot => "binance_spot",
+        fdc_barter::LiveExchange::BinanceFuturesUsd => "binance_futures_usd",
     };
     format!(
         "{}:{}{}:{}",
@@ -392,6 +393,21 @@ fn test_trade_envelope(symbol: &str, trade_id: &str) -> BarterIngestionEnvelope 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_subscription_label_formats_binance_futures_usd() {
+        let subscription = fdc_barter::default_binance_futures_usd_market_data_subscriptions()
+            .into_iter()
+            .find(|subscription| {
+                subscription.base == "btc" && subscription.kind == BarterMarketDataKind::Liquidation
+            })
+            .expect("default futures subscriptions include BTC/USDT liquidations");
+
+        assert_eq!(
+            live_subscription_label(subscription),
+            "binance_futures_usd:BTCUSDT:liquidation"
+        );
+    }
 
     #[test]
     fn default_live_subscription_labels_cover_trades_l1_and_l2_for_default_symbols() {

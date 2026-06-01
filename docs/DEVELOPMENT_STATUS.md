@@ -1476,3 +1476,40 @@ Result:
 quality_metadata_contract: 3 passed
 fdc-barter: 36 passed, 4 ignored
 ```
+
+## Worktree Checkpoint: B20b Warning Cleanup Start
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `b20b-warning-cleanup`
+Plan: `docs/superpowers/plans/2026-06-01-mdb-next-development-slices.md`
+
+Completed B20b startup and first low-risk cleanup slice.
+
+Completed capabilities:
+
+- Pushed merged `mdb-mqdev` fdc-barter next-market-data commits to `origin/mdb-mqdev`.
+- Captured B20b baseline with `CARGO_NET_OFFLINE=true rtk cargo check -p fdc-api`.
+- Fixed the compile regression introduced by adding `LiveExchange::BinanceFuturesUsd`: `fdc-server` now formats futures live subscription labels as `binance_futures_usd`.
+- Added regression coverage for Binance Futures USD subscription label projection without adding a direct `barter-instrument` dependency to `fdc-server`.
+- Removed behavior-free unused `StreamExt` imports from `fdc-server` and `fdc-api` live runner paths.
+
+Baseline after compile-regression fix:
+
+```text
+CARGO_NET_OFFLINE=true rtk cargo check -p fdc-api
+Result: 0 errors, 30 warnings
+```
+
+Targeted verification so far:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-server live_subscription_label_formats_binance_futures_usd
+CARGO_NET_OFFLINE=true rtk cargo check -p fdc-api
+```
+
+Result:
+
+```text
+fdc-server futures label regression test: 1 passed
+fdc-api check after unused import cleanup: 0 errors, 28 warnings
+```
