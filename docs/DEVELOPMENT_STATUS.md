@@ -1213,3 +1213,102 @@ Suggested analysis questions:
 6. Configuration: default subscriptions, exchange/symbol configuration, backoff/reconnect policy, and whether live is enabled in production by default.
 
 Next session should start by writing a short analysis/design document for the next production live supervisor evolution before coding.
+
+## Session Checkpoint: Expanded Barter Market Data Collection
+
+Last updated: 2026-06-01 implementation checkpoint
+Checkpoint commit before this note: `feat: use expanded barter live market data upstream`
+Local branch state when written: `mdb-mqdev` was 12 commits ahead of `origin/mdb-mqdev` before the status/plan commit.
+
+Current active work: `fdc-barter` has moved from trade-only realtime acquisition to the first expanded market-data slice for crypto exchange data.
+
+Design and plan committed:
+
+- `docs/superpowers/specs/2026-05-31-multi-source-data-adapter-architecture-design.md`
+- `crates/fdc-adapter/barter/docs/market-data-collection-requirements.md`
+- `crates/fdc-adapter/barter/docs/market-data-collection-implementation-plan.md`
+- `docs/superpowers/plans/2026-06-01-mdb-next-development-slices.md`
+
+Completed in code and docs:
+
+- Added precise crypto market-data capability declarations through `supported_crypto_market_data_capabilities()`.
+- Added `BarterMarketType` and market-type metadata on `BarterMarketEvent`.
+- Replaced raw placeholders for key market-data types with structured payloads:
+  - `OrderBookL1Payload`
+  - `OrderBookPayload`
+  - `OrderBookLevelPayload`
+  - `LiquidationPayload`
+  - `OrderBookUpdateKind`
+- Preserved structured trade mapping behavior.
+- Mapped Barter-rs events into structured mdb payloads for:
+  - trades
+  - L1 top-of-book updates
+  - L2 order-book snapshot/update events
+  - liquidations
+- Added generic live market-data subscription and collection APIs:
+  - `LiveMarketDataSubscription`
+  - `default_binance_spot_market_data_subscriptions()`
+  - `init_binance_spot_market_data()`
+  - `map_live_market_data_result()`
+  - `collect_live_market_data_envelopes()`
+- Kept backward-compatible trade-only wrappers:
+  - `default_binance_spot_trade_subscriptions()`
+  - `init_binance_spot_public_trades()`
+  - `map_live_trade_result()`
+  - `collect_live_trade_envelopes()`
+- Updated downstream structured-payload consumers in `fdc-api` and `fdc-server` so the existing production live flow can consume expanded Barter market-data envelopes.
+- Preserved dependency boundary: Barter-rs crates remain isolated under `crates/fdc-adapter/barter`.
+
+Recent commits included in this checkpoint:
+
+```text
+273d078 feat: use expanded barter live market data upstream
+0f1b720 fix: update barter structured payload consumers
+48de651 feat: initialize expanded binance spot market data streams
+363903b feat: add barter live market data subscriptions
+b66c9b9 refactor: generalize barter live market data mapping
+b4af116 feat: map structured barter market data payloads
+18b4bb2 feat: declare barter market data capabilities
+350e0d3 docs: plan barter market data implementation
+1be8782 docs: add barter market data requirements
+9833c68 docs: design multi-source data adapter architecture
+fc29501 commit
+b23b74d docs: checkpoint realtime collection progress
+```
+
+Verification on 2026-06-01:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-api --test acquisition_api_mvp_contract -p fdc-server --test production_server_router_contract
+grep -R "barter_data\|barter-instrument\|barter_instrument" -n crates \
+  | grep -v "crates/fdc-adapter/barter" \
+  | grep -v "target" || true
+```
+
+Result:
+
+```text
+fdc-barter: 25 passed, 3 ignored
+fdc-api/fdc-server selected contracts: 11 passed, 2 ignored
+Barter dependency boundary grep: no output
+```
+
+Known caveats:
+
+- `docs/DEVELOPMENT_STATUS.md` remains append-only and contains older checkpoints above this section; this section is the current resume point.
+- Optional live smoke tests remain ignored and environment-gated.
+- Existing warnings remain from older crates and should be handled in narrow stabilization slices.
+- `Cargo.lock` policy is still undecided unless a later B20c slice changes it.
+
+Next recommended development plan:
+
+- Start from `docs/superpowers/plans/2026-06-01-mdb-next-development-slices.md`.
+- Recommended order:
+  1. B20b warning cleanup by crate.
+  2. B20c Cargo.lock policy decision.
+  3. B20d dependency boundary audit report.
+  4. Production live supervisor v2 design.
+  5. Persistence boundary design.
+  6. SQL/query integration design.
+  7. Historical REST backfill design and implementation.
