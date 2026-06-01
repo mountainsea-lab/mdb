@@ -92,9 +92,10 @@ pub struct LiquidationPayload {
     pub liquidation_time: TimestampNs,
 }
 
-/// Candle payload boundary for later historical and live candle mapping.
+/// Candle payload boundary for historical and live candle mapping.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CandlePayload {
+    pub interval: Option<String>,
     pub open_time: TimestampNs,
     pub close_time: TimestampNs,
     pub open: Price,
@@ -102,6 +103,8 @@ pub struct CandlePayload {
     pub low: Price,
     pub close: Price,
     pub volume: DecimalQuantity,
+    pub trade_count: Option<u64>,
+    pub quote_volume: Option<DecimalQuantity>,
 }
 
 /// Raw payload boundary for event kinds not fully modeled in Phase A.

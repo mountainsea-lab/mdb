@@ -1312,3 +1312,37 @@ Next recommended development plan:
   5. Persistence boundary design.
   6. SQL/query integration design.
   7. Historical REST backfill design and implementation.
+
+## Worktree Checkpoint: fdc-barter Candle/OHLCV Payload Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 1: Candle/OHLCV payload and mapper contract.
+
+Completed capabilities:
+
+- Extended `CandlePayload` with research/backtest fields:
+  - `interval: Option<String>`
+  - `trade_count: Option<u64>`
+  - `quote_volume: Option<DecimalQuantity>`
+- Added offline candle contract tests in `crates/fdc-adapter/barter/tests/candle_mapper_contract.rs`.
+- Mapped Barter-rs `DataKind::Candle` into `BarterMarketPayload::Candle` instead of a raw placeholder.
+- Preserved existing Trade/L1/L2/Liquidation mapper behavior.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test candle_mapper_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test mapper_market_data_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+candle_mapper_contract: 2 passed
+mapper_market_data_contract: 4 passed
+fdc-barter: 27 passed, 3 ignored
+```

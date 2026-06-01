@@ -15,8 +15,8 @@ use crate::{
     mapper::{exchange::to_exchange_code, instrument::to_symbol},
     model::{
         BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload, BarterMarketType,
-        LiquidationPayload, OrderBookL1Payload, OrderBookLevelPayload, OrderBookPayload,
-        OrderBookUpdateKind, RawPayload, TradePayload, TradeSide,
+        CandlePayload, LiquidationPayload, OrderBookL1Payload, OrderBookLevelPayload,
+        OrderBookPayload, OrderBookUpdateKind, TradePayload, TradeSide,
     },
 };
 
@@ -62,8 +62,21 @@ impl TryFrom<MarketEvent<MarketDataInstrument, DataKind>> for BarterMarketEvent 
                 sequence = mapped_sequence;
                 BarterMarketPayload::OrderBook(payload)
             }
-            DataKind::Candle(_) => BarterMarketPayload::Raw(RawPayload {
-                description: "candle".to_string(),
+            DataKind::Candle(candle) => BarterMarketPayload::Candle(CandlePayload {
+                interval: None,
+                open_time: timestamp,
+                close_time: candle
+                    .close_time
+                    .timestamp_nanos_opt()
+                    .map(TimestampNs::from_nanos)
+                    .ok_or(BarterAdapterError::InvalidTimestamp)?,
+                open: price_from_f64("candle.open", candle.open)?,
+                high: price_from_f64("candle.high", candle.high)?,
+                low: price_from_f64("candle.low", candle.low)?,
+                close: price_from_f64("candle.close", candle.close)?,
+                volume: decimal_from_f64("candle.volume", candle.volume)?,
+                trade_count: Some(candle.trade_count),
+                quote_volume: None,
             }),
             DataKind::Liquidation(liquidation) => {
                 BarterMarketPayload::Liquidation(LiquidationPayload {
