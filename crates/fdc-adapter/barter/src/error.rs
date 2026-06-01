@@ -32,6 +32,18 @@ pub enum BarterAdapterError {
     #[error("invalid historical request: {0}")]
     InvalidHistoricalRequest(String),
 
+    /// No historical provider is registered for the requested exchange.
+    #[error("unsupported historical exchange: {0}")]
+    UnsupportedHistoricalExchange(String),
+
+    /// A historical provider does not support the requested subscription shape.
+    #[error("unsupported historical subscription: {0}")]
+    UnsupportedHistoricalSubscription(String),
+
+    /// A historical REST boundary failed before or during request execution.
+    #[error("historical REST error: {0}")]
+    HistoricalRest(String),
+
     /// The adapter payload cannot be mapped to a neutral transform DTO.
     #[error("unsupported market data payload for transform DTO mapping: {0}")]
     UnsupportedTransformPayload(String),
