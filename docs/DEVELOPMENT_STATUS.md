@@ -1552,3 +1552,40 @@ Boundary note:
 
 - Barter-rs and exchange REST implementation details remain inside `fdc-barter`.
 - Default tests remain offline; real REST execution can be added later behind ignored/gated smoke tests.
+
+## Worktree Checkpoint: fdc-barter Binance Spot Historical OHLCV Provider Parser
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-binance-ohlcv-provider`
+Design: `docs/superpowers/specs/2026-06-01-fdc-barter-multi-exchange-historical-rest-design.md`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-multi-exchange-historical-rest.md`
+
+Completed the next historical REST implementation slice by turning an offline Binance Spot `/api/v3/klines` JSON response body into adapter-owned historical candle envelopes.
+
+Completed capabilities:
+
+- Added `BinanceSpotOhlcvProvider`, an exchange-specific `HistoricalExchangeProvider` for parsed Binance Spot kline rows.
+- Added `binance_spot_ohlcv_provider_from_response()` for offline-testable response parsing without default network I/O.
+- Parsed Binance kline arrays into `CandlePayload` values with open/high/low/close, base volume, quote volume, trade count, open time, and close time.
+- Emitted `BarterMarketEvent` values in `Historical` mode and wrapped them with `BarterIngestionEnvelope::from_backfill_event()`.
+- Added next-cursor pagination based on the last kline close time when the response fills the requested page limit.
+- Re-exported the provider type and constructor from `fdc-barter`.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter binance_spot_ohlcv_provider -- --nocapture
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+binance_spot_ohlcv_provider contracts: 3 passed
+fdc-barter: 45 passed, 4 ignored
+```
+
+Boundary note:
+
+- The provider remains adapter-owned and offline-testable; it does not expose reqwest, Barter REST internals, or exchange-specific transport types outside `fdc-barter`.
+- Live network execution should still be added only behind explicit ignored/gated smoke tests.

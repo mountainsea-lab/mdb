@@ -4,8 +4,9 @@ pub mod live;
 
 pub use envelope::{BarterIngestionEnvelope, DataQualityFlags};
 pub use historical::{
-    binance_spot_ohlcv_capabilities, binance_spot_ohlcv_rest_request_descriptor,
-    historical_trade_dedupe_key, validate_historical_backfill_request, HistoricalBackfillPage,
+    binance_spot_ohlcv_capabilities, binance_spot_ohlcv_provider_from_response,
+    binance_spot_ohlcv_rest_request_descriptor, historical_trade_dedupe_key,
+    validate_historical_backfill_request, BinanceSpotOhlcvProvider, HistoricalBackfillPage,
     HistoricalBackfillRequest, HistoricalBackfillSource, HistoricalExchangeProvider,
     HistoricalPageOutcome, HistoricalProviderCapabilities, HistoricalProviderRegistry,
     HistoricalRestRequestDescriptor,

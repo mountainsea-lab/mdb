@@ -17,17 +17,18 @@ pub use capability::{
 pub use config::{BarterAdapterConfig, BarterDataMode};
 pub use error::{BarterAdapterError, Result};
 pub use ingestion::{
-    binance_spot_ohlcv_capabilities, binance_spot_ohlcv_rest_request_descriptor,
-    collect_live_market_data_envelopes, collect_live_trade_envelopes,
-    default_binance_futures_usd_market_data_subscriptions,
+    binance_spot_ohlcv_capabilities, binance_spot_ohlcv_provider_from_response,
+    binance_spot_ohlcv_rest_request_descriptor, collect_live_market_data_envelopes,
+    collect_live_trade_envelopes, default_binance_futures_usd_market_data_subscriptions,
     default_binance_spot_market_data_subscriptions, default_binance_spot_trade_subscriptions,
     historical_trade_dedupe_key, init_binance_futures_usd_market_data,
     init_binance_spot_market_data, init_binance_spot_public_trades, map_live_market_data_result,
     map_live_trade_result, public_trade_result_to_data_kind, validate_historical_backfill_request,
-    BarterIngestionEnvelope, DataQualityFlags, HistoricalBackfillPage, HistoricalBackfillRequest,
-    HistoricalBackfillSource, HistoricalExchangeProvider, HistoricalPageOutcome,
-    HistoricalProviderCapabilities, HistoricalProviderRegistry, HistoricalRestRequestDescriptor,
-    LiveExchange, LiveMarketDataSubscription, LiveTradeSubscription,
+    BarterIngestionEnvelope, BinanceSpotOhlcvProvider, DataQualityFlags, HistoricalBackfillPage,
+    HistoricalBackfillRequest, HistoricalBackfillSource, HistoricalExchangeProvider,
+    HistoricalPageOutcome, HistoricalProviderCapabilities, HistoricalProviderRegistry,
+    HistoricalRestRequestDescriptor, LiveExchange, LiveMarketDataSubscription,
+    LiveTradeSubscription,
 };
 pub use mapper::event::map_market_event;
 pub use model::{
