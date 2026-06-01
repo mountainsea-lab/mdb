@@ -1446,3 +1446,33 @@ historical_trades_contract: 3 passed
 historical_ohlcv_contract: 2 passed
 fdc-barter: 33 passed, 4 ignored
 ```
+
+## Worktree Checkpoint: fdc-barter Adapter Quality Metadata Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 5: Adapter quality/runtime metadata boundary.
+
+Completed capabilities:
+
+- Added `BarterRuntimeObservation` for non-envelope runtime observations such as reconnect and stream item errors.
+- Added `BarterKindCounters` to track emitted events by `BarterMarketDataKind`.
+- Added `event_latency_ns()` helper for adapter receive latency calculation.
+- Added offline quality metadata contract tests.
+- Kept reconnect envelope behavior unchanged; `map_live_market_data_result()` still returns `Ok(None)` for reconnect events.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test quality_metadata_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+quality_metadata_contract: 3 passed
+fdc-barter: 36 passed, 4 ignored
+```

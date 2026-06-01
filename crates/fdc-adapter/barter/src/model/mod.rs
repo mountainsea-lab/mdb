@@ -1,9 +1,11 @@
 pub mod checkpoint;
 pub mod event;
+pub mod quality;
 pub mod request;
 pub mod source;
 
 pub use checkpoint::{BarterCheckpoint, HistoricalCursor};
+pub use quality::{event_latency_ns, BarterKindCounters, BarterRuntimeObservation};
 pub use event::{
     BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
     BarterMarketType, CandlePayload, DecimalQuantity, LiquidationPayload, OrderBookL1Payload,

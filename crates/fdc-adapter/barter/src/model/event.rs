@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::checkpoint::BarterCheckpoint;
 
 /// mdb-normalized market data kind produced by `fdc-barter`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum BarterMarketDataKind {
     Trade,
     OrderBookL1,

@@ -30,8 +30,9 @@ pub use ingestion::{
 };
 pub use mapper::event::map_market_event;
 pub use model::{
-    BarterCheckpoint, BarterMarketDataKind, BarterMarketDataMode, BarterMarketDataRequest,
-    BarterMarketEvent, BarterMarketPayload, BarterMarketType, BarterSourceState,
+    event_latency_ns, BarterCheckpoint, BarterKindCounters, BarterMarketDataKind,
+    BarterMarketDataMode, BarterMarketDataRequest,
+    BarterMarketEvent, BarterMarketPayload, BarterMarketType, BarterRuntimeObservation, BarterSourceState,
     BarterSourceStatus, CandlePayload, DecimalQuantity, HistoricalCursor, HistoricalPageRequest,
     LiquidationPayload, OrderBookL1Payload, OrderBookLevelPayload, OrderBookPayload,
     OrderBookUpdateKind, RawPayload, TradePayload, TradeSide,
