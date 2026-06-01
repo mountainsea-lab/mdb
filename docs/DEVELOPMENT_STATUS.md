@@ -1513,3 +1513,42 @@ Result:
 fdc-server futures label regression test: 1 passed
 fdc-api check after unused import cleanup: 0 errors, 28 warnings
 ```
+
+## Worktree Checkpoint: fdc-barter Multi-Exchange Historical REST Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-historical-rest`
+Design: `docs/superpowers/specs/2026-06-01-fdc-barter-multi-exchange-historical-rest-design.md`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-multi-exchange-historical-rest.md`
+
+Completed first implementation slice for a Barter-integration-inspired historical REST acquisition boundary.
+
+Completed capabilities:
+
+- Added `HistoricalProviderCapabilities` for exchange, market type, data kind, interval, and limit metadata.
+- Added `HistoricalExchangeProvider` as the exchange-specific historical provider trait.
+- Added `HistoricalProviderRegistry` to route `HistoricalBackfillRequest` by normalized exchange.
+- Implemented `HistoricalBackfillSource` for `HistoricalProviderRegistry` to preserve source compatibility.
+- Added explicit historical errors for unsupported exchange, unsupported subscription, and REST boundary failures.
+- Added `HistoricalRestRequestDescriptor` as an adapter-owned REST request shape inspired by Barter-rs `RestRequest`.
+- Added Binance Spot OHLCV descriptor builder for `/api/v3/klines` without default network I/O.
+- Re-exported new historical boundary types from `fdc-barter`.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test historical_provider_registry_contract --test binance_spot_historical_rest_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+historical provider/REST contracts: 6 passed
+fdc-barter: 42 passed, 4 ignored
+```
+
+Boundary note:
+
+- Barter-rs and exchange REST implementation details remain inside `fdc-barter`.
+- Default tests remain offline; real REST execution can be added later behind ignored/gated smoke tests.
