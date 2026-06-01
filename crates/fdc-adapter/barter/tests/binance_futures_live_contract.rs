@@ -19,9 +19,15 @@ fn default_binance_futures_usd_subscriptions_include_derivatives_targets() {
             && sub.quote == "usdt"
             && sub.kind == BarterMarketDataKind::Trade
     }));
-    assert!(subscriptions.iter().any(|sub| sub.kind == BarterMarketDataKind::OrderBookL1));
-    assert!(subscriptions.iter().any(|sub| sub.kind == BarterMarketDataKind::OrderBook));
-    assert!(subscriptions.iter().any(|sub| sub.kind == BarterMarketDataKind::Liquidation));
+    assert!(subscriptions
+        .iter()
+        .any(|sub| sub.kind == BarterMarketDataKind::OrderBookL1));
+    assert!(subscriptions
+        .iter()
+        .any(|sub| sub.kind == BarterMarketDataKind::OrderBook));
+    assert!(subscriptions
+        .iter()
+        .any(|sub| sub.kind == BarterMarketDataKind::Liquidation));
 }
 
 #[tokio::test]

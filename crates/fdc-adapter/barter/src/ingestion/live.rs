@@ -1,7 +1,9 @@
 use barter_data::{
     event::{DataKind, MarketEvent},
     exchange::binance::{futures::BinanceFuturesUsd, spot::BinanceSpot},
-    streams::{builder::multi::MultiStreamBuilder, consumer::MarketStreamResult, reconnect, Streams},
+    streams::{
+        builder::multi::MultiStreamBuilder, consumer::MarketStreamResult, reconnect, Streams,
+    },
     subscription::{
         book::{OrderBooksL1, OrderBooksL2},
         liquidation::Liquidations,
@@ -208,7 +210,8 @@ pub async fn init_binance_spot_market_data(
         }
     }
 
-    let mut builder = MultiStreamBuilder::<MarketStreamResult<MarketDataInstrument, DataKind>>::new();
+    let mut builder =
+        MultiStreamBuilder::<MarketStreamResult<MarketDataInstrument, DataKind>>::new();
 
     if !trade_subscriptions.is_empty() {
         builder = builder.add(Streams::<PublicTrades>::builder().subscribe(trade_subscriptions));
@@ -280,7 +283,8 @@ pub async fn init_binance_futures_usd_market_data(
         }
     }
 
-    let mut builder = MultiStreamBuilder::<MarketStreamResult<MarketDataInstrument, DataKind>>::new();
+    let mut builder =
+        MultiStreamBuilder::<MarketStreamResult<MarketDataInstrument, DataKind>>::new();
 
     if !trade_subscriptions.is_empty() {
         builder = builder.add(Streams::<PublicTrades>::builder().subscribe(trade_subscriptions));
@@ -292,7 +296,8 @@ pub async fn init_binance_futures_usd_market_data(
         builder = builder.add(Streams::<OrderBooksL2>::builder().subscribe(l2_subscriptions));
     }
     if !liquidation_subscriptions.is_empty() {
-        builder = builder.add(Streams::<Liquidations>::builder().subscribe(liquidation_subscriptions));
+        builder =
+            builder.add(Streams::<Liquidations>::builder().subscribe(liquidation_subscriptions));
     }
 
     builder

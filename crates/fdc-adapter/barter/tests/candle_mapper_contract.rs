@@ -38,7 +38,10 @@ fn candle_payload_exposes_research_fields() {
     assert_eq!(payload.interval.as_deref(), Some("1m"));
     assert_eq!(payload.trade_count, Some(42));
     assert_eq!(payload.quote_volume.unwrap().to_string(), "1296225.00");
-    assert_eq!(BarterMarketPayload::Candle(payload).kind(), BarterMarketDataKind::Candle);
+    assert_eq!(
+        BarterMarketPayload::Candle(payload).kind(),
+        BarterMarketDataKind::Candle
+    );
 }
 
 #[test]

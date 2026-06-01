@@ -53,7 +53,10 @@ impl From<&HistoricalBackfillPage> for HistoricalPageOutcome {
 /// Offline-testable boundary implemented by concrete historical providers.
 #[async_trait]
 pub trait HistoricalBackfillSource: Send + Sync {
-    async fn fetch_page(&self, request: HistoricalBackfillRequest) -> Result<HistoricalBackfillPage>;
+    async fn fetch_page(
+        &self,
+        request: HistoricalBackfillRequest,
+    ) -> Result<HistoricalBackfillPage>;
 }
 
 /// Validate a historical page request before provider I/O.
