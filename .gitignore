@@ -109,3 +109,6 @@ config/production.toml
 core.*
 .claude
 .codegraph
+
+.worktrees/
+worktrees/
