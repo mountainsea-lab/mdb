@@ -28,6 +28,10 @@ pub enum BarterAdapterError {
     #[error("unsupported live subscription: {0}")]
     UnsupportedLiveSubscription(String),
 
+    /// A historical backfill request is invalid before provider I/O.
+    #[error("invalid historical request: {0}")]
+    InvalidHistoricalRequest(String),
+
     /// The adapter payload cannot be mapped to a neutral transform DTO.
     #[error("unsupported market data payload for transform DTO mapping: {0}")]
     UnsupportedTransformPayload(String),

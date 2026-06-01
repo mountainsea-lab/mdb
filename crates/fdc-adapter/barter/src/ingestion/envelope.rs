@@ -36,4 +36,10 @@ impl BarterIngestionEnvelope {
             event,
         }
     }
+
+    pub fn from_backfill_event(source_id: impl Into<String>, event: BarterMarketEvent) -> Self {
+        let mut envelope = Self::from_event(source_id, event);
+        envelope.quality.is_backfill = true;
+        envelope
+    }
 }

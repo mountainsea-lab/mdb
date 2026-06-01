@@ -1312,3 +1312,167 @@ Next recommended development plan:
   5. Persistence boundary design.
   6. SQL/query integration design.
   7. Historical REST backfill design and implementation.
+
+## Worktree Checkpoint: fdc-barter Candle/OHLCV Payload Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 1: Candle/OHLCV payload and mapper contract.
+
+Completed capabilities:
+
+- Extended `CandlePayload` with research/backtest fields:
+  - `interval: Option<String>`
+  - `trade_count: Option<u64>`
+  - `quote_volume: Option<DecimalQuantity>`
+- Added offline candle contract tests in `crates/fdc-adapter/barter/tests/candle_mapper_contract.rs`.
+- Mapped Barter-rs `DataKind::Candle` into `BarterMarketPayload::Candle` instead of a raw placeholder.
+- Preserved existing Trade/L1/L2/Liquidation mapper behavior.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test candle_mapper_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test mapper_market_data_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+candle_mapper_contract: 2 passed
+mapper_market_data_contract: 4 passed
+fdc-barter: 27 passed, 3 ignored
+```
+
+## Worktree Checkpoint: fdc-barter Binance Futures USD Live Initializer
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 2: Binance Futures USD live market-data initializer.
+
+Completed capabilities:
+
+- Added `LiveExchange::BinanceFuturesUsd`.
+- Added `default_binance_futures_usd_market_data_subscriptions()` for BTC/USDT and ETH/USDT derivatives streams.
+- Added `init_binance_futures_usd_market_data()` for Binance Futures USD trades, L1, L2, and liquidations.
+- Added offline normal contract coverage and ignored/gated live smoke coverage in `crates/fdc-adapter/barter/tests/binance_futures_live_contract.rs`.
+- Preserved existing Binance Spot live APIs and tests.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test binance_futures_live_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test binance_futures_live_contract -- --ignored --list
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test live_acquisition_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+binance_futures_live_contract: 1 passed, 1 ignored
+ignored compile/list check: passed
+live_acquisition_contract: passed
+fdc-barter: 28 passed, 4 ignored
+```
+
+## Worktree Checkpoint: fdc-barter Historical OHLCV Backfill Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 3: Historical OHLCV backfill boundary.
+
+Completed capabilities:
+
+- Added adapter-owned historical backfill types:
+  - `HistoricalBackfillRequest`
+  - `HistoricalBackfillPage`
+  - `HistoricalPageOutcome`
+  - `HistoricalBackfillSource`
+- Added `validate_historical_backfill_request()` for offline request validation.
+- Added `BarterAdapterError::InvalidHistoricalRequest`.
+- Added `BarterIngestionEnvelope::from_backfill_event()` to mark backfill quality flags.
+- Added offline OHLCV backfill contract tests using a fake source.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test historical_ohlcv_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+historical_ohlcv_contract: 2 passed
+fdc-barter: 30 passed, 4 ignored
+```
+
+## Worktree Checkpoint: fdc-barter Historical Trades Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 4: Historical trades boundary.
+
+Completed capabilities:
+
+- Confirmed historical trade requests do not require candle intervals.
+- Added `historical_trade_dedupe_key()` for historical public trade records.
+- Dedupe key uses `(exchange, symbol, trade_id)` when trade id exists.
+- Dedupe key falls back to `(exchange, symbol, event_time, price, quantity)` when trade id is missing.
+- Added offline historical trades contract coverage.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test historical_trades_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test historical_ohlcv_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+historical_trades_contract: 3 passed
+historical_ohlcv_contract: 2 passed
+fdc-barter: 33 passed, 4 ignored
+```
+
+## Worktree Checkpoint: fdc-barter Adapter Quality Metadata Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 5: Adapter quality/runtime metadata boundary.
+
+Completed capabilities:
+
+- Added `BarterRuntimeObservation` for non-envelope runtime observations such as reconnect and stream item errors.
+- Added `BarterKindCounters` to track emitted events by `BarterMarketDataKind`.
+- Added `event_latency_ns()` helper for adapter receive latency calculation.
+- Added offline quality metadata contract tests.
+- Kept reconnect envelope behavior unchanged; `map_live_market_data_result()` still returns `Ok(None)` for reconnect events.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test quality_metadata_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+quality_metadata_contract: 3 passed
+fdc-barter: 36 passed, 4 ignored
+```

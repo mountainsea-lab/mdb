@@ -9,7 +9,8 @@ fn capability_matrix_contains_first_slice_realtime_targets() {
     let binance_spot = capabilities
         .iter()
         .find(|capability| {
-            capability.exchange == "binance_spot" && capability.market_type == BarterMarketType::Spot
+            capability.exchange == "binance_spot"
+                && capability.market_type == BarterMarketType::Spot
         })
         .expect("binance spot capability should exist");
     assert!(binance_spot.supports_live);
@@ -57,13 +58,7 @@ fn capability_matrix_marks_historical_as_future_work_for_now() {
 fn capability_matrix_includes_known_barter_trade_only_exchanges() {
     let capabilities = supported_crypto_market_data_capabilities();
 
-    for exchange in [
-        "coinbase",
-        "bitfinex",
-        "bitmex",
-        "gateio_spot",
-        "okx",
-    ] {
+    for exchange in ["coinbase", "bitfinex", "bitmex", "gateio_spot", "okx"] {
         let capability = capabilities
             .iter()
             .find(|capability| capability.exchange == exchange)
