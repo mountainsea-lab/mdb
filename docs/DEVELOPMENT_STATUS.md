@@ -1380,3 +1380,37 @@ ignored compile/list check: passed
 live_acquisition_contract: passed
 fdc-barter: 28 passed, 4 ignored
 ```
+
+## Worktree Checkpoint: fdc-barter Historical OHLCV Backfill Boundary
+
+Last updated: 2026-06-01 task checkpoint
+Branch: `fdc-barter-next-market-data`
+Plan: `docs/superpowers/plans/2026-06-01-fdc-barter-next-market-data.md`
+
+Completed Task 3: Historical OHLCV backfill boundary.
+
+Completed capabilities:
+
+- Added adapter-owned historical backfill types:
+  - `HistoricalBackfillRequest`
+  - `HistoricalBackfillPage`
+  - `HistoricalPageOutcome`
+  - `HistoricalBackfillSource`
+- Added `validate_historical_backfill_request()` for offline request validation.
+- Added `BarterAdapterError::InvalidHistoricalRequest`.
+- Added `BarterIngestionEnvelope::from_backfill_event()` to mark backfill quality flags.
+- Added offline OHLCV backfill contract tests using a fake source.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test historical_ohlcv_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Result:
+
+```text
+historical_ohlcv_contract: 2 passed
+fdc-barter: 30 passed, 4 ignored
+```

@@ -1,7 +1,12 @@
 pub mod envelope;
+pub mod historical;
 pub mod live;
 
 pub use envelope::{BarterIngestionEnvelope, DataQualityFlags};
+pub use historical::{
+    validate_historical_backfill_request, HistoricalBackfillPage, HistoricalBackfillRequest,
+    HistoricalBackfillSource, HistoricalPageOutcome,
+};
 pub use live::{
     collect_live_market_data_envelopes, collect_live_trade_envelopes,
     default_binance_futures_usd_market_data_subscriptions,

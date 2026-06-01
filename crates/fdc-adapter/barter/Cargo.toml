@@ -21,7 +21,7 @@ thiserror = { workspace = true }
 rust_decimal = { workspace = true }
 uuid = { workspace = true }
 futures = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
-async-trait = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
