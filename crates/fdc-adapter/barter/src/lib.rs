@@ -21,8 +21,8 @@ pub use ingestion::{
     binance_spot_historical_trades_provider_from_response,
     binance_spot_historical_trades_rest_request_descriptor, binance_spot_ohlcv_capabilities,
     binance_spot_ohlcv_provider_from_response, binance_spot_ohlcv_rest_request_descriptor,
-    collect_live_market_data_envelopes, collect_live_trade_envelopes,
-    default_binance_futures_usd_market_data_subscriptions,
+    collect_live_envelopes_with_summary, collect_live_market_data_envelopes,
+    collect_live_trade_envelopes, default_binance_futures_usd_market_data_subscriptions,
     default_binance_spot_market_data_subscriptions, default_binance_spot_trade_subscriptions,
     execute_binance_spot_historical_trades_rest, execute_binance_spot_ohlcv_rest,
     historical_trade_dedupe_key, init_binance_futures_usd_market_data,
@@ -33,7 +33,8 @@ pub use ingestion::{
     HistoricalBackfillPage, HistoricalBackfillRequest, HistoricalBackfillSource,
     HistoricalExchangeProvider, HistoricalPageOutcome, HistoricalProviderCapabilities,
     HistoricalProviderRegistry, HistoricalRestExecutor, HistoricalRestRequestDescriptor,
-    LiveExchange, LiveMarketDataSubscription, LiveTradeSubscription,
+    LiveCollectionOutcome, LiveCollectionRequest, LiveExchange, LiveMarketDataSubscription,
+    LiveTradeSubscription,
 };
 pub use mapper::event::map_market_event;
 pub use model::{
