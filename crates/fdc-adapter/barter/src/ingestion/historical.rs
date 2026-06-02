@@ -224,6 +224,87 @@ impl RestRequest for BinanceSpotKlinesRestRequest {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct BinanceSpotAggTradesQuery {
+    symbol: String,
+    #[serde(rename = "startTime")]
+    start_time: String,
+    #[serde(rename = "endTime")]
+    end_time: String,
+    limit: String,
+}
+
+#[derive(Debug, Clone)]
+struct BinanceSpotAggTradesRestRequest {
+    path: String,
+    query: BinanceSpotAggTradesQuery,
+}
+
+impl BinanceSpotAggTradesRestRequest {
+    fn from_descriptor(descriptor: &HistoricalRestRequestDescriptor) -> Result<Self> {
+        if descriptor.exchange != "binance_spot" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported historical REST exchange {}",
+                descriptor.exchange
+            )));
+        }
+        if descriptor.method != "GET" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported historical REST method {}",
+                descriptor.method
+            )));
+        }
+        if descriptor.path != "/api/v3/aggTrades" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported Binance Spot historical trades path {}",
+                descriptor.path
+            )));
+        }
+
+        let query_value = |key: &str| -> Result<String> {
+            descriptor
+                .query
+                .iter()
+                .find_map(|(candidate, value)| (candidate == key).then(|| value.clone()))
+                .ok_or_else(|| {
+                    BarterAdapterError::HistoricalRest(format!("missing query param {key}"))
+                })
+        };
+
+        Ok(Self {
+            path: descriptor.path.clone(),
+            query: BinanceSpotAggTradesQuery {
+                symbol: query_value("symbol")?,
+                start_time: query_value("startTime")?,
+                end_time: query_value("endTime")?,
+                limit: query_value("limit")?,
+            },
+        })
+    }
+}
+
+impl RestRequest for BinanceSpotAggTradesRestRequest {
+    type Response = serde_json::Value;
+    type QueryParams = BinanceSpotAggTradesQuery;
+    type Body = ();
+
+    fn path(&self) -> Cow<'static, str> {
+        Cow::Owned(self.path.clone())
+    }
+
+    fn method() -> reqwest::Method {
+        reqwest::Method::GET
+    }
+
+    fn query_params(&self) -> Option<&Self::QueryParams> {
+        Some(&self.query)
+    }
+
+    fn timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct BinanceSpotApiError {
     code: Option<i64>,
@@ -289,12 +370,32 @@ impl BarterIntegrationHistoricalRestExecutor {
 #[async_trait]
 impl HistoricalRestExecutor for BarterIntegrationHistoricalRestExecutor {
     async fn execute(&self, descriptor: &HistoricalRestRequestDescriptor) -> Result<String> {
-        let request = BinanceSpotKlinesRestRequest::from_descriptor(descriptor)?;
-        let (payload, _metric) = self
-            .client
-            .execute(request)
-            .await
-            .map_err(BarterAdapterError::from)?;
+        let payload = match descriptor.path.as_str() {
+            "/api/v3/klines" => {
+                let request = BinanceSpotKlinesRestRequest::from_descriptor(descriptor)?;
+                let (payload, _metric) = self
+                    .client
+                    .execute(request)
+                    .await
+                    .map_err(BarterAdapterError::from)?;
+                payload
+            }
+            "/api/v3/aggTrades" => {
+                let request = BinanceSpotAggTradesRestRequest::from_descriptor(descriptor)?;
+                let (payload, _metric) = self
+                    .client
+                    .execute(request)
+                    .await
+                    .map_err(BarterAdapterError::from)?;
+                payload
+            }
+            unsupported => {
+                return Err(BarterAdapterError::HistoricalRest(format!(
+                    "unsupported Binance Spot historical REST path {unsupported}"
+                )));
+            }
+        };
+
         serde_json::to_string(&payload)
             .map_err(|error| BarterAdapterError::HistoricalRest(error.to_string()))
     }
@@ -611,6 +712,16 @@ pub async fn execute_binance_spot_ohlcv_rest(
     let descriptor = binance_spot_ohlcv_rest_request_descriptor(&request)?;
     let response_body = executor.execute(&descriptor).await?;
     let provider = binance_spot_ohlcv_provider_from_response(&response_body)?;
+    provider.fetch_page(request).await
+}
+
+pub async fn execute_binance_spot_historical_trades_rest(
+    executor: &dyn HistoricalRestExecutor,
+    request: HistoricalBackfillRequest,
+) -> Result<HistoricalBackfillPage> {
+    let descriptor = binance_spot_historical_trades_rest_request_descriptor(&request)?;
+    let response_body = executor.execute(&descriptor).await?;
+    let provider = binance_spot_historical_trades_provider_from_response(&response_body)?;
     provider.fetch_page(request).await
 }
 

@@ -1618,3 +1618,27 @@ Boundary note:
 
 - Barter-rs REST networking remains reused through `barter-integration`.
 - Default verification remains offline and network-free.
+
+## Worktree Checkpoint: fdc-barter Binance Spot Historical Trades REST
+
+Last updated: 2026-06-02 task checkpoint
+Branch: `main`
+Design: `docs/superpowers/specs/2026-06-02-fdc-barter-binance-historical-trades-rest-design.md`
+Plan: `docs/superpowers/plans/2026-06-02-fdc-barter-binance-historical-trades-rest.md`
+
+Completed a Binance Spot historical aggregate trades REST slice.
+
+Completed capabilities:
+
+- Added Binance Spot `/api/v3/aggTrades` descriptor for historical trade backfill requests.
+- Added `BinanceSpotHistoricalTradesProvider` to parse aggregate trade JSON into historical `TradePayload` envelopes.
+- Added `execute_binance_spot_historical_trades_rest()` for executor-backed trade page acquisition.
+- Extended `BarterIntegrationHistoricalRestExecutor` to route aggregate trades through `barter-integration::RestClient`.
+- Added offline descriptor/parser/provider/fake-executor tests and an ignored real REST smoke gated by `FDC_BARTER_HISTORICAL_SMOKE=1`.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test binance_spot_historical_trades_rest_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
