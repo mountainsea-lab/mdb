@@ -146,6 +146,7 @@ async fn live_collection_rejects_zero_limit() {
         LiveCollectionRequest {
             source_id: SOURCE_ID.to_string(),
             limit: 0,
+            timeout: None,
         },
         input,
     )
@@ -168,6 +169,7 @@ async fn live_collection_rejects_empty_source_id() {
         LiveCollectionRequest {
             source_id: String::new(),
             limit: 1,
+            timeout: None,
         },
         input,
     )
@@ -195,6 +197,7 @@ async fn live_collection_returns_summary_when_limit_reached() {
         LiveCollectionRequest {
             source_id: SOURCE_ID.to_string(),
             limit: 2,
+            timeout: None,
         },
         input,
     )
@@ -230,6 +233,7 @@ async fn live_collection_stops_when_stream_ends_before_limit() {
         LiveCollectionRequest {
             source_id: SOURCE_ID.to_string(),
             limit: 3,
+            timeout: None,
         },
         input,
     )
@@ -259,6 +263,7 @@ async fn live_collection_counts_reconnects() {
         LiveCollectionRequest {
             source_id: SOURCE_ID.to_string(),
             limit: 2,
+            timeout: None,
         },
         input,
     )
@@ -280,6 +285,7 @@ async fn live_collection_returns_stream_item_errors() {
         LiveCollectionRequest {
             source_id: SOURCE_ID.to_string(),
             limit: 1,
+            timeout: None,
         },
         input,
     )

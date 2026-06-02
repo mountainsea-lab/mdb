@@ -5,6 +5,7 @@ use barter_data::{
 };
 use barter_instrument::instrument::market_data::MarketDataInstrument;
 use futures::{Stream, StreamExt};
+use std::time::Duration;
 
 use crate::{
     error::{BarterAdapterError, Result},
@@ -21,6 +22,7 @@ use crate::{
 pub struct LiveCollectionRequest {
     pub source_id: String,
     pub limit: usize,
+    pub timeout: Option<Duration>,
 }
 
 /// Summary produced by bounded live collection.
@@ -218,22 +220,39 @@ where
     }
 
     let requested_limit = request.limit;
+    let timeout = request.timeout;
     let source_id = request.source_id;
     let mut envelopes = Vec::with_capacity(requested_limit);
     let mut skipped_reconnects = 0usize;
 
-    while envelopes.len() < requested_limit {
-        let Some(result) = stream.next().await else {
-            break;
-        };
+    let collection = async {
+        while envelopes.len() < requested_limit {
+            let Some(result) = stream.next().await else {
+                break;
+            };
 
-        if matches!(&result, reconnect::Event::Reconnecting(_)) {
-            skipped_reconnects += 1;
+            if matches!(&result, reconnect::Event::Reconnecting(_)) {
+                skipped_reconnects += 1;
+            }
+
+            if let Some(envelope) = map_live_market_data_result(&source_id, result)? {
+                envelopes.push(envelope);
+            }
         }
 
-        if let Some(envelope) = map_live_market_data_result(&source_id, result)? {
-            envelopes.push(envelope);
-        }
+        Result::<()>::Ok(())
+    };
+
+    if let Some(timeout) = timeout {
+        tokio::time::timeout(timeout, collection)
+            .await
+            .map_err(|_| BarterAdapterError::LiveCollectionTimeout {
+                source_id: source_id.clone(),
+                requested_limit,
+                timeout,
+            })??;
+    } else {
+        collection.await?;
     }
 
     let records_received = envelopes.len();

@@ -11,6 +11,7 @@ async fn main() -> fdc_barter::Result<()> {
         return Ok(());
     }
 
+    println!("initializing Binance Spot order book streams...");
     let streams = init_binance_spot_market_data([
         LiveMarketDataSubscription::new(
             LiveExchange::BinanceSpot,
@@ -28,11 +29,13 @@ async fn main() -> fdc_barter::Result<()> {
         ),
     ])
     .await?;
+    println!("streams initialized; collecting up to 5 records for 30s...");
 
     let outcome = collect_live_envelopes_with_summary(
         LiveCollectionRequest {
             source_id: "example-binance-spot-order-books".to_string(),
             limit: 5,
+            timeout: Some(std::time::Duration::from_secs(30)),
         },
         streams.select_all(),
     )

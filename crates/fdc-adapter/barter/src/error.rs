@@ -32,6 +32,16 @@ pub enum BarterAdapterError {
     #[error("invalid live collection request: {0}")]
     InvalidLiveCollectionRequest(String),
 
+    /// Bounded live collection did not receive enough stream items before the deadline.
+    #[error(
+        "live collection timed out after {timeout:?} while waiting for {requested_limit} records from {source_id}"
+    )]
+    LiveCollectionTimeout {
+        source_id: String,
+        requested_limit: usize,
+        timeout: std::time::Duration,
+    },
+
     /// A historical backfill request is invalid before provider I/O.
     #[error("invalid historical request: {0}")]
     InvalidHistoricalRequest(String),

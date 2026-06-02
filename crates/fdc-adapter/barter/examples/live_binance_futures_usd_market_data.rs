@@ -13,6 +13,7 @@ async fn main() -> fdc_barter::Result<()> {
         return Ok(());
     }
 
+    println!("initializing Binance Futures USD market-data streams...");
     let streams = init_binance_futures_usd_market_data([
         LiveMarketDataSubscription::new(
             LiveExchange::BinanceFuturesUsd,
@@ -44,11 +45,13 @@ async fn main() -> fdc_barter::Result<()> {
         ),
     ])
     .await?;
+    println!("streams initialized; collecting up to 5 records for 30s...");
 
     let outcome = collect_live_envelopes_with_summary(
         LiveCollectionRequest {
             source_id: "example-binance-futures-usd-market-data".to_string(),
             limit: 5,
+            timeout: Some(std::time::Duration::from_secs(30)),
         },
         streams.select_all(),
     )

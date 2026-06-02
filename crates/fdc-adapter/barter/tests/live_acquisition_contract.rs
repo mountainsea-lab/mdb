@@ -13,10 +13,11 @@ use barter_instrument::{
 };
 use chrono::{TimeZone, Utc};
 use fdc_barter::{
-    collect_live_market_data_envelopes, collect_live_trade_envelopes,
-    default_binance_spot_trade_subscriptions, init_binance_spot_public_trades,
-    map_live_market_data_result, map_live_trade_result, BarterMarketDataKind, BarterMarketDataMode,
-    BarterMarketPayload, LiveExchange, LiveTradeSubscription, TradeSide,
+    collect_live_envelopes_with_summary, collect_live_market_data_envelopes,
+    collect_live_trade_envelopes, default_binance_spot_trade_subscriptions,
+    init_binance_spot_public_trades, map_live_market_data_result, map_live_trade_result,
+    BarterMarketDataKind, BarterMarketDataMode, BarterMarketPayload, LiveCollectionRequest,
+    LiveExchange, LiveTradeSubscription, TradeSide,
 };
 use futures::{stream, StreamExt};
 
@@ -116,6 +117,27 @@ async fn bounded_collection_returns_requested_number_of_envelopes() {
     assert_eq!(envelopes.len(), 2);
     assert_eq!(envelopes[0].event.symbol.to_string(), "BTCUSDT");
     assert_eq!(envelopes[1].event.symbol.to_string(), "ETHUSDT");
+}
+
+#[tokio::test]
+async fn summary_collection_times_out_when_stream_is_idle() {
+    let input = futures::stream::pending();
+
+    let error = collect_live_envelopes_with_summary(
+        LiveCollectionRequest {
+            source_id: SOURCE_ID.to_string(),
+            limit: 1,
+            timeout: Some(std::time::Duration::from_millis(10)),
+        },
+        input,
+    )
+    .await
+    .expect_err("idle live collection should time out");
+
+    assert!(
+        error.to_string().contains("live collection timed out"),
+        "unexpected error: {error}"
+    );
 }
 
 #[tokio::test]
