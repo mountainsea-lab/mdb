@@ -20,6 +20,20 @@ fn live_example_enabled() -> bool {
     std::env::var(ENABLE_ENV).as_deref() == Ok("1")
 }
 
+// Manual run commands for troubleshooting:
+//
+// Safe dry run, no network access:
+//   cargo run --example live_binance_spot_order_books
+//
+// Live network run:
+//   FDC_BARTER_LIVE_EXAMPLE=1 cargo run --example live_binance_spot_order_books
+//
+// Debug live network run:
+//   RUST_LOG=debug FDC_BARTER_LIVE_EXAMPLE=1 cargo run --example live_binance_spot_order_books
+//
+// IDE main run:
+//   Add environment variable FDC_BARTER_LIVE_EXAMPLE=1 to the run configuration.
+//   Add RUST_LOG=debug as well when detailed subscription diagnostics are needed.
 #[tokio::main]
 async fn main() -> fdc_barter::Result<()> {
     init_tracing();
