@@ -63,7 +63,7 @@ impl BarterSourceCapabilities {
 }
 
 pub fn supported_crypto_market_data_capabilities() -> Vec<BarterSourceCapabilities> {
-    use BarterMarketDataKind::{Liquidation, OrderBook, OrderBookL1, Trade};
+    use BarterMarketDataKind::{Candle, Liquidation, OrderBook, OrderBookL1, Trade};
     use BarterMarketType::{Future, Option, Perpetual, Spot};
 
     vec![
@@ -71,7 +71,7 @@ pub fn supported_crypto_market_data_capabilities() -> Vec<BarterSourceCapabiliti
             "binance_spot",
             Spot,
             vec![Trade, OrderBookL1, OrderBook],
-            vec![],
+            vec![Candle, Trade],
             vec![],
         ),
         BarterSourceCapabilities::crypto_exchange(

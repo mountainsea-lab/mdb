@@ -14,7 +14,11 @@ fn capability_matrix_contains_first_slice_realtime_targets() {
         })
         .expect("binance spot capability should exist");
     assert!(binance_spot.supports_live);
-    assert!(!binance_spot.supports_historical);
+    assert!(binance_spot.supports_historical);
+    assert_eq!(
+        binance_spot.historical_kinds,
+        vec![BarterMarketDataKind::Candle, BarterMarketDataKind::Trade]
+    );
     assert_eq!(
         binance_spot.kinds,
         vec![
@@ -43,15 +47,30 @@ fn capability_matrix_contains_first_slice_realtime_targets() {
 }
 
 #[test]
-fn capability_matrix_marks_historical_as_future_work_for_now() {
+fn capability_matrix_marks_only_binance_spot_historical_as_supported_for_now() {
     let capabilities = supported_crypto_market_data_capabilities();
 
-    assert!(capabilities
+    let binance_spot = capabilities
         .iter()
-        .all(|capability| !capability.supports_historical));
-    assert!(capabilities
+        .find(|capability| capability.exchange == "binance_spot")
+        .expect("binance spot capability should exist");
+    assert!(binance_spot.supports_historical);
+    assert_eq!(
+        binance_spot.historical_kinds,
+        vec![BarterMarketDataKind::Candle, BarterMarketDataKind::Trade]
+    );
+
+    for capability in capabilities
         .iter()
-        .all(|capability| capability.historical_kinds.is_empty()));
+        .filter(|capability| capability.exchange != "binance_spot")
+    {
+        assert!(
+            !capability.supports_historical,
+            "{} should not advertise historical support yet",
+            capability.exchange
+        );
+        assert!(capability.historical_kinds.is_empty());
+    }
 }
 
 #[test]
