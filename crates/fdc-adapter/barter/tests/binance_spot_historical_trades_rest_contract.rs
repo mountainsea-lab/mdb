@@ -1,8 +1,10 @@
+use async_trait::async_trait;
 use fdc_barter::{
     binance_spot_historical_trades_provider_from_response,
-    binance_spot_historical_trades_rest_request_descriptor, historical_trade_dedupe_key,
-    BarterMarketDataKind, BarterMarketPayload, BarterMarketType, HistoricalBackfillRequest,
-    HistoricalExchangeProvider, TradeSide,
+    binance_spot_historical_trades_rest_request_descriptor,
+    execute_binance_spot_historical_trades_rest, historical_trade_dedupe_key, BarterMarketDataKind,
+    BarterMarketPayload, BarterMarketType, HistoricalBackfillRequest, HistoricalExchangeProvider,
+    HistoricalRestExecutor, HistoricalRestRequestDescriptor, TradeSide,
 };
 use fdc_core::types::TimestampNs;
 
@@ -126,4 +128,68 @@ async fn binance_spot_historical_trades_provider_marks_complete_when_short_page(
 
     assert!(page.complete);
     assert!(page.next_cursor.is_none());
+}
+
+struct FakeTradesExecutor;
+
+#[async_trait]
+impl HistoricalRestExecutor for FakeTradesExecutor {
+    async fn execute(
+        &self,
+        descriptor: &HistoricalRestRequestDescriptor,
+    ) -> fdc_barter::Result<String> {
+        assert_eq!(descriptor.exchange, "binance_spot");
+        assert_eq!(descriptor.method, "GET");
+        assert_eq!(descriptor.path, "/api/v3/aggTrades");
+        assert!(descriptor
+            .query
+            .contains(&("symbol".to_string(), "BTCUSDT".to_string())));
+        Ok(sample_agg_trades().to_string())
+    }
+}
+
+#[tokio::test]
+async fn fake_executor_fetches_binance_spot_historical_trades_without_network() {
+    let page = execute_binance_spot_historical_trades_rest(&FakeTradesExecutor, trade_request())
+        .await
+        .expect("fake executor response should parse into historical trades");
+
+    assert_eq!(page.envelopes.len(), 2);
+    assert_eq!(page.envelopes[0].event.kind, BarterMarketDataKind::Trade);
+}
+
+#[tokio::test]
+#[ignore = "requires FDC_BARTER_HISTORICAL_SMOKE=1 and public Binance REST access"]
+async fn ignored_live_smoke_fetches_binance_spot_historical_trades() {
+    if std::env::var("FDC_BARTER_HISTORICAL_SMOKE").as_deref() != Ok("1") {
+        eprintln!("set FDC_BARTER_HISTORICAL_SMOKE=1 to run real historical trades smoke");
+        return;
+    }
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let start_ms = now_ms - 10 * 60_000;
+    let end_ms = now_ms - 9 * 60_000;
+
+    let request = HistoricalBackfillRequest {
+        source_id: "barter-binance-spot-trades-history-smoke".to_string(),
+        exchange: "binance_spot".to_string(),
+        market_type: BarterMarketType::Spot,
+        symbol: "BTCUSDT".to_string(),
+        kind: BarterMarketDataKind::Trade,
+        interval: None,
+        start: TimestampNs::from_nanos(start_ms * 1_000_000),
+        end: TimestampNs::from_nanos(end_ms * 1_000_000),
+        limit: Some(10),
+        cursor: None,
+    };
+
+    let executor = fdc_barter::BarterIntegrationHistoricalRestExecutor::binance_spot();
+    let page = execute_binance_spot_historical_trades_rest(&executor, request)
+        .await
+        .expect("real Binance Spot aggregate trades smoke should fetch and parse one page");
+
+    assert!(!page.envelopes.is_empty());
+    assert!(page.envelopes[0].quality.is_backfill);
+    assert_eq!(page.envelopes[0].event.exchange, "binance_spot");
+    assert_eq!(page.envelopes[0].event.kind, BarterMarketDataKind::Trade);
 }
