@@ -1,11 +1,51 @@
 # Development Status
 
-Last updated: 2026-05-29
+Last updated: 2026-06-02
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `HEAD` (`feat: add production server binary`)
+Latest checkpoint commit when this file was written: `e1fe868` (`Document historical barter example run commands`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-02 Development Checkpoint
+
+Today completed and pushed the fdc-barter acquisition/example observability stage to `origin/mdb-mqdev` at commit `e1fe868`.
+
+Completed today:
+
+- Added Binance Spot historical trades REST parser and execution path.
+- Added Binance Spot historical OHLCV REST execution path on top of the existing provider/parser work.
+- Added bounded live acquisition summary helpers and clearer validation errors.
+- Added fdc-barter acquisition examples:
+  - `historical_binance_spot_ohlcv`
+  - `historical_binance_spot_trades`
+  - `live_binance_futures_usd_market_data`
+  - `live_binance_spot_order_books`
+  - `live_binance_spot_trades`
+- Improved live example observability with `tracing`/`tracing-subscriber`, startup logs, subscription logs, collection logs, and per-record summaries.
+- Added run-command comments to all five fdc-barter examples, including IDE `main` run environment-variable instructions.
+- Cleaned completed temporary worktree branches after merging to `mdb-mqdev`.
+
+Verification performed before push:
+
+- `cd crates/fdc-adapter/barter && rtk cargo test`
+  - Result: `62 passed, 6 ignored`
+- Checked all five fdc-barter examples with `rtk cargo check --example ...`
+  - Result: all examples built with `0 errors`
+- Verified local and remote `mdb-mqdev` tips match: `e1fe868b18fcba514b60265e6acb94f7c2f23845`.
+
+Workflow note for tomorrow:
+
+- Continue development from `mdb-mqdev`, not `main`.
+- For new tasks, create a temporary worktree branch from `mdb-mqdev`, merge/fast-forward back to `mdb-mqdev` when complete, then delete the temporary worktree branch.
+- Only merge `mdb-mqdev` to `main` when a staged/phase-level feature is complete.
+
+Known uncommitted working-tree state not part of today’s fdc-barter push:
+
+- `crates/fdc-server/src/health/*` deleted
+- `crates/fdc-server/src/bin/health/` untracked
+
+Treat those `fdc-server` health changes separately before committing or pushing them.
 
 ## Current Focus
 
