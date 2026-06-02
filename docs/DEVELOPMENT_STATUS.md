@@ -1642,3 +1642,28 @@ Verification:
 CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test binance_spot_historical_trades_rest_contract
 CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
 ```
+
+## Worktree Checkpoint: fdc-barter Acquisition Completion and Examples
+
+Last updated: 2026-06-02 task checkpoint
+Branch: `main`
+Design: `docs/superpowers/specs/2026-06-02-fdc-barter-acquisition-completion-examples-design.md`
+Plan: `docs/superpowers/plans/2026-06-02-fdc-barter-acquisition-completion-examples.md`
+
+Completed the internal `fdc-barter` acquisition loop without adding storage/API coupling.
+
+Completed capabilities:
+
+- Added bounded live acquisition summaries for Barter stream envelopes.
+- Added multi-page historical backfill runner with source-complete, max-pages, and max-records stop reasons.
+- Added Binance Spot OHLCV and historical trades page fetcher adapters around existing REST execution helpers.
+- Updated the capability matrix to advertise Binance Spot historical candle and trade support.
+- Added environment-gated examples for each currently supported live and historical acquisition type.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-barter --check
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --examples --no-run
+```
