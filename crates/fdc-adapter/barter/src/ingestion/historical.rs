@@ -127,6 +127,12 @@ pub struct HistoricalRestRequestDescriptor {
     pub timeout_ms: u64,
 }
 
+/// Adapter-owned execution boundary for public historical REST descriptors.
+#[async_trait]
+pub trait HistoricalRestExecutor: Send + Sync {
+    async fn execute(&self, descriptor: &HistoricalRestRequestDescriptor) -> Result<String>;
+}
+
 /// Offline-testable boundary implemented by concrete historical providers.
 #[async_trait]
 pub trait HistoricalBackfillSource: Send + Sync {
@@ -381,6 +387,17 @@ pub fn binance_spot_ohlcv_provider_from_response(
     response_body: &str,
 ) -> Result<BinanceSpotOhlcvProvider> {
     BinanceSpotOhlcvProvider::from_response_body(response_body)
+}
+
+/// Execute a Binance Spot OHLCV REST descriptor through an injected executor and parse the response.
+pub async fn execute_binance_spot_ohlcv_rest(
+    executor: &dyn HistoricalRestExecutor,
+    request: HistoricalBackfillRequest,
+) -> Result<HistoricalBackfillPage> {
+    let descriptor = binance_spot_ohlcv_rest_request_descriptor(&request)?;
+    let response_body = executor.execute(&descriptor).await?;
+    let provider = binance_spot_ohlcv_provider_from_response(&response_body)?;
+    provider.fetch_page(request).await
 }
 
 #[derive(Debug, Clone)]
