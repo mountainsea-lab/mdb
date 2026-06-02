@@ -1,6 +1,14 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
+use barter_integration::{
+    error::SocketError,
+    protocol::http::{
+        public::PublicNoHeaders,
+        rest::{client::RestClient, RestRequest},
+        HttpParser,
+    },
+};
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -131,6 +139,165 @@ pub struct HistoricalRestRequestDescriptor {
 #[async_trait]
 pub trait HistoricalRestExecutor: Send + Sync {
     async fn execute(&self, descriptor: &HistoricalRestRequestDescriptor) -> Result<String>;
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct BinanceSpotKlinesQuery {
+    symbol: String,
+    interval: String,
+    #[serde(rename = "startTime")]
+    start_time: String,
+    #[serde(rename = "endTime")]
+    end_time: String,
+    limit: String,
+}
+
+#[derive(Debug, Clone)]
+struct BinanceSpotKlinesRestRequest {
+    path: String,
+    query: BinanceSpotKlinesQuery,
+}
+
+impl BinanceSpotKlinesRestRequest {
+    fn from_descriptor(descriptor: &HistoricalRestRequestDescriptor) -> Result<Self> {
+        if descriptor.exchange != "binance_spot" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported historical REST exchange {}",
+                descriptor.exchange
+            )));
+        }
+        if descriptor.method != "GET" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported historical REST method {}",
+                descriptor.method
+            )));
+        }
+        if descriptor.path != "/api/v3/klines" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported Binance Spot historical path {}",
+                descriptor.path
+            )));
+        }
+
+        let query_value = |key: &str| -> Result<String> {
+            descriptor
+                .query
+                .iter()
+                .find_map(|(candidate, value)| (candidate == key).then(|| value.clone()))
+                .ok_or_else(|| {
+                    BarterAdapterError::HistoricalRest(format!("missing query param {key}"))
+                })
+        };
+
+        Ok(Self {
+            path: descriptor.path.clone(),
+            query: BinanceSpotKlinesQuery {
+                symbol: query_value("symbol")?,
+                interval: query_value("interval")?,
+                start_time: query_value("startTime")?,
+                end_time: query_value("endTime")?,
+                limit: query_value("limit")?,
+            },
+        })
+    }
+}
+
+impl RestRequest for BinanceSpotKlinesRestRequest {
+    type Response = serde_json::Value;
+    type QueryParams = BinanceSpotKlinesQuery;
+    type Body = ();
+
+    fn path(&self) -> Cow<'static, str> {
+        Cow::Owned(self.path.clone())
+    }
+
+    fn method() -> reqwest::Method {
+        reqwest::Method::GET
+    }
+
+    fn query_params(&self) -> Option<&Self::QueryParams> {
+        Some(&self.query)
+    }
+
+    fn timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BinanceSpotApiError {
+    code: Option<i64>,
+    msg: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BinanceSpotHistoricalHttpParser;
+
+#[derive(Debug, thiserror::Error)]
+enum BinanceSpotHistoricalRestError {
+    #[error(transparent)]
+    Socket(#[from] SocketError),
+    #[error("Binance Spot historical REST API error status={status}: code={code:?} msg={msg:?}")]
+    Api {
+        status: reqwest::StatusCode,
+        code: Option<i64>,
+        msg: Option<String>,
+    },
+}
+
+impl HttpParser for BinanceSpotHistoricalHttpParser {
+    type ApiError = BinanceSpotApiError;
+    type OutputError = BinanceSpotHistoricalRestError;
+
+    fn parse_api_error(
+        &self,
+        status: reqwest::StatusCode,
+        error: Self::ApiError,
+    ) -> Self::OutputError {
+        BinanceSpotHistoricalRestError::Api {
+            status,
+            code: error.code,
+            msg: error.msg,
+        }
+    }
+}
+
+impl From<BinanceSpotHistoricalRestError> for BarterAdapterError {
+    fn from(error: BinanceSpotHistoricalRestError) -> Self {
+        BarterAdapterError::HistoricalRest(error.to_string())
+    }
+}
+
+/// Historical REST executor backed by barter-integration's RestClient.
+#[derive(Debug)]
+pub struct BarterIntegrationHistoricalRestExecutor {
+    client: RestClient<PublicNoHeaders, BinanceSpotHistoricalHttpParser>,
+}
+
+impl BarterIntegrationHistoricalRestExecutor {
+    pub fn binance_spot() -> Self {
+        Self {
+            client: RestClient::new(
+                "https://api.binance.com",
+                PublicNoHeaders,
+                BinanceSpotHistoricalHttpParser,
+            ),
+        }
+    }
+}
+
+#[async_trait]
+impl HistoricalRestExecutor for BarterIntegrationHistoricalRestExecutor {
+    async fn execute(&self, descriptor: &HistoricalRestRequestDescriptor) -> Result<String> {
+        let request = BinanceSpotKlinesRestRequest::from_descriptor(descriptor)?;
+        let (payload, _metric) = self
+            .client
+            .execute(request)
+            .await
+            .map_err(BarterAdapterError::from)?;
+        serde_json::to_string(&payload)
+            .map_err(|error| BarterAdapterError::HistoricalRest(error.to_string()))
+    }
 }
 
 /// Offline-testable boundary implemented by concrete historical providers.

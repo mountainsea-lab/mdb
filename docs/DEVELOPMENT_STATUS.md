@@ -1589,3 +1589,32 @@ Boundary note:
 
 - The provider remains adapter-owned and offline-testable; it does not expose reqwest, Barter REST internals, or exchange-specific transport types outside `fdc-barter`.
 - Live network execution should still be added only behind explicit ignored/gated smoke tests.
+
+## Worktree Checkpoint: fdc-barter Binance Spot Historical OHLCV REST Execution
+
+Last updated: 2026-06-02 task checkpoint
+Branch: `mdb-mqdev`
+Plan: `docs/superpowers/plans/2026-06-02-fdc-barter-binance-ohlcv-rest-execution.md`
+
+Completed a gated historical REST execution slice for Binance Spot OHLCV.
+
+Completed capabilities:
+
+- Added `HistoricalRestExecutor` as an adapter-owned HTTP execution boundary.
+- Added `execute_binance_spot_ohlcv_rest()` to build the Binance Spot kline descriptor, fetch a response body through an injected executor, parse klines, and return `HistoricalBackfillPage`.
+- Added `BarterIntegrationHistoricalRestExecutor` backed by `barter-integration`'s `RestClient<PublicNoHeaders, Parser>`.
+- Added an offline fake-executor contract test that verifies default tests do not call the network.
+- Added an ignored real Binance Spot OHLCV smoke gated by `FDC_BARTER_HISTORICAL_SMOKE=1`.
+
+Verification:
+
+```bash
+CARGO_NET_OFFLINE=true rtk cargo fmt --package fdc-barter --check
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter --test binance_spot_historical_rest_execution_contract
+CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter
+```
+
+Boundary note:
+
+- Barter-rs REST networking remains reused through `barter-integration`.
+- Default verification remains offline and network-free.

@@ -61,3 +61,39 @@ async fn executor_fetches_binance_spot_ohlcv_page_without_network_in_default_tes
     assert_eq!(candle.trade_count, Some(42));
     assert_eq!(candle.quote_volume.unwrap().to_string(), "12999.99000000");
 }
+
+#[tokio::test]
+#[ignore = "requires FDC_BARTER_HISTORICAL_SMOKE=1 and public Binance REST access"]
+async fn ignored_live_smoke_fetches_one_binance_spot_ohlcv_candle() {
+    if std::env::var("FDC_BARTER_HISTORICAL_SMOKE").as_deref() != Ok("1") {
+        eprintln!("set FDC_BARTER_HISTORICAL_SMOKE=1 to run real historical REST smoke");
+        return;
+    }
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let start_ms = now_ms - 10 * 60_000;
+    let end_ms = now_ms - 9 * 60_000;
+
+    let request = HistoricalBackfillRequest {
+        source_id: "barter-binance-spot-history-smoke".to_string(),
+        exchange: "binance_spot".to_string(),
+        market_type: BarterMarketType::Spot,
+        symbol: "BTCUSDT".to_string(),
+        kind: BarterMarketDataKind::Candle,
+        interval: Some("1m".to_string()),
+        start: TimestampNs::from_nanos(start_ms * 1_000_000),
+        end: TimestampNs::from_nanos(end_ms * 1_000_000),
+        limit: Some(1),
+        cursor: None,
+    };
+
+    let executor = fdc_barter::BarterIntegrationHistoricalRestExecutor::binance_spot();
+    let page = execute_binance_spot_ohlcv_rest(&executor, request)
+        .await
+        .expect("real Binance Spot kline smoke should fetch and parse one page");
+
+    assert!(!page.envelopes.is_empty());
+    assert!(page.envelopes[0].quality.is_backfill);
+    assert_eq!(page.envelopes[0].event.exchange, "binance_spot");
+    assert_eq!(page.envelopes[0].event.kind, BarterMarketDataKind::Candle);
+}

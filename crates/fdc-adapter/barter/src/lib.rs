@@ -25,11 +25,11 @@ pub use ingestion::{
     init_binance_futures_usd_market_data, init_binance_spot_market_data,
     init_binance_spot_public_trades, map_live_market_data_result, map_live_trade_result,
     public_trade_result_to_data_kind, validate_historical_backfill_request,
-    BarterIngestionEnvelope, BinanceSpotOhlcvProvider, DataQualityFlags, HistoricalBackfillPage,
-    HistoricalBackfillRequest, HistoricalBackfillSource, HistoricalExchangeProvider,
-    HistoricalPageOutcome, HistoricalProviderCapabilities, HistoricalProviderRegistry,
-    HistoricalRestExecutor, HistoricalRestRequestDescriptor, LiveExchange,
-    LiveMarketDataSubscription, LiveTradeSubscription,
+    BarterIngestionEnvelope, BarterIntegrationHistoricalRestExecutor, BinanceSpotOhlcvProvider,
+    DataQualityFlags, HistoricalBackfillPage, HistoricalBackfillRequest, HistoricalBackfillSource,
+    HistoricalExchangeProvider, HistoricalPageOutcome, HistoricalProviderCapabilities,
+    HistoricalProviderRegistry, HistoricalRestExecutor, HistoricalRestRequestDescriptor,
+    LiveExchange, LiveMarketDataSubscription, LiveTradeSubscription,
 };
 pub use mapper::event::map_market_event;
 pub use model::{
