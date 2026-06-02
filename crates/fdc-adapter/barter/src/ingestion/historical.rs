@@ -18,7 +18,7 @@ use crate::{
     ingestion::BarterIngestionEnvelope,
     model::{
         BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
-        BarterMarketType, CandlePayload, HistoricalCursor,
+        BarterMarketType, CandlePayload, HistoricalCursor, TradePayload, TradeSide,
     },
 };
 
@@ -482,6 +482,53 @@ pub fn binance_spot_ohlcv_capabilities() -> HistoricalProviderCapabilities {
     }
 }
 
+pub fn binance_spot_historical_trades_capabilities() -> HistoricalProviderCapabilities {
+    HistoricalProviderCapabilities {
+        exchange: "binance_spot".to_string(),
+        market_types: vec![BarterMarketType::Spot],
+        kinds: vec![BarterMarketDataKind::Trade],
+        intervals: Vec::new(),
+        max_limit: Some(1000),
+    }
+}
+
+pub fn binance_spot_historical_trades_rest_request_descriptor(
+    request: &HistoricalBackfillRequest,
+) -> Result<HistoricalRestRequestDescriptor> {
+    validate_historical_backfill_request(request)?;
+
+    let capabilities = binance_spot_historical_trades_capabilities();
+    capabilities.validate_request(request)?;
+
+    if normalize_exchange(&request.exchange) != capabilities.normalized_exchange() {
+        return Err(BarterAdapterError::UnsupportedHistoricalExchange(
+            request.exchange.clone(),
+        ));
+    }
+
+    Ok(HistoricalRestRequestDescriptor {
+        exchange: capabilities.exchange,
+        method: "GET".to_string(),
+        path: "/api/v3/aggTrades".to_string(),
+        query: vec![
+            ("symbol".to_string(), request.symbol.to_ascii_uppercase()),
+            (
+                "startTime".to_string(),
+                nanos_to_millis(request.start).to_string(),
+            ),
+            (
+                "endTime".to_string(),
+                nanos_to_millis(request.end).to_string(),
+            ),
+            (
+                "limit".to_string(),
+                request.limit.unwrap_or(500).to_string(),
+            ),
+        ],
+        timeout_ms: 5_000,
+    })
+}
+
 /// Offline-testable Binance Spot OHLCV provider backed by parsed public klines response rows.
 #[derive(Debug, Clone)]
 pub struct BinanceSpotOhlcvProvider {
@@ -565,6 +612,151 @@ pub async fn execute_binance_spot_ohlcv_rest(
     let response_body = executor.execute(&descriptor).await?;
     let provider = binance_spot_ohlcv_provider_from_response(&response_body)?;
     provider.fetch_page(request).await
+}
+
+#[derive(Debug, Clone)]
+pub struct BinanceSpotHistoricalTradesProvider {
+    capabilities: HistoricalProviderCapabilities,
+    rows: Vec<BinanceSpotAggTradeRow>,
+}
+
+impl BinanceSpotHistoricalTradesProvider {
+    pub fn from_response_body(response_body: &str) -> Result<Self> {
+        let rows = parse_binance_spot_agg_trades_response(response_body)?;
+        Ok(Self {
+            capabilities: binance_spot_historical_trades_capabilities(),
+            rows,
+        })
+    }
+}
+
+#[async_trait]
+impl HistoricalExchangeProvider for BinanceSpotHistoricalTradesProvider {
+    fn capabilities(&self) -> &HistoricalProviderCapabilities {
+        &self.capabilities
+    }
+
+    async fn fetch_page(
+        &self,
+        request: HistoricalBackfillRequest,
+    ) -> Result<HistoricalBackfillPage> {
+        validate_historical_backfill_request(&request)?;
+        self.capabilities.validate_request(&request)?;
+
+        let mut envelopes = Vec::with_capacity(self.rows.len());
+        for row in &self.rows {
+            let event = row.to_market_event(&request)?;
+            envelopes.push(BarterIngestionEnvelope::from_backfill_event(
+                request.source_id.clone(),
+                event,
+            ));
+        }
+
+        let complete = request
+            .limit
+            .map(|limit| envelopes.len() < limit)
+            .unwrap_or(true);
+        let next_cursor = if complete {
+            None
+        } else {
+            self.rows.last().map(|row| {
+                HistoricalCursor::next_start(
+                    request.exchange.clone(),
+                    request.symbol.clone(),
+                    request.kind,
+                    TimestampNs::from_nanos(millis_to_nanos(row.time_ms + 1)),
+                )
+            })
+        };
+
+        Ok(HistoricalBackfillPage {
+            request,
+            envelopes,
+            next_cursor,
+            complete,
+        })
+    }
+}
+
+pub fn binance_spot_historical_trades_provider_from_response(
+    response_body: &str,
+) -> Result<BinanceSpotHistoricalTradesProvider> {
+    BinanceSpotHistoricalTradesProvider::from_response_body(response_body)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BinanceSpotAggTradeRow {
+    #[serde(rename = "a")]
+    aggregate_trade_id: u64,
+    #[serde(rename = "p")]
+    price: String,
+    #[serde(rename = "q")]
+    quantity: String,
+    #[serde(rename = "T")]
+    time_ms: i64,
+    #[serde(rename = "m")]
+    buyer_is_maker: bool,
+}
+
+impl BinanceSpotAggTradeRow {
+    fn to_market_event(&self, request: &HistoricalBackfillRequest) -> Result<BarterMarketEvent> {
+        let event_time = TimestampNs::from_nanos(millis_to_nanos(self.time_ms));
+        let cursor = HistoricalCursor::next_start(
+            request.exchange.clone(),
+            request.symbol.clone(),
+            request.kind,
+            TimestampNs::from_nanos(millis_to_nanos(self.time_ms + 1)),
+        );
+
+        Ok(BarterMarketEvent {
+            source: request.source_id.clone(),
+            mode: BarterMarketDataMode::Historical,
+            exchange: normalize_exchange(&request.exchange),
+            symbol: Symbol::new(&request.symbol),
+            market_type: request.market_type,
+            kind: BarterMarketDataKind::Trade,
+            timestamp: event_time,
+            received_at: TimestampNs::now(),
+            payload: BarterMarketPayload::Trade(TradePayload {
+                trade_id: Some(self.aggregate_trade_id.to_string()),
+                price: Price::new(self.price.parse::<Decimal>().map_err(|_| {
+                    BarterAdapterError::HistoricalRest(format!(
+                        "invalid numeric value for field price: {}",
+                        self.price
+                    ))
+                })?),
+                quantity: self.quantity.parse::<Decimal>().map_err(|_| {
+                    BarterAdapterError::HistoricalRest(format!(
+                        "invalid numeric value for field quantity: {}",
+                        self.quantity
+                    ))
+                })?,
+                side: Some(if self.buyer_is_maker {
+                    TradeSide::Sell
+                } else {
+                    TradeSide::Buy
+                }),
+            }),
+            sequence: Some(self.aggregate_trade_id.to_string()),
+            checkpoint: Some(crate::model::BarterCheckpoint {
+                source_id: request.source_id.clone(),
+                exchange: normalize_exchange(&request.exchange),
+                symbol: request.symbol.to_ascii_uppercase(),
+                kind: BarterMarketDataKind::Trade,
+                mode: BarterMarketDataMode::Historical,
+                last_event_time: event_time,
+                cursor: Some(cursor),
+                updated_at: TimestampNs::now(),
+            }),
+        })
+    }
+}
+
+fn parse_binance_spot_agg_trades_response(
+    response_body: &str,
+) -> Result<Vec<BinanceSpotAggTradeRow>> {
+    serde_json::from_str(response_body)
+        .map_err(|error| BarterAdapterError::HistoricalRest(error.to_string()))
 }
 
 #[derive(Debug, Clone)]
