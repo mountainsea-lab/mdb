@@ -3,46 +3,96 @@ use fdc_barter::{
     collect_live_envelopes_with_summary, init_binance_spot_market_data, BarterMarketDataKind,
     LiveCollectionRequest, LiveExchange, LiveMarketDataSubscription,
 };
+use tracing::{debug, error, info};
+use tracing_subscriber::{fmt, EnvFilter};
+
+const EXAMPLE_NAME: &str = "live_binance_spot_trades";
+const ENABLE_ENV: &str = "FDC_BARTER_LIVE_EXAMPLE";
+const LIMIT: usize = 5;
+const TIMEOUT_SECS: u64 = 30;
+
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = fmt().with_env_filter(filter).try_init();
+}
+
+fn live_example_enabled() -> bool {
+    std::env::var(ENABLE_ENV).as_deref() == Ok("1")
+}
 
 #[tokio::main]
 async fn main() -> fdc_barter::Result<()> {
-    if std::env::var("FDC_BARTER_LIVE_EXAMPLE").as_deref() != Ok("1") {
-        println!("set FDC_BARTER_LIVE_EXAMPLE=1 to run the live Binance Spot trades example");
+    init_tracing();
+
+    info!(example = EXAMPLE_NAME, env = ENABLE_ENV, enabled = live_example_enabled(), "starting live example");
+
+    if !live_example_enabled() {
+        info!(
+            example = EXAMPLE_NAME,
+            env = ENABLE_ENV,
+            command = "FDC_BARTER_LIVE_EXAMPLE=1 cargo run --example live_binance_spot_trades",
+            "live network access disabled; set env to run this example"
+        );
         return Ok(());
     }
 
-    println!("initializing Binance Spot trade stream...");
-    let streams = init_binance_spot_market_data([LiveMarketDataSubscription::new(
+    let subscription = LiveMarketDataSubscription::new(
         LiveExchange::BinanceSpot,
         "btc",
         "usdt",
         MarketDataInstrumentKind::Spot,
         BarterMarketDataKind::Trade,
-    )])
-    .await?;
-    println!("stream initialized; collecting up to 5 records for 30s...");
+    );
+
+    info!(
+        example = EXAMPLE_NAME,
+        exchange = ?subscription.exchange,
+        base = %subscription.base,
+        quote = %subscription.quote,
+        instrument_kind = ?subscription.instrument_kind,
+        kind = ?subscription.kind,
+        "initializing live stream"
+    );
+    debug!(example = EXAMPLE_NAME, subscription = ?subscription, "subscription detail");
+
+    let streams = match init_binance_spot_market_data([subscription]).await {
+        Ok(streams) => streams,
+        Err(error) => {
+            error!(example = EXAMPLE_NAME, %error, "failed to initialize live stream");
+            return Err(error);
+        }
+    };
+
+    info!(example = EXAMPLE_NAME, limit = LIMIT, timeout_secs = TIMEOUT_SECS, "stream initialized; collecting records");
 
     let outcome = collect_live_envelopes_with_summary(
         LiveCollectionRequest {
             source_id: "example-binance-spot-trades".to_string(),
-            limit: 5,
-            timeout: Some(std::time::Duration::from_secs(30)),
+            limit: LIMIT,
+            timeout: Some(std::time::Duration::from_secs(TIMEOUT_SECS)),
         },
         streams.select_all(),
     )
     .await?;
 
-    println!(
-        "records_received={} complete={} skipped_reconnects={}",
-        outcome.records_received, outcome.complete, outcome.skipped_reconnects
+    info!(
+        example = EXAMPLE_NAME,
+        records_received = outcome.records_received,
+        requested_limit = outcome.requested_limit,
+        complete = outcome.complete,
+        skipped_reconnects = outcome.skipped_reconnects,
+        "collection finished"
     );
-    for envelope in outcome.envelopes {
-        println!(
-            "kind={:?} exchange={} symbol={} ts={}",
-            envelope.event.kind,
-            envelope.event.exchange,
-            envelope.event.symbol.as_str(),
-            envelope.event.timestamp.as_nanos()
+
+    for (index, envelope) in outcome.envelopes.into_iter().enumerate() {
+        info!(
+            example = EXAMPLE_NAME,
+            index,
+            kind = ?envelope.event.kind,
+            exchange = %envelope.event.exchange,
+            symbol = %envelope.event.symbol.as_str(),
+            timestamp_ns = envelope.event.timestamp.as_nanos(),
+            "received live envelope"
         );
     }
 
