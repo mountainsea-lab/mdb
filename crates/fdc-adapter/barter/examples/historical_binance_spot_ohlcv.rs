@@ -5,6 +5,16 @@ use fdc_barter::{
 };
 use fdc_core::types::TimestampNs;
 
+// Manual run commands for troubleshooting:
+//
+// Safe dry run, no network access:
+//   cargo run --example historical_binance_spot_ohlcv
+//
+// Historical REST network run:
+//   FDC_BARTER_HISTORICAL_EXAMPLE=1 cargo run --example historical_binance_spot_ohlcv
+//
+// IDE main run:
+//   Add environment variable FDC_BARTER_HISTORICAL_EXAMPLE=1 to the run configuration.
 #[tokio::main]
 async fn main() -> fdc_barter::Result<()> {
     if std::env::var("FDC_BARTER_HISTORICAL_EXAMPLE").as_deref() != Ok("1") {
