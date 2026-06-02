@@ -28,6 +28,10 @@ pub enum BarterAdapterError {
     #[error("unsupported live subscription: {0}")]
     UnsupportedLiveSubscription(String),
 
+    /// A live collection request is invalid before consuming any stream items.
+    #[error("invalid live collection request: {0}")]
+    InvalidLiveCollectionRequest(String),
+
     /// A historical backfill request is invalid before provider I/O.
     #[error("invalid historical request: {0}")]
     InvalidHistoricalRequest(String),

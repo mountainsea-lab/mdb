@@ -7,7 +7,7 @@ use futures::{Stream, StreamExt};
 
 use crate::{
     error::{BarterAdapterError, Result},
-    ingestion::BarterIngestionEnvelope,
+    ingestion::{live::map_live_market_data_result, BarterIngestionEnvelope},
 };
 
 /// Request for bounded live collection from a specific adapter source.
@@ -40,13 +40,13 @@ where
     S: Stream<Item = MarketStreamResult<MarketDataInstrument, DataKind>> + Unpin,
 {
     if request.source_id.is_empty() {
-        return Err(BarterAdapterError::UnsupportedLiveSubscription(
+        return Err(BarterAdapterError::InvalidLiveCollectionRequest(
             "source_id must not be empty".to_string(),
         ));
     }
 
     if request.limit == 0 {
-        return Err(BarterAdapterError::UnsupportedLiveSubscription(
+        return Err(BarterAdapterError::InvalidLiveCollectionRequest(
             "limit must be greater than zero".to_string(),
         ));
     }
@@ -65,7 +65,7 @@ where
             skipped_reconnects += 1;
         }
 
-        if let Some(envelope) = super::live::map_live_market_data_result(&source_id, result)? {
+        if let Some(envelope) = map_live_market_data_result(&source_id, result)? {
             envelopes.push(envelope);
         }
     }

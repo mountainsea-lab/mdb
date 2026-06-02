@@ -11,7 +11,8 @@ use barter_instrument::{
 };
 use chrono::{TimeZone, Utc};
 use fdc_barter::{
-    collect_live_envelopes_with_summary, BarterMarketDataKind, LiveCollectionRequest, TradeSide,
+    collect_live_envelopes_with_summary, BarterAdapterError, BarterMarketDataKind,
+    LiveCollectionRequest, TradeSide,
 };
 use futures::stream;
 
@@ -50,7 +51,12 @@ async fn live_collection_rejects_zero_limit() {
     .await
     .expect_err("zero limit should be rejected");
 
-    assert!(error.to_string().contains("limit"));
+    match error {
+        BarterAdapterError::InvalidLiveCollectionRequest(message) => {
+            assert_eq!(message, "limit must be greater than zero");
+        }
+        other => panic!("expected InvalidLiveCollectionRequest, got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -67,7 +73,12 @@ async fn live_collection_rejects_empty_source_id() {
     .await
     .expect_err("empty source_id should be rejected");
 
-    assert!(error.to_string().contains("source_id"));
+    match error {
+        BarterAdapterError::InvalidLiveCollectionRequest(message) => {
+            assert_eq!(message, "source_id must not be empty");
+        }
+        other => panic!("expected InvalidLiveCollectionRequest, got {other:?}"),
+    }
 }
 
 #[tokio::test]
