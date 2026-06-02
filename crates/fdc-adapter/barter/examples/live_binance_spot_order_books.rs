@@ -24,7 +24,12 @@ fn live_example_enabled() -> bool {
 async fn main() -> fdc_barter::Result<()> {
     init_tracing();
 
-    info!(example = EXAMPLE_NAME, env = ENABLE_ENV, enabled = live_example_enabled(), "starting live example");
+    info!(
+        example = EXAMPLE_NAME,
+        env = ENABLE_ENV,
+        enabled = live_example_enabled(),
+        "starting live example"
+    );
 
     if !live_example_enabled() {
         info!(
@@ -75,7 +80,12 @@ async fn main() -> fdc_barter::Result<()> {
         }
     };
 
-    info!(example = EXAMPLE_NAME, limit = LIMIT, timeout_secs = TIMEOUT_SECS, "streams initialized; collecting records");
+    info!(
+        example = EXAMPLE_NAME,
+        limit = LIMIT,
+        timeout_secs = TIMEOUT_SECS,
+        "streams initialized; collecting records"
+    );
 
     let outcome = collect_live_envelopes_with_summary(
         LiveCollectionRequest {
