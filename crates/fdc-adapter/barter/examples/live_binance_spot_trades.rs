@@ -1,0 +1,47 @@
+use barter_instrument::instrument::market_data::kind::MarketDataInstrumentKind;
+use fdc_barter::{
+    collect_live_envelopes_with_summary, init_binance_spot_market_data, BarterMarketDataKind,
+    LiveCollectionRequest, LiveExchange, LiveMarketDataSubscription,
+};
+
+#[tokio::main]
+async fn main() -> fdc_barter::Result<()> {
+    if std::env::var("FDC_BARTER_LIVE_EXAMPLE").as_deref() != Ok("1") {
+        println!("set FDC_BARTER_LIVE_EXAMPLE=1 to run the live Binance Spot trades example");
+        return Ok(());
+    }
+
+    let streams = init_binance_spot_market_data([LiveMarketDataSubscription::new(
+        LiveExchange::BinanceSpot,
+        "btc",
+        "usdt",
+        MarketDataInstrumentKind::Spot,
+        BarterMarketDataKind::Trade,
+    )])
+    .await?;
+
+    let outcome = collect_live_envelopes_with_summary(
+        LiveCollectionRequest {
+            source_id: "example-binance-spot-trades".to_string(),
+            limit: 5,
+        },
+        streams.select_all(),
+    )
+    .await?;
+
+    println!(
+        "records_received={} complete={} skipped_reconnects={}",
+        outcome.records_received, outcome.complete, outcome.skipped_reconnects
+    );
+    for envelope in outcome.envelopes {
+        println!(
+            "kind={:?} exchange={} symbol={} ts={}",
+            envelope.event.kind,
+            envelope.event.exchange,
+            envelope.event.symbol.as_str(),
+            envelope.event.timestamp.as_nanos()
+        );
+    }
+
+    Ok(())
+}
