@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use fdc_core::{error::Error, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::StorageWriteRecord;
+use crate::{StorageTier, StorageWriteRecord};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StorageQueryOrder {
@@ -29,6 +29,35 @@ impl Default for StorageQueryOrder {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StorageTierScope {
+    All,
+    Only(StorageTier),
+    Hot,
+    Warm,
+    Cold,
+}
+
+impl Default for StorageTierScope {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct StorageQueryMetrics {
+    pub scanned_entries: usize,
+    pub decoded_records: usize,
+    pub returned_records: usize,
+    pub tier_hits: BTreeMap<StorageTier, usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageQueryResult {
+    pub records: Vec<StorageWriteRecord>,
+    pub metrics: StorageQueryMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageQuery {
     pub namespace: String,
     pub collection: Option<String>,
@@ -40,6 +69,7 @@ pub struct StorageQuery {
     pub tags: BTreeMap<String, String>,
     pub limit: Option<usize>,
     pub order: StorageQueryOrder,
+    pub tier_scope: StorageTierScope,
 }
 
 impl StorageQuery {
@@ -55,6 +85,7 @@ impl StorageQuery {
             tags: BTreeMap::new(),
             limit: None,
             order: StorageQueryOrder::default(),
+            tier_scope: StorageTierScope::default(),
         }
     }
 
@@ -92,6 +123,11 @@ impl StorageQuery {
 
     pub fn with_order(mut self, order: StorageQueryOrder) -> Self {
         self.order = order;
+        self
+    }
+
+    pub fn with_tier_scope(mut self, tier_scope: StorageTierScope) -> Self {
+        self.tier_scope = tier_scope;
         self
     }
 
@@ -225,6 +261,35 @@ mod tests {
     fn storage_query_validation_rejects_empty_namespace() {
         let query = StorageQuery::new(" ");
         assert!(query.validate().is_err());
+    }
+
+    #[test]
+    fn storage_tier_scope_defaults_to_all() {
+        let query = StorageQuery::new("market_data");
+        assert_eq!(query.tier_scope, StorageTierScope::All);
+    }
+
+    #[test]
+    fn storage_query_builder_sets_tier_scope() {
+        let query = StorageQuery::new("market_data")
+            .with_tier_scope(StorageTierScope::Only(StorageTier::L3));
+        assert_eq!(query.tier_scope, StorageTierScope::Only(StorageTier::L3));
+    }
+
+    #[test]
+    fn storage_query_metrics_tracks_counts_and_tier_hits() {
+        let mut metrics = StorageQueryMetrics {
+            scanned_entries: 3,
+            decoded_records: 2,
+            returned_records: 1,
+            ..StorageQueryMetrics::default()
+        };
+        metrics.tier_hits.insert(StorageTier::L2, 3);
+
+        assert_eq!(metrics.scanned_entries, 3);
+        assert_eq!(metrics.decoded_records, 2);
+        assert_eq!(metrics.returned_records, 1);
+        assert_eq!(metrics.tier_hits.get(&StorageTier::L2), Some(&3));
     }
 
     #[test]

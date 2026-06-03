@@ -40,7 +40,10 @@ pub use engine::{EngineCapabilities, StorageEngine, StorageEngineType};
 pub use index::{IndexConfig, IndexManager, IndexType};
 pub use metrics::StorageMetrics;
 pub(crate) use query::{apply_query_order_and_limit, record_matches_storage_query};
-pub use query::{QueryableStorage, StorageQuery, StorageQueryOrder};
+pub use query::{
+    QueryableStorage, StorageQuery, StorageQueryMetrics, StorageQueryOrder, StorageQueryResult,
+    StorageTierScope,
+};
 pub use queryable::{InMemoryQueryableStorage, MarketDataQuery, QueryableMarketDataStore};
 pub use replication::{ReplicationConfig, ReplicationManager};
 pub use shard::{ShardKey, ShardManager, ShardStrategy};
