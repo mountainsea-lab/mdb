@@ -13,8 +13,8 @@ use fdc_core::{error::Error, Result};
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
-    StorageTier, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord, StorageWriteSink,
-    TierConfig, TierManager,
+    StorageQueryMetrics, StorageQueryResult, StorageTier, StorageWriteBatch, StorageWriteOutcome,
+    StorageWriteRecord, StorageWriteSink, TierConfig, TierManager,
 };
 
 const KEY_SEPARATOR: u8 = 0;
@@ -43,6 +43,51 @@ impl TieredStorageStore {
     pub fn storage_key_for_record(record: &StorageWriteRecord) -> Vec<u8> {
         storage_key(&record.namespace, &record.collection, &record.key)
     }
+
+    pub async fn query_storage_with_metrics(
+        &self,
+        query: &StorageQuery,
+    ) -> Result<StorageQueryResult> {
+        query.validate()?;
+
+        let prefix = query.collection.as_ref().map_or_else(
+            || storage_namespace_prefix(&query.namespace),
+            |collection| storage_collection_prefix(&query.namespace, collection),
+        );
+
+        let tiers = self.tier_manager.tiers_for_scope(&query.tier_scope);
+        let now = Utc::now();
+        let mut seen = BTreeSet::new();
+        let mut records = Vec::new();
+        let mut metrics = StorageQueryMetrics::default();
+
+        for (tier, key, value) in self
+            .tier_manager
+            .scan_prefix_in_tiers(&prefix, &tiers, None)
+            .await?
+        {
+            metrics.scanned_entries += 1;
+            *metrics.tier_hits.entry(tier).or_insert(0) += 1;
+
+            if !seen.insert(key) {
+                continue;
+            }
+
+            let record = decode_record(&value)?;
+            metrics.decoded_records += 1;
+            if record_is_expired(&record, now) {
+                continue;
+            }
+            if record_matches_storage_query(&record, query) {
+                records.push(record);
+            }
+        }
+
+        let records = apply_query_order_and_limit(records, query);
+        metrics.returned_records = records.len();
+
+        Ok(StorageQueryResult { records, metrics })
+    }
 }
 
 #[async_trait]
@@ -67,32 +112,7 @@ impl StorageWriteSink for TieredStorageStore {
 #[async_trait]
 impl QueryableStorage for TieredStorageStore {
     async fn query_storage(&self, query: &StorageQuery) -> Result<Vec<StorageWriteRecord>> {
-        query.validate()?;
-
-        let prefix = query.collection.as_ref().map_or_else(
-            || storage_namespace_prefix(&query.namespace),
-            |collection| storage_collection_prefix(&query.namespace, collection),
-        );
-
-        let now = Utc::now();
-        let mut seen = BTreeSet::new();
-        let mut records = Vec::new();
-
-        for (key, value) in self.tier_manager.scan_prefix(&prefix, None).await? {
-            if !seen.insert(key) {
-                continue;
-            }
-
-            let record = decode_record(&value)?;
-            if record_is_expired(&record, now) {
-                continue;
-            }
-            if record_matches_storage_query(&record, query) {
-                records.push(record);
-            }
-        }
-
-        Ok(apply_query_order_and_limit(records, query))
+        Ok(self.query_storage_with_metrics(query).await?.records)
     }
 }
 
@@ -153,7 +173,7 @@ mod tests {
 
     use super::*;
     use crate::StorageEngineType;
-    use crate::{StoragePlacementHint, StorageQueryOrder, StorageWriteMetadata};
+    use crate::{StoragePlacementHint, StorageQueryOrder, StorageTierScope, StorageWriteMetadata};
     use tempfile::tempdir;
 
     fn tagged_record(key: &[u8], symbol: &str) -> StorageWriteRecord {
@@ -164,6 +184,22 @@ mod tests {
         StorageWriteRecord::new("market_data", "trades", key.to_vec(), b"value".to_vec())
             .with_metadata(metadata)
             .with_placement(StoragePlacementHint::for_tier(StorageTier::L1))
+    }
+
+    async fn memory_store_with_l1_to_l4() -> TieredStorageStore {
+        let mut manager = TierManager::new();
+        for tier in [
+            StorageTier::L1,
+            StorageTier::L2,
+            StorageTier::L3,
+            StorageTier::L4,
+        ] {
+            let mut config = TierConfig::new(tier);
+            config.engine_type = StorageEngineType::Memory;
+            manager.add_tier(config);
+        }
+        manager.initialize().await.unwrap();
+        TieredStorageStore::new(Arc::new(manager))
     }
 
     #[test]
@@ -239,6 +275,130 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].key, b"active".to_vec());
+    }
+
+    #[tokio::test]
+    async fn tiered_store_query_can_scope_to_only_one_tier() {
+        let store = memory_store_with_l1_to_l4().await;
+        let l1 = tagged_record(b"same", "BTCUSDT")
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L1));
+        let l3 = tagged_record(b"l3", "BTCUSDT")
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L3));
+
+        store
+            .write_batch(StorageWriteBatch::new(vec![l1, l3]))
+            .await
+            .unwrap();
+
+        let result = store
+            .query_storage_with_metrics(
+                &StorageQuery::new("market_data")
+                    .with_tier_scope(StorageTierScope::Only(StorageTier::L3)),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.records.len(), 1);
+        assert_eq!(result.records[0].key, b"l3".to_vec());
+        assert_eq!(result.metrics.tier_hits.get(&StorageTier::L3), Some(&1));
+        assert!(!result.metrics.tier_hits.contains_key(&StorageTier::L1));
+    }
+
+    #[tokio::test]
+    async fn tiered_store_query_hot_scope_reads_l1_l2_only() {
+        let store = memory_store_with_l1_to_l4().await;
+        store
+            .write_batch(StorageWriteBatch::new(vec![
+                tagged_record(b"l1", "BTCUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L1)),
+                tagged_record(b"l2", "BTCUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L2)),
+                tagged_record(b"l3", "BTCUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L3)),
+                tagged_record(b"l4", "BTCUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L4)),
+            ]))
+            .await
+            .unwrap();
+
+        let result = store
+            .query_storage_with_metrics(
+                &StorageQuery::new("market_data")
+                    .with_tier_scope(StorageTierScope::Hot)
+                    .with_order(StorageQueryOrder::KeyAsc),
+            )
+            .await
+            .unwrap();
+
+        let keys: Vec<_> = result
+            .records
+            .iter()
+            .map(|record| record.key.as_slice())
+            .collect();
+        assert_eq!(keys, vec![b"l1".as_slice(), b"l2".as_slice()]);
+        assert_eq!(result.metrics.tier_hits.get(&StorageTier::L1), Some(&1));
+        assert_eq!(result.metrics.tier_hits.get(&StorageTier::L2), Some(&1));
+        assert!(!result.metrics.tier_hits.contains_key(&StorageTier::L3));
+        assert!(!result.metrics.tier_hits.contains_key(&StorageTier::L4));
+    }
+
+    #[tokio::test]
+    async fn tiered_store_query_warm_and_cold_scopes_read_expected_tiers() {
+        let store = memory_store_with_l1_to_l4().await;
+        store
+            .write_batch(StorageWriteBatch::new(vec![
+                tagged_record(b"l3", "BTCUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L3)),
+                tagged_record(b"l4", "BTCUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L4)),
+            ]))
+            .await
+            .unwrap();
+
+        let warm = store
+            .query_storage_with_metrics(
+                &StorageQuery::new("market_data").with_tier_scope(StorageTierScope::Warm),
+            )
+            .await
+            .unwrap();
+        let cold = store
+            .query_storage_with_metrics(
+                &StorageQuery::new("market_data").with_tier_scope(StorageTierScope::Cold),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(warm.records.len(), 1);
+        assert_eq!(warm.records[0].key, b"l3".to_vec());
+        assert_eq!(cold.records.len(), 1);
+        assert_eq!(cold.records[0].key, b"l4".to_vec());
+    }
+
+    #[tokio::test]
+    async fn tiered_store_query_metrics_report_scanned_decoded_returned_and_tier_hits() {
+        let store = memory_store_with_l1_to_l4().await;
+        store
+            .write_batch(StorageWriteBatch::new(vec![
+                tagged_record(b"btc", "BTCUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L1)),
+                tagged_record(b"eth", "ETHUSDT")
+                    .with_placement(StoragePlacementHint::for_tier(StorageTier::L2)),
+            ]))
+            .await
+            .unwrap();
+
+        let result = store
+            .query_storage_with_metrics(&StorageQuery::new("market_data").with_tag("symbol", "BTCUSDT"))
+            .await
+            .unwrap();
+
+        assert_eq!(result.records.len(), 1);
+        assert_eq!(result.records[0].key, b"btc".to_vec());
+        assert_eq!(result.metrics.scanned_entries, 2);
+        assert_eq!(result.metrics.decoded_records, 2);
+        assert_eq!(result.metrics.returned_records, 1);
+        assert_eq!(result.metrics.tier_hits.get(&StorageTier::L1), Some(&1));
+        assert_eq!(result.metrics.tier_hits.get(&StorageTier::L2), Some(&1));
     }
 
     #[tokio::test]
