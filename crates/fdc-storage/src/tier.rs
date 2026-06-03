@@ -403,7 +403,10 @@ impl TierManager {
 
             return match engine_guard.compact().await {
                 Ok(()) => Ok(StorageCompactionOutcome::compacted(tier.clone())),
-                Err(error) => Ok(StorageCompactionOutcome::failed(tier.clone(), error.to_string())),
+                Err(error) => Ok(StorageCompactionOutcome::failed(
+                    tier.clone(),
+                    error.to_string(),
+                )),
             };
         }
         Err(Error::validation(format!(
@@ -417,11 +420,9 @@ impl TierManager {
         match outcome.kind {
             StorageCompactionOutcomeKind::Compacted => Ok(()),
             StorageCompactionOutcomeKind::Unsupported | StorageCompactionOutcomeKind::Failed => {
-                Err(Error::storage(
-                    outcome
-                        .message
-                        .unwrap_or_else(|| "storage compaction did not complete".to_string()),
-                ))
+                Err(Error::storage(outcome.message.unwrap_or_else(|| {
+                    "storage compaction did not complete".to_string()
+                })))
             }
         }
     }
@@ -851,8 +852,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tier_manager_compact_tier_with_outcome_reports_unsupported_without_error_string_matching()
-    {
+    async fn tier_manager_compact_tier_with_outcome_reports_unsupported_without_error_string_matching(
+    ) {
         let mut manager = TierManager::new();
         manager.add_tier(TierConfig::new(StorageTier::L1));
         manager.initialize().await.unwrap();
@@ -863,8 +864,15 @@ mod tests {
             .unwrap();
 
         assert_eq!(outcome.tier, StorageTier::L1);
-        assert_eq!(outcome.kind, crate::StorageCompactionOutcomeKind::Unsupported);
-        assert!(outcome.message.as_deref().unwrap_or("").contains("compaction"));
+        assert_eq!(
+            outcome.kind,
+            crate::StorageCompactionOutcomeKind::Unsupported
+        );
+        assert!(outcome
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("compaction"));
     }
 
     #[tokio::test]

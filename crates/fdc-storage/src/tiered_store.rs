@@ -19,8 +19,9 @@ use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
     StorageHealthSnapshot, StorageMaintenanceAuditEntry, StorageMaintenanceErrorKind,
     StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery, StorageQueryMetrics,
-    StorageQueryResult, StorageTier, StorageTierHealth, StorageTierHealthStatus, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord,
-    StorageWriteSink, TierConfig, TierLifecycleAction, TierLifecycleReport, TierManager,
+    StorageQueryResult, StorageTier, StorageTierHealth, StorageTierHealthStatus, StorageWriteBatch,
+    StorageWriteOutcome, StorageWriteRecord, StorageWriteSink, TierConfig, TierLifecycleAction,
+    TierLifecycleReport, TierManager,
 };
 
 const KEY_SEPARATOR: u8 = 0;
@@ -318,9 +319,7 @@ impl TieredStorageStore {
         let health = self.storage_health_snapshot().await?;
         info!(
             compaction_compacted = compacted_tiers.len(),
-            compaction_unsupported,
-            compaction_failed,
-            "storage maintenance pass completed"
+            compaction_unsupported, compaction_failed, "storage maintenance pass completed"
         );
         Ok(StorageMaintenanceReport {
             started_at,
