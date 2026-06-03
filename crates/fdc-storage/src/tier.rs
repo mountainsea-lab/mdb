@@ -1,7 +1,9 @@
 //! Storage tier management
 
 use crate::engine::{StorageEngine, StorageEngineType, StorageStats};
-use crate::{StorageAccessPatternHint, StorageDurabilityHint, StoragePlacementHint};
+use crate::{
+    StorageAccessPatternHint, StorageDurabilityHint, StoragePlacementHint, StorageTierScope,
+};
 use chrono::{DateTime, Utc};
 use fdc_core::error::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -317,22 +319,78 @@ impl TierManager {
         prefix: &[u8],
         limit: Option<usize>,
     ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        let mut results = Vec::new();
-        let mut tiers: Vec<_> = self.engines.keys().collect();
-        tiers.sort_by_key(|tier| tier.priority());
+        let tiers = self.tiers_for_scope(&StorageTierScope::All);
+        Ok(self
+            .scan_prefix_in_tiers(prefix, &tiers, limit)
+            .await?
+            .into_iter()
+            .map(|(_, key, value)| (key, value))
+            .collect())
+    }
 
-        for tier in tiers {
-            if let Some(engine) = self.engines.get(tier) {
-                let remaining = limit.map(|limit| limit.saturating_sub(results.len()));
-                if matches!(remaining, Some(0)) {
-                    break;
+    /// Resolve a query tier scope into initialized tiers ordered by priority.
+    pub fn tiers_for_scope(&self, scope: &StorageTierScope) -> Vec<StorageTier> {
+        let mut tiers = match scope {
+            StorageTierScope::All => self.engines.keys().cloned().collect(),
+            StorageTierScope::Only(tier) => {
+                if self.engines.contains_key(tier) {
+                    vec![tier.clone()]
+                } else {
+                    Vec::new()
                 }
-
-                let engine_guard = engine.read().await;
-                let mut tier_results = engine_guard.scan(Some(prefix), None, remaining).await?;
-                tier_results.retain(|(key, _)| key.starts_with(prefix));
-                results.extend(tier_results);
             }
+            StorageTierScope::Hot => [StorageTier::L1, StorageTier::L2]
+                .into_iter()
+                .filter(|tier| self.engines.contains_key(tier))
+                .collect(),
+            StorageTierScope::Warm => {
+                if self.engines.contains_key(&StorageTier::L3) {
+                    vec![StorageTier::L3]
+                } else {
+                    Vec::new()
+                }
+            }
+            StorageTierScope::Cold => {
+                if self.engines.contains_key(&StorageTier::L4) {
+                    vec![StorageTier::L4]
+                } else {
+                    Vec::new()
+                }
+            }
+        };
+        tiers.sort_by_key(|tier| tier.priority());
+        tiers
+    }
+
+    /// Scan a prefix only in the requested tiers. Returned entries keep their tier origin.
+    pub async fn scan_prefix_in_tiers(
+        &self,
+        prefix: &[u8],
+        tiers: &[StorageTier],
+        limit: Option<usize>,
+    ) -> Result<Vec<(StorageTier, Vec<u8>, Vec<u8>)>> {
+        let mut results = Vec::new();
+        let mut ordered_tiers = tiers.to_vec();
+        ordered_tiers.sort_by_key(|tier| tier.priority());
+
+        for tier in ordered_tiers {
+            let remaining = limit.map(|limit| limit.saturating_sub(results.len()));
+            if matches!(remaining, Some(0)) {
+                break;
+            }
+
+            let Some(engine) = self.engines.get(&tier) else {
+                continue;
+            };
+
+            let engine_guard = engine.read().await;
+            let mut tier_results = engine_guard.scan(Some(prefix), None, remaining).await?;
+            tier_results.retain(|(key, _)| key.starts_with(prefix));
+            results.extend(
+                tier_results
+                    .into_iter()
+                    .map(|(key, value)| (tier.clone(), key, value)),
+            );
         }
 
         if let Some(limit) = limit {
@@ -555,5 +613,69 @@ mod tests {
         let manager = TierManager::new();
         assert_eq!(manager.tiers.len(), 0);
         assert_eq!(manager.engines.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn tier_manager_resolves_scope_to_available_initialized_tiers() {
+        let mut manager = TierManager::new();
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        manager.add_tier(TierConfig::new(StorageTier::L3));
+        manager.initialize().await.unwrap();
+
+        assert_eq!(
+            manager.tiers_for_scope(&StorageTierScope::All),
+            vec![StorageTier::L1, StorageTier::L3]
+        );
+        assert_eq!(
+            manager.tiers_for_scope(&StorageTierScope::Hot),
+            vec![StorageTier::L1]
+        );
+        assert_eq!(
+            manager.tiers_for_scope(&StorageTierScope::Warm),
+            vec![StorageTier::L3]
+        );
+        assert_eq!(
+            manager.tiers_for_scope(&StorageTierScope::Cold),
+            Vec::<StorageTier>::new()
+        );
+        assert_eq!(
+            manager.tiers_for_scope(&StorageTierScope::Only(StorageTier::L3)),
+            vec![StorageTier::L3]
+        );
+    }
+
+    #[tokio::test]
+    async fn tier_manager_scans_prefix_only_in_requested_tiers() {
+        let mut manager = TierManager::new();
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        manager.add_tier(TierConfig::new(StorageTier::L2));
+        manager.initialize().await.unwrap();
+
+        manager
+            .put_with_placement(
+                b"scope/a",
+                b"l1",
+                &StoragePlacementHint::for_tier(StorageTier::L1),
+            )
+            .await
+            .unwrap();
+        manager
+            .put_with_placement(
+                b"scope/b",
+                b"l2",
+                &StoragePlacementHint::for_tier(StorageTier::L2),
+            )
+            .await
+            .unwrap();
+
+        let l2_results = manager
+            .scan_prefix_in_tiers(b"scope/", &[StorageTier::L2], None)
+            .await
+            .unwrap();
+
+        assert_eq!(l2_results.len(), 1);
+        assert_eq!(l2_results[0].0, StorageTier::L2);
+        assert_eq!(l2_results[0].1, b"scope/b".to_vec());
+        assert_eq!(l2_results[0].2, b"l2".to_vec());
     }
 }
