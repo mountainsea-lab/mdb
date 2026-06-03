@@ -41,6 +41,25 @@ async fn queryable_store_returns_records_by_symbol() {
 }
 
 #[tokio::test]
+async fn tiered_queryable_store_returns_records_by_symbol() {
+    let store = QueryableMarketDataStore::memory_tiered()
+        .await
+        .expect("memory tiered store should initialize");
+    let record = market_data_record("BTCUSDT", "trade", b"btc-1", br#"{"symbol":"BTCUSDT"}"#);
+
+    store
+        .write_batch(StorageWriteBatch::new(vec![record.clone()]))
+        .await
+        .expect("valid market data record should write to tiered store");
+
+    let records = store.query(&MarketDataQuery::for_trades().with_symbol("BTCUSDT"));
+
+    assert_eq!(records, vec![record]);
+    assert_eq!(store.record_count(), 1);
+    assert_eq!(store.all_records().len(), 1);
+}
+
+#[tokio::test]
 async fn queryable_store_filters_symbols_independently() {
     let store = QueryableMarketDataStore::new();
     let btc = market_data_record("BTCUSDT", "trade", b"btc-1", br#"{"symbol":"BTCUSDT"}"#);
@@ -83,8 +102,61 @@ async fn queryable_store_applies_trade_collection_and_limit() {
 }
 
 #[tokio::test]
+async fn tiered_queryable_store_applies_trade_collection_and_limit() {
+    let store = QueryableMarketDataStore::memory_tiered()
+        .await
+        .expect("memory tiered store should initialize");
+    let first = market_data_record("BTCUSDT", "trade", b"btc-1", br#"{"trade_id":"1"}"#);
+    let second = market_data_record("BTCUSDT", "trade", b"btc-2", br#"{"trade_id":"2"}"#);
+    let book = StorageWriteRecord::new(
+        "market_data",
+        "order_book_l1",
+        b"book-1".to_vec(),
+        br#"{"symbol":"BTCUSDT"}"#.to_vec(),
+    );
+
+    store
+        .write_batch(StorageWriteBatch::new(vec![first.clone(), second, book]))
+        .await
+        .expect("valid mixed market data records should write");
+
+    let records = store.query(
+        &MarketDataQuery::for_trades()
+            .with_symbol("BTCUSDT")
+            .with_limit(1),
+    );
+
+    assert_eq!(records, vec![first]);
+    assert_eq!(store.record_count(), 3);
+    assert_eq!(store.all_records().len(), 3);
+}
+
+#[tokio::test]
 async fn queryable_store_rejects_invalid_batch_atomically() {
     let store = QueryableMarketDataStore::new();
+    let seed = market_data_record("BTCUSDT", "trade", b"btc-1", br#"{"symbol":"BTCUSDT"}"#);
+    store
+        .write_batch(StorageWriteBatch::new(vec![seed.clone()]))
+        .await
+        .expect("seed record should write");
+
+    let invalid = StorageWriteRecord::new("market_data", "trades", Vec::new(), b"value".to_vec());
+    let error = store
+        .write_batch(StorageWriteBatch::new(vec![invalid]))
+        .await
+        .expect_err("invalid record should be rejected");
+
+    assert!(error
+        .to_string()
+        .contains("storage write record key must not be empty"));
+    assert_eq!(store.all_records(), vec![seed]);
+}
+
+#[tokio::test]
+async fn tiered_queryable_store_rejects_invalid_batch_atomically() {
+    let store = QueryableMarketDataStore::memory_tiered()
+        .await
+        .expect("memory tiered store should initialize");
     let seed = market_data_record("BTCUSDT", "trade", b"btc-1", br#"{"symbol":"BTCUSDT"}"#);
     store
         .write_batch(StorageWriteBatch::new(vec![seed.clone()]))

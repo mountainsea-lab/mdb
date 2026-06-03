@@ -6,7 +6,7 @@ Generic storage boundary for MDB/FDC modules.
 
 ## Current status
 
-Status as of S11: **P1-closed, pre-integration-ready**.
+Status as of S12: **P1-closed, market-data integration baseline validated**.
 
 The module is ready for broader business-module integration through its public generic APIs, but it is not yet fully production-deployment ready.
 
@@ -28,6 +28,13 @@ See:
 - Structured tracing spans/events around write/query/lifecycle/maintenance boundaries.
 - Duplicate-key TTL hard-delete semantics documented and regression-tested.
 - Public API stability policy documented.
+
+## Completed in S12
+
+- `QueryableMarketDataStore` can use either the original in-memory backend or a `TieredStorageStore` backend.
+- Market-data write/query contracts pass against a memory-tiered S11 storage backend.
+- `fdc-server` can inject a storage-backed market-data facade for production router tests.
+- `fdc-api` market-data query contracts pass with a storage-backed facade.
 
 ## P2 roadmap: before production deployment
 

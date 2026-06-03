@@ -1,7 +1,7 @@
 # fdc-storage Storage Boundary Acceptance Report
 
 Date: 2026-06-03
-Status: S11 P1-closed pre-integration-ready module baseline
+Status: S12 market-data integration baseline validated
 
 ## Scope
 
@@ -23,6 +23,7 @@ Status: S11 P1-closed pre-integration-ready module baseline
 | Lifecycle | Done | explicit TTL hard-delete, retention demotion, retention delete |
 | Maintenance/health | Done | explicit maintenance pass, health snapshot, guarded options-based maintenance, typed compaction outcomes, metrics snapshot |
 | P1 closure | Done | engine feature-based compaction classification, tracing spans, duplicate-key TTL semantics, API stability docs |
+| Market-data integration baseline | Done | `QueryableMarketDataStore` can delegate to `TieredStorageStore`; server/API contracts validate write/query flow through storage-backed facade |
 | Business dependency isolation | Guarded | `fdc-storage` must not depend on barter/ingestion/transform/api/server/orchestrator |
 
 ## Verification
@@ -45,6 +46,12 @@ Expected result as of S11: all `fdc-storage` tests pass.
 - TTL hard-delete semantics are explicit: when one logical storage key expires, lifecycle deletes that key from all initialized tiers. Duplicate tier copies are treated as copies of the same logical record, not independent versions.
 - Structured tracing spans exist around storage write/query/lifecycle/maintenance boundaries without logging payload bytes or business DTO fields.
 - Public API stability rules are documented in `public-api-stability.md`.
+
+## S12 Market-data Integration Notes
+
+- `QueryableMarketDataStore` remains the market-data facade used by `fdc-server` and `fdc-api`.
+- The facade can now be backed by S11 `TieredStorageStore` while preserving the original in-memory constructor behavior.
+- Server and API contract tests validate that market-data writes and `/market-data/trades` queries work through a storage-backed facade.
 
 ## Known Limitations
 

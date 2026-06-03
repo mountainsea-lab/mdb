@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
 use fdc_server::{build_production_router, ProductionServerState, ServerRuntimeConfig};
+use fdc_storage::QueryableMarketDataStore;
 use tower::ServiceExt;
 
 #[tokio::test]
@@ -116,6 +119,43 @@ async fn production_trade_query_reads_shared_store_after_fixture_ingest_helper()
     let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(json["status"], "success");
     assert_eq!(json["data"]["returned_records"], 2);
+}
+
+#[tokio::test]
+async fn production_trade_query_reads_tiered_backed_market_data_store() {
+    let config =
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse");
+    let store = Arc::new(
+        QueryableMarketDataStore::memory_tiered()
+            .await
+            .expect("memory tiered store should initialize"),
+    );
+    let state = ProductionServerState::with_market_data_store(config, store);
+
+    state
+        .ingest_test_trade("BTCUSDT", "tiered-prod-btc-1")
+        .await
+        .expect("fixture ingest should write to tiered-backed store");
+
+    let router = build_production_router(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/trades?symbol=BTCUSDT&limit=10")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("query should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_records"], 1);
+    assert_eq!(json["data"]["records"][0]["symbol"], "BTCUSDT");
 }
 
 #[test]

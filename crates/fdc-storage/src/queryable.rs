@@ -1,10 +1,12 @@
 use async_trait::async_trait;
 use fdc_core::Result;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
-    StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord, StorageWriteSink,
+    StorageTierScope, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord, StorageWriteSink,
+    TieredStorageStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,9 +125,19 @@ impl QueryableStorage for InMemoryQueryableStorage {
     }
 }
 
-#[derive(Debug, Default)]
+enum QueryableMarketDataBackend {
+    InMemory(InMemoryQueryableStorage),
+    Tiered(Arc<TieredStorageStore>),
+}
+
 pub struct QueryableMarketDataStore {
-    inner: InMemoryQueryableStorage,
+    backend: QueryableMarketDataBackend,
+}
+
+impl Default for QueryableMarketDataStore {
+    fn default() -> Self {
+        Self::in_memory()
+    }
 }
 
 impl QueryableMarketDataStore {
@@ -133,24 +145,60 @@ impl QueryableMarketDataStore {
         Self::default()
     }
 
+    pub fn in_memory() -> Self {
+        Self {
+            backend: QueryableMarketDataBackend::InMemory(InMemoryQueryableStorage::new()),
+        }
+    }
+
+    pub fn from_tiered_store(store: Arc<TieredStorageStore>) -> Self {
+        Self {
+            backend: QueryableMarketDataBackend::Tiered(store),
+        }
+    }
+
+    pub async fn memory_tiered() -> Result<Self> {
+        let store = TieredStorageStore::memory_only().await?;
+        Ok(Self::from_tiered_store(Arc::new(store)))
+    }
+
     pub fn query(&self, query: &MarketDataQuery) -> Vec<StorageWriteRecord> {
-        futures::executor::block_on(self.inner.query_storage(&query.to_storage_query()))
-            .expect("market data query should be valid")
+        match &self.backend {
+            QueryableMarketDataBackend::InMemory(inner) => {
+                futures::executor::block_on(inner.query_storage(&query.to_storage_query()))
+                    .expect("market data query should be valid")
+            }
+            QueryableMarketDataBackend::Tiered(store) => {
+                futures::executor::block_on(store.query_storage(&query.to_storage_query()))
+                    .expect("market data query should be valid")
+            }
+        }
     }
 
     pub fn all_records(&self) -> Vec<StorageWriteRecord> {
-        self.inner.all_records()
+        match &self.backend {
+            QueryableMarketDataBackend::InMemory(inner) => inner.all_records(),
+            QueryableMarketDataBackend::Tiered(store) => {
+                futures::executor::block_on(store.query_storage(
+                    &StorageQuery::new("market_data").with_tier_scope(StorageTierScope::All),
+                ))
+                .expect("market data record scan should be valid")
+            }
+        }
     }
 
     pub fn record_count(&self) -> usize {
-        self.inner.record_count()
+        self.all_records().len()
     }
 }
 
 #[async_trait]
 impl StorageWriteSink for QueryableMarketDataStore {
     async fn write_batch(&self, batch: StorageWriteBatch) -> Result<StorageWriteOutcome> {
-        self.inner.write_batch(batch).await
+        match &self.backend {
+            QueryableMarketDataBackend::InMemory(inner) => inner.write_batch(batch).await,
+            QueryableMarketDataBackend::Tiered(store) => store.write_batch(batch).await,
+        }
     }
 }
 

@@ -26,6 +26,17 @@ impl ProductionServerState {
         }
     }
 
+    pub fn with_market_data_store(
+        config: ServerRuntimeConfig,
+        market_data_store: Arc<QueryableMarketDataStore>,
+    ) -> Self {
+        Self {
+            config,
+            market_data_store,
+            market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
+        }
+    }
+
     pub fn config(&self) -> &ServerRuntimeConfig {
         &self.config
     }

@@ -58,6 +58,24 @@ async fn seeded_state() -> ApiAppState {
     ApiAppState::new(FdcServerApp::with_defaults()).with_market_data_store(store)
 }
 
+async fn tiered_seeded_state() -> ApiAppState {
+    let store = Arc::new(
+        QueryableMarketDataStore::memory_tiered()
+            .await
+            .expect("memory tiered store should initialize"),
+    );
+    store
+        .write_batch(StorageWriteBatch::new(vec![
+            trade_record("BTCUSDT", b"btc-1", "btc-1"),
+            trade_record("ETHUSDT", b"eth-1", "eth-1"),
+            trade_record("BTCUSDT", b"btc-2", "btc-2"),
+        ]))
+        .await
+        .expect("seed records should write");
+
+    ApiAppState::new(FdcServerApp::with_defaults()).with_market_data_store(store)
+}
+
 #[tokio::test]
 async fn pure_helper_filters_trades_by_symbol() {
     let state = seeded_state().await;
@@ -96,6 +114,53 @@ async fn pure_helper_applies_limit() {
 #[tokio::test]
 async fn in_memory_router_returns_seeded_trade_json() {
     let state = seeded_state().await;
+    let router = build_market_data_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/trades?symbol=BTCUSDT&limit=10")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("router should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("response should be JSON");
+
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_records"], 2);
+    assert_eq!(json["data"]["records"][0]["symbol"], "BTCUSDT");
+    assert_eq!(json["data"]["records"][0]["payload"]["symbol"], "BTCUSDT");
+}
+
+#[tokio::test]
+async fn tiered_pure_helper_filters_trades_by_symbol() {
+    let state = tiered_seeded_state().await;
+
+    let response = query_market_data_trades(
+        &state,
+        MarketDataTradeQueryParams {
+            symbol: Some("BTCUSDT".to_string()),
+            limit: Some(10),
+        },
+    );
+
+    assert_eq!(response.status, "success");
+    assert_eq!(response.data.returned_records, 2);
+    assert!(response.data.records.iter().all(|record| {
+        record.symbol.as_deref() == Some("BTCUSDT") && record.kind.as_deref() == Some("trade")
+    }));
+}
+
+#[tokio::test]
+async fn tiered_router_returns_seeded_trade_json() {
+    let state = tiered_seeded_state().await;
     let router = build_market_data_router(state);
 
     let response = router
