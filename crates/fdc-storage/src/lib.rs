@@ -11,6 +11,7 @@ pub mod compression; // 压缩算法
 pub mod config; // 配置管理
 pub mod engine; // 存储引擎抽象
 pub mod index; // 索引系统
+pub mod lifecycle; // tier lifecycle reports and maintenance result types
 pub mod metrics; // 存储指标
 pub mod query; // generic storage query boundary
 pub mod queryable; // queryable in-memory market-data storage boundary
@@ -38,6 +39,7 @@ pub use compression::{CompressionAlgorithm, CompressionManager};
 pub use config::StorageConfig;
 pub use engine::{EngineCapabilities, StorageEngine, StorageEngineType};
 pub use index::{IndexConfig, IndexManager, IndexType};
+pub use lifecycle::{TierLifecycleAction, TierLifecycleReport, TierLifecycleTierReport};
 pub use metrics::StorageMetrics;
 pub(crate) use query::{apply_query_order_and_limit, record_matches_storage_query};
 pub use query::{
