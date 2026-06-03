@@ -1,6 +1,7 @@
 //! Storage tier management
 
 use crate::engine::{StorageEngine, StorageEngineType, StorageStats};
+use crate::{StorageAccessPatternHint, StorageDurabilityHint, StoragePlacementHint};
 use chrono::{DateTime, Utc};
 use fdc_core::error::{Error, Result};
 use serde::{Deserialize, Serialize};
@@ -273,7 +274,32 @@ impl TierManager {
         // 根据数据大小和访问模式决定初始层级
         let target_tier = self.determine_initial_tier(key, value.len()).await;
 
-        if let Some(engine) = self.engines.get(&target_tier) {
+        self.put_to_tier(key, value, &target_tier).await
+    }
+
+    /// 根据 placement hint 设置数据。
+    pub async fn put_with_placement(
+        &self,
+        key: &[u8],
+        value: &[u8],
+        placement: &StoragePlacementHint,
+    ) -> Result<()> {
+        let target_tier = self
+            .determine_tier_for_placement(key, value.len(), placement)
+            .await;
+
+        self.put_to_tier(key, value, &target_tier).await
+    }
+
+    async fn put_to_tier(&self, key: &[u8], value: &[u8], target_tier: &StorageTier) -> Result<()> {
+        if !self.engines.contains_key(target_tier) {
+            return Err(Error::validation(format!(
+                "storage tier {:?} is not initialized",
+                target_tier
+            )));
+        }
+
+        if let Some(engine) = self.engines.get(target_tier) {
             let engine_guard = engine.read().await;
             engine_guard.put(key, value).await?;
 
@@ -282,6 +308,37 @@ impl TierManager {
         }
 
         Ok(())
+    }
+
+    /// 按 prefix 跨层扫描数据。较热层级优先，调用方负责去重。
+    pub async fn scan_prefix(
+        &self,
+        prefix: &[u8],
+        limit: Option<usize>,
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        let mut results = Vec::new();
+        let mut tiers: Vec<_> = self.engines.keys().collect();
+        tiers.sort_by_key(|tier| tier.priority());
+
+        for tier in tiers {
+            if let Some(engine) = self.engines.get(tier) {
+                let remaining = limit.map(|limit| limit.saturating_sub(results.len()));
+                if matches!(remaining, Some(0)) {
+                    break;
+                }
+
+                let engine_guard = engine.read().await;
+                let mut tier_results = engine_guard.scan(Some(prefix), None, remaining).await?;
+                tier_results.retain(|(key, _)| key.starts_with(prefix));
+                results.extend(tier_results);
+            }
+        }
+
+        if let Some(limit) = limit {
+            results.truncate(limit);
+        }
+
+        Ok(results)
     }
 
     /// 删除数据
@@ -311,11 +368,56 @@ impl TierManager {
     async fn determine_initial_tier(&self, key: &[u8], data_size: usize) -> StorageTier {
         // 检查是否有历史访问模式
         if let Some(pattern) = self.access_patterns.read().await.get(key) {
-            return pattern.recommended_tier();
+            return self
+                .nearest_available_tier(pattern.recommended_tier())
+                .unwrap_or(StorageTier::L1);
         }
 
-        // 新数据默认放在L2
-        StorageTier::L2
+        // 新数据默认放在 L2；如果未配置 L2，则选择最近可用层级。
+        let _ = data_size;
+        self.nearest_available_tier(StorageTier::L2)
+            .unwrap_or(StorageTier::L1)
+    }
+
+    async fn determine_tier_for_placement(
+        &self,
+        key: &[u8],
+        data_size: usize,
+        placement: &StoragePlacementHint,
+    ) -> StorageTier {
+        if let Some(target_tier) = &placement.target_tier {
+            return self
+                .nearest_available_tier(target_tier.clone())
+                .unwrap_or_else(|| target_tier.clone());
+        }
+
+        let hinted_tier = match (&placement.access_pattern, &placement.durability) {
+            (StorageAccessPatternHint::UltraHot, _) => Some(StorageTier::L1),
+            (StorageAccessPatternHint::Hot, _) => Some(StorageTier::L2),
+            (StorageAccessPatternHint::Warm, _) => Some(StorageTier::L3),
+            (StorageAccessPatternHint::Cold, _) => Some(StorageTier::L4),
+            (_, StorageDurabilityHint::Ephemeral) => Some(StorageTier::L1),
+            (_, StorageDurabilityHint::Cached) => Some(StorageTier::L2),
+            (_, StorageDurabilityHint::Persistent) => Some(StorageTier::L3),
+            (_, StorageDurabilityHint::Archival) => Some(StorageTier::L4),
+            _ => None,
+        };
+
+        if let Some(tier) = hinted_tier {
+            return self.nearest_available_tier(tier.clone()).unwrap_or(tier);
+        }
+
+        self.determine_initial_tier(key, data_size).await
+    }
+
+    fn nearest_available_tier(&self, desired: StorageTier) -> Option<StorageTier> {
+        if self.engines.contains_key(&desired) {
+            return Some(desired);
+        }
+
+        let mut tiers: Vec<_> = self.engines.keys().cloned().collect();
+        tiers.sort_by_key(|tier| (tier.priority() as i16 - desired.priority() as i16).abs());
+        tiers.into_iter().next()
     }
 
     /// 调度提升任务

@@ -18,6 +18,7 @@ pub mod replication; // 数据复制
 pub mod shard; // 数据分片
 pub mod sink; // storage write sink boundary
 pub mod tier; // 存储层级管理
+pub mod tiered_store; // tier-aware storage sink/query store
 pub mod typed; // typed storage facade over raw records
 pub mod write; // storage-owned write records and placement hints
 
@@ -45,6 +46,7 @@ pub use replication::{ReplicationConfig, ReplicationManager};
 pub use shard::{ShardKey, ShardManager, ShardStrategy};
 pub use sink::{RecordingStorageSink, StorageWriteOutcome, StorageWriteSink};
 pub use tier::{StorageTier, TierConfig, TierManager};
+pub use tiered_store::{validate_storage_record_roundtrip, TieredStorageStore};
 pub use typed::{
     decode_storage_record, query_typed_storage, StorageTypeDescriptor, TypedStorageReadRecord,
     TypedStorageRecord,
