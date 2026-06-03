@@ -13,6 +13,7 @@ use std::sync::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use fdc_core::{error::Error, Result};
+use tracing::{debug, info, instrument, warn};
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
@@ -54,6 +55,12 @@ impl TieredStorageStore {
         storage_key(&record.namespace, &record.collection, &record.key)
     }
 
+    #[instrument(skip(self, query), fields(
+        namespace = %query.namespace,
+        collection = query.collection.as_deref().unwrap_or(""),
+        limit = ?query.limit,
+        tier_scope = ?query.tier_scope
+    ))]
     pub async fn query_storage_with_metrics(
         &self,
         query: &StorageQuery,
@@ -95,10 +102,17 @@ impl TieredStorageStore {
 
         let records = apply_query_order_and_limit(records, query);
         metrics.returned_records = records.len();
+        debug!(
+            scanned_entries = metrics.scanned_entries,
+            decoded_records = metrics.decoded_records,
+            returned_records = metrics.returned_records,
+            "storage query completed"
+        );
 
         Ok(StorageQueryResult { records, metrics })
     }
 
+    #[instrument(skip(self))]
     pub async fn run_lifecycle_once(&self) -> Result<TierLifecycleReport> {
         let now = Utc::now();
         let tiers = self
@@ -156,9 +170,20 @@ impl TieredStorageStore {
             }
         }
 
+        info!(
+            scanned_entries = report.scanned_entries,
+            ttl_deleted = report.ttl_deleted,
+            retention_demoted = report.retention_demoted,
+            retention_deleted = report.retention_deleted,
+            retained = report.retained,
+            decode_errors = report.decode_errors,
+            "storage lifecycle pass completed"
+        );
+
         Ok(report)
     }
 
+    #[instrument(skip(self))]
     pub async fn storage_health_snapshot(&self) -> Result<StorageHealthSnapshot> {
         let stats = self.tier_manager.get_tier_stats().await?;
         let initialized: BTreeSet<_> = self.tier_manager.initialized_tiers().into_iter().collect();
@@ -205,6 +230,9 @@ impl TieredStorageStore {
             .await
     }
 
+    #[instrument(skip(self, options), fields(
+        timeout_ms = ?options.timeout.map(|timeout| timeout.as_millis())
+    ))]
     pub async fn run_maintenance_once_with_options(
         &self,
         options: StorageMaintenanceOptions,
@@ -252,6 +280,7 @@ impl TieredStorageStore {
         })
     }
 
+    #[instrument(skip(self))]
     async fn run_maintenance_once_inner(&self) -> Result<StorageMaintenanceReport> {
         let started_at = Utc::now();
         let lifecycle = self.run_lifecycle_once().await?;
@@ -274,6 +303,7 @@ impl TieredStorageStore {
                 }
                 crate::StorageCompactionOutcomeKind::Failed => {
                     compaction_failed += 1;
+                    warn!(tier = ?tier, error = ?outcome.message, "storage compaction failed");
                     compaction_errors.insert(
                         tier.clone(),
                         outcome
@@ -287,6 +317,12 @@ impl TieredStorageStore {
         }
 
         let health = self.storage_health_snapshot().await?;
+        info!(
+            compaction_compacted = compacted_tiers.len(),
+            compaction_unsupported,
+            compaction_failed,
+            "storage maintenance pass completed"
+        );
         Ok(StorageMaintenanceReport {
             started_at,
             finished_at: Utc::now(),
@@ -313,6 +349,7 @@ impl Drop for MaintenanceRunGuard {
 
 #[async_trait]
 impl StorageWriteSink for TieredStorageStore {
+    #[instrument(skip(self, batch), fields(batch_size = batch.records.len()))]
     async fn write_batch(&self, batch: StorageWriteBatch) -> Result<StorageWriteOutcome> {
         batch.validate()?;
         let batch_id = batch.batch_id;
@@ -332,6 +369,7 @@ impl StorageWriteSink for TieredStorageStore {
 
 #[async_trait]
 impl QueryableStorage for TieredStorageStore {
+    #[instrument(skip(self, query), fields(namespace = %query.namespace, limit = ?query.limit))]
     async fn query_storage(&self, query: &StorageQuery) -> Result<Vec<StorageWriteRecord>> {
         Ok(self.query_storage_with_metrics(query).await?.records)
     }
