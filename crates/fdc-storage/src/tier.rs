@@ -2,7 +2,8 @@
 
 use crate::engine::{StorageEngine, StorageEngineType, StorageStats};
 use crate::{
-    StorageAccessPatternHint, StorageDurabilityHint, StoragePlacementHint, StorageTierScope,
+    StorageAccessPatternHint, StorageCompactionOutcome, StorageCompactionOutcomeKind,
+    StorageDurabilityHint, StorageEngineFeature, StoragePlacementHint, StorageTierScope,
 };
 use chrono::{DateTime, Utc};
 use fdc_core::error::{Error, Result};
@@ -318,6 +319,14 @@ impl TierManager {
         Ok(())
     }
 
+    pub async fn get_from_tier(&self, key: &[u8], tier: &StorageTier) -> Result<Option<Vec<u8>>> {
+        if let Some(engine) = self.engines.get(tier) {
+            let engine_guard = engine.read().await;
+            return engine_guard.get(key).await;
+        }
+        Ok(None)
+    }
+
     /// 按 prefix 跨层扫描数据。较热层级优先，调用方负责去重。
     pub async fn scan_prefix(
         &self,
@@ -379,15 +388,43 @@ impl TierManager {
         tiers
     }
 
-    pub async fn compact_tier(&self, tier: &StorageTier) -> Result<()> {
+    pub async fn compact_tier_with_outcome(
+        &self,
+        tier: &StorageTier,
+    ) -> Result<StorageCompactionOutcome> {
         if let Some(engine) = self.engines.get(tier) {
             let engine_guard = engine.read().await;
-            return engine_guard.compact().await;
+            if !engine_guard.supports_feature(StorageEngineFeature::Compaction) {
+                return Ok(StorageCompactionOutcome::unsupported(
+                    tier.clone(),
+                    format!("{} compaction is not supported", engine_guard.engine_type()),
+                ));
+            }
+
+            return match engine_guard.compact().await {
+                Ok(()) => Ok(StorageCompactionOutcome::compacted(tier.clone())),
+                Err(error) => Ok(StorageCompactionOutcome::failed(
+                    tier.clone(),
+                    error.to_string(),
+                )),
+            };
         }
         Err(Error::validation(format!(
             "storage tier {:?} is not initialized",
             tier
         )))
+    }
+
+    pub async fn compact_tier(&self, tier: &StorageTier) -> Result<()> {
+        let outcome = self.compact_tier_with_outcome(tier).await?;
+        match outcome.kind {
+            StorageCompactionOutcomeKind::Compacted => Ok(()),
+            StorageCompactionOutcomeKind::Unsupported | StorageCompactionOutcomeKind::Failed => {
+                Err(Error::storage(outcome.message.unwrap_or_else(|| {
+                    "storage compaction did not complete".to_string()
+                })))
+            }
+        }
     }
 
     /// Scan a prefix only in the requested tiers. Returned entries keep their tier origin.
@@ -811,6 +848,50 @@ mod tests {
         manager.initialize().await.unwrap();
 
         let error = manager.compact_tier(&StorageTier::L1).await.unwrap_err();
-        assert!(error.to_string().contains("Compaction not supported"));
+        assert!(error.to_string().contains("compaction"));
+    }
+
+    #[tokio::test]
+    async fn tier_manager_compact_tier_with_outcome_reports_unsupported_without_error_string_matching(
+    ) {
+        let mut manager = TierManager::new();
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        manager.initialize().await.unwrap();
+
+        let outcome = manager
+            .compact_tier_with_outcome(&StorageTier::L1)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.tier, StorageTier::L1);
+        assert_eq!(
+            outcome.kind,
+            crate::StorageCompactionOutcomeKind::Unsupported
+        );
+        assert!(outcome
+            .message
+            .as_deref()
+            .unwrap_or("")
+            .contains("compaction"));
+    }
+
+    #[tokio::test]
+    async fn tier_manager_compact_tier_with_outcome_reports_compacted_for_rocksdb() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = TierConfig::new(StorageTier::L4).with_engine_config(
+            "db_path".to_string(),
+            dir.path().join("rocksdb").to_string_lossy().to_string(),
+        );
+        let mut manager = TierManager::new();
+        manager.add_tier(config);
+        manager.initialize().await.unwrap();
+
+        let outcome = manager
+            .compact_tier_with_outcome(&StorageTier::L4)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome.tier, StorageTier::L4);
+        assert_eq!(outcome.kind, crate::StorageCompactionOutcomeKind::Compacted);
     }
 }

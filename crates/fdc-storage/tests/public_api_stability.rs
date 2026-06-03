@@ -1,6 +1,7 @@
 use fdc_storage::{
-    StorageMaintenanceReport, StoragePlacementHint, StorageQuery, StorageTier, StorageTierScope,
-    TierLifecycleReport, TieredStorageStore,
+    StorageEngineFeature, StorageEngineFeatureError, StorageEngineType, StorageMaintenanceReport,
+    StoragePlacementHint, StorageQuery, StorageTier, StorageTierScope, TierLifecycleReport,
+    TieredStorageStore,
 };
 
 #[tokio::test]
@@ -16,6 +17,10 @@ async fn public_storage_api_smoke_compiles_and_runs() {
 
     let lifecycle = TierLifecycleReport::default();
     assert_eq!(lifecycle.scanned_entries, 0);
+
+    let feature = StorageEngineFeature::Compaction;
+    let feature_error = StorageEngineFeatureError::unsupported(StorageEngineType::Memory, feature);
+    assert_eq!(feature_error.feature, StorageEngineFeature::Compaction);
 
     let maintenance: StorageMaintenanceReport = store.run_maintenance_once().await.unwrap();
     assert!(maintenance.finished_at >= maintenance.started_at);

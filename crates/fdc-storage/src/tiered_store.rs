@@ -13,14 +13,15 @@ use std::sync::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use fdc_core::{error::Error, Result};
+use tracing::{debug, info, instrument, warn};
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
-    StorageCompactionOutcome, StorageHealthSnapshot, StorageMaintenanceAuditEntry,
-    StorageMaintenanceErrorKind, StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery,
-    StorageQueryMetrics, StorageQueryResult, StorageTier, StorageTierHealth,
-    StorageTierHealthStatus, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord,
-    StorageWriteSink, TierConfig, TierLifecycleAction, TierLifecycleReport, TierManager,
+    StorageHealthSnapshot, StorageMaintenanceAuditEntry, StorageMaintenanceErrorKind,
+    StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery, StorageQueryMetrics,
+    StorageQueryResult, StorageTier, StorageTierHealth, StorageTierHealthStatus, StorageWriteBatch,
+    StorageWriteOutcome, StorageWriteRecord, StorageWriteSink, TierConfig, TierLifecycleAction,
+    TierLifecycleReport, TierManager,
 };
 
 const KEY_SEPARATOR: u8 = 0;
@@ -54,6 +55,12 @@ impl TieredStorageStore {
         storage_key(&record.namespace, &record.collection, &record.key)
     }
 
+    #[instrument(skip(self, query), fields(
+        namespace = %query.namespace,
+        collection = query.collection.as_deref().unwrap_or(""),
+        limit = ?query.limit,
+        tier_scope = ?query.tier_scope
+    ))]
     pub async fn query_storage_with_metrics(
         &self,
         query: &StorageQuery,
@@ -95,10 +102,17 @@ impl TieredStorageStore {
 
         let records = apply_query_order_and_limit(records, query);
         metrics.returned_records = records.len();
+        debug!(
+            scanned_entries = metrics.scanned_entries,
+            decoded_records = metrics.decoded_records,
+            returned_records = metrics.returned_records,
+            "storage query completed"
+        );
 
         Ok(StorageQueryResult { records, metrics })
     }
 
+    #[instrument(skip(self))]
     pub async fn run_lifecycle_once(&self) -> Result<TierLifecycleReport> {
         let now = Utc::now();
         let tiers = self
@@ -156,9 +170,20 @@ impl TieredStorageStore {
             }
         }
 
+        info!(
+            scanned_entries = report.scanned_entries,
+            ttl_deleted = report.ttl_deleted,
+            retention_demoted = report.retention_demoted,
+            retention_deleted = report.retention_deleted,
+            retained = report.retained,
+            decode_errors = report.decode_errors,
+            "storage lifecycle pass completed"
+        );
+
         Ok(report)
     }
 
+    #[instrument(skip(self))]
     pub async fn storage_health_snapshot(&self) -> Result<StorageHealthSnapshot> {
         let stats = self.tier_manager.get_tier_stats().await?;
         let initialized: BTreeSet<_> = self.tier_manager.initialized_tiers().into_iter().collect();
@@ -205,6 +230,9 @@ impl TieredStorageStore {
             .await
     }
 
+    #[instrument(skip(self, options), fields(
+        timeout_ms = ?options.timeout.map(|timeout| timeout.as_millis())
+    ))]
     pub async fn run_maintenance_once_with_options(
         &self,
         options: StorageMaintenanceOptions,
@@ -252,6 +280,7 @@ impl TieredStorageStore {
         })
     }
 
+    #[instrument(skip(self))]
     async fn run_maintenance_once_inner(&self) -> Result<StorageMaintenanceReport> {
         let started_at = Utc::now();
         let lifecycle = self.run_lifecycle_once().await?;
@@ -262,27 +291,36 @@ impl TieredStorageStore {
         let mut compaction_failed = 0;
 
         for tier in self.tier_manager.initialized_tiers() {
-            match self.tier_manager.compact_tier(&tier).await {
-                Ok(()) => {
+            let outcome = self.tier_manager.compact_tier_with_outcome(&tier).await?;
+            match outcome.kind {
+                crate::StorageCompactionOutcomeKind::Compacted => {
                     compacted_tiers.push(tier.clone());
-                    compaction_outcomes.push(StorageCompactionOutcome::compacted(tier));
+                    compaction_outcomes.push(outcome);
                 }
-                Err(error) => {
-                    let message = error.to_string();
-                    if is_unsupported_compaction_error(&error) {
-                        compaction_unsupported += 1;
-                        compaction_outcomes
-                            .push(StorageCompactionOutcome::unsupported(tier, message));
-                    } else {
-                        compaction_failed += 1;
-                        compaction_errors.insert(tier.clone(), message.clone());
-                        compaction_outcomes.push(StorageCompactionOutcome::failed(tier, message));
-                    }
+                crate::StorageCompactionOutcomeKind::Unsupported => {
+                    compaction_unsupported += 1;
+                    compaction_outcomes.push(outcome);
+                }
+                crate::StorageCompactionOutcomeKind::Failed => {
+                    compaction_failed += 1;
+                    warn!(tier = ?tier, error = ?outcome.message, "storage compaction failed");
+                    compaction_errors.insert(
+                        tier.clone(),
+                        outcome
+                            .message
+                            .clone()
+                            .unwrap_or_else(|| "storage compaction failed".to_string()),
+                    );
+                    compaction_outcomes.push(outcome);
                 }
             }
         }
 
         let health = self.storage_health_snapshot().await?;
+        info!(
+            compaction_compacted = compacted_tiers.len(),
+            compaction_unsupported, compaction_failed, "storage maintenance pass completed"
+        );
         Ok(StorageMaintenanceReport {
             started_at,
             finished_at: Utc::now(),
@@ -307,18 +345,9 @@ impl Drop for MaintenanceRunGuard {
     }
 }
 
-fn is_unsupported_compaction_error(error: &Error) -> bool {
-    match error {
-        Error::Unimplemented { .. } => true,
-        _ => error
-            .to_string()
-            .to_ascii_lowercase()
-            .contains("not supported"),
-    }
-}
-
 #[async_trait]
 impl StorageWriteSink for TieredStorageStore {
+    #[instrument(skip(self, batch), fields(batch_size = batch.records.len()))]
     async fn write_batch(&self, batch: StorageWriteBatch) -> Result<StorageWriteOutcome> {
         batch.validate()?;
         let batch_id = batch.batch_id;
@@ -338,6 +367,7 @@ impl StorageWriteSink for TieredStorageStore {
 
 #[async_trait]
 impl QueryableStorage for TieredStorageStore {
+    #[instrument(skip(self, query), fields(namespace = %query.namespace, limit = ?query.limit))]
     async fn query_storage(&self, query: &StorageQuery) -> Result<Vec<StorageWriteRecord>> {
         Ok(self.query_storage_with_metrics(query).await?.records)
     }
@@ -685,6 +715,63 @@ mod tests {
         assert_eq!(report.scanned_entries, 1);
         assert_eq!(report.ttl_deleted, 1);
         assert!(store.tier_manager().get(&key).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_ttl_delete_removes_duplicate_key_from_each_tier_copy() {
+        let store = lifecycle_store_with_tiers(vec![
+            memory_tier_config(StorageTier::L1),
+            memory_tier_config(StorageTier::L2),
+        ])
+        .await;
+
+        let record = tagged_record(b"ttl-duplicate", "BTCUSDT")
+            .with_timestamp(Utc::now() - Duration::seconds(10))
+            .with_placement(
+                StoragePlacementHint::for_tier(StorageTier::L1).with_ttl(Duration::seconds(1)),
+            );
+        let key = TieredStorageStore::storage_key_for_record(&record);
+        let value = encode_record(&record).unwrap();
+
+        store
+            .tier_manager()
+            .put_to_specific_tier(&key, &value, &StorageTier::L1)
+            .await
+            .unwrap();
+        store
+            .tier_manager()
+            .put_to_specific_tier(&key, &value, &StorageTier::L2)
+            .await
+            .unwrap();
+
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L1)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L2)
+            .await
+            .unwrap()
+            .is_some());
+
+        let report = store.run_lifecycle_once().await.unwrap();
+
+        assert_eq!(report.ttl_deleted, 1);
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L1)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L2)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]

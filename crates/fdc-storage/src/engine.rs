@@ -36,6 +36,49 @@ impl std::fmt::Display for StorageEngineType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StorageEngineFeature {
+    Compaction,
+    Snapshot,
+    Restore,
+    SqlQuery,
+}
+
+impl std::fmt::Display for StorageEngineFeature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StorageEngineFeature::Compaction => write!(f, "compaction"),
+            StorageEngineFeature::Snapshot => write!(f, "snapshot"),
+            StorageEngineFeature::Restore => write!(f, "restore"),
+            StorageEngineFeature::SqlQuery => write!(f, "sql_query"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StorageEngineFeatureError {
+    pub engine_type: StorageEngineType,
+    pub feature: StorageEngineFeature,
+    pub message: String,
+}
+
+impl StorageEngineFeatureError {
+    pub fn unsupported(engine_type: StorageEngineType, feature: StorageEngineFeature) -> Self {
+        Self {
+            engine_type,
+            feature,
+            message: "feature is not supported by this storage engine".to_string(),
+        }
+    }
+
+    pub fn into_error(self) -> Error {
+        Error::unimplemented(format!(
+            "unsupported storage engine feature: engine={}, feature={}, message={}",
+            self.engine_type, self.feature, self.message
+        ))
+    }
+}
+
 /// 引擎能力
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineCapabilities {
@@ -162,6 +205,16 @@ pub trait StorageEngine: Send + Sync {
     /// 获取引擎能力
     fn capabilities(&self) -> EngineCapabilities;
 
+    fn supports_feature(&self, feature: StorageEngineFeature) -> bool {
+        let capabilities = self.capabilities();
+        match feature {
+            StorageEngineFeature::Compaction => capabilities.supports_compression,
+            StorageEngineFeature::Snapshot => capabilities.supports_backup,
+            StorageEngineFeature::Restore => capabilities.supports_backup,
+            StorageEngineFeature::SqlQuery => capabilities.supports_sql,
+        }
+    }
+
     /// 初始化引擎
     async fn initialize(&mut self) -> Result<()>;
 
@@ -198,26 +251,38 @@ pub trait StorageEngine: Send + Sync {
 
     /// 压缩数据
     async fn compact(&self) -> Result<()> {
-        // 默认实现：不支持压缩
-        Err(Error::unimplemented("Compaction not supported"))
+        Err(StorageEngineFeatureError::unsupported(
+            self.engine_type(),
+            StorageEngineFeature::Compaction,
+        )
+        .into_error())
     }
 
     /// 创建快照
     async fn snapshot(&self) -> Result<String> {
-        // 默认实现：不支持快照
-        Err(Error::unimplemented("Snapshots not supported"))
+        Err(StorageEngineFeatureError::unsupported(
+            self.engine_type(),
+            StorageEngineFeature::Snapshot,
+        )
+        .into_error())
     }
 
     /// 恢复快照
     async fn restore(&self, _snapshot_id: &str) -> Result<()> {
-        // 默认实现：不支持恢复
-        Err(Error::unimplemented("Restore not supported"))
+        Err(StorageEngineFeatureError::unsupported(
+            self.engine_type(),
+            StorageEngineFeature::Restore,
+        )
+        .into_error())
     }
 
     /// 执行SQL查询（如果支持）
     async fn query(&self, _sql: &str) -> Result<Vec<HashMap<String, Value>>> {
-        // 默认实现：不支持SQL
-        Err(Error::unimplemented("SQL queries not supported"))
+        Err(StorageEngineFeatureError::unsupported(
+            self.engine_type(),
+            StorageEngineFeature::SqlQuery,
+        )
+        .into_error())
     }
 
     /// 健康检查
@@ -366,5 +431,99 @@ mod tests {
         let duckdb_caps = StorageEngineFactory::get_capabilities(&StorageEngineType::DuckDB);
         assert!(duckdb_caps.supports_sql);
         assert!(duckdb_caps.supports_compression);
+    }
+
+    #[test]
+    fn engine_feature_support_maps_from_capabilities() {
+        assert!(!StorageEngineFactory::get_capabilities(&StorageEngineType::Memory).supports_sql);
+        assert!(StorageEngineFactory::get_capabilities(&StorageEngineType::DuckDB).supports_sql);
+
+        struct DummyEngine {
+            engine_type: StorageEngineType,
+            capabilities: EngineCapabilities,
+        }
+
+        #[async_trait]
+        impl StorageEngine for DummyEngine {
+            fn engine_type(&self) -> StorageEngineType {
+                self.engine_type.clone()
+            }
+
+            fn capabilities(&self) -> EngineCapabilities {
+                self.capabilities.clone()
+            }
+
+            async fn initialize(&mut self) -> Result<()> {
+                Ok(())
+            }
+
+            async fn shutdown(&mut self) -> Result<()> {
+                Ok(())
+            }
+
+            async fn get(&self, _key: &[u8]) -> Result<Option<Vec<u8>>> {
+                Ok(None)
+            }
+
+            async fn put(&self, _key: &[u8], _value: &[u8]) -> Result<()> {
+                Ok(())
+            }
+
+            async fn delete(&self, _key: &[u8]) -> Result<()> {
+                Ok(())
+            }
+
+            async fn batch(&self, _operations: Vec<BatchOperation>) -> Result<()> {
+                Ok(())
+            }
+
+            async fn scan(
+                &self,
+                _start_key: Option<&[u8]>,
+                _end_key: Option<&[u8]>,
+                _limit: Option<usize>,
+            ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+                Ok(Vec::new())
+            }
+
+            async fn stats(&self) -> Result<StorageStats> {
+                Ok(StorageStats::default())
+            }
+        }
+
+        let unsupported = DummyEngine {
+            engine_type: StorageEngineType::Memory,
+            capabilities: EngineCapabilities::default(),
+        };
+        assert!(!unsupported.supports_feature(StorageEngineFeature::Compaction));
+        assert!(!unsupported.supports_feature(StorageEngineFeature::SqlQuery));
+
+        let supported = DummyEngine {
+            engine_type: StorageEngineType::RocksDB,
+            capabilities: EngineCapabilities {
+                supports_compression: true,
+                supports_sql: true,
+                supports_backup: true,
+                ..EngineCapabilities::default()
+            },
+        };
+        assert!(supported.supports_feature(StorageEngineFeature::Compaction));
+        assert!(supported.supports_feature(StorageEngineFeature::SqlQuery));
+        assert!(supported.supports_feature(StorageEngineFeature::Snapshot));
+        assert!(supported.supports_feature(StorageEngineFeature::Restore));
+    }
+
+    #[test]
+    fn unsupported_feature_error_formats_stable_message() {
+        let error = StorageEngineFeatureError::unsupported(
+            StorageEngineType::Memory,
+            StorageEngineFeature::Compaction,
+        )
+        .into_error();
+
+        let message = error.to_string();
+        assert!(message.contains("unsupported storage engine feature"));
+        assert!(message.contains("memory"));
+        assert!(message.contains("compaction"));
     }
 }
