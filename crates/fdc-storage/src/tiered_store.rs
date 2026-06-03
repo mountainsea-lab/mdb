@@ -149,9 +149,12 @@ pub fn validate_storage_record_roundtrip(record: &StorageWriteRecord) -> Result<
 #[cfg(test)]
 mod tests {
     use chrono::{Duration, TimeZone};
+    use std::collections::HashMap;
 
     use super::*;
+    use crate::StorageEngineType;
     use crate::{StoragePlacementHint, StorageQueryOrder, StorageWriteMetadata};
+    use tempfile::tempdir;
 
     fn tagged_record(key: &[u8], symbol: &str) -> StorageWriteRecord {
         let mut metadata = StorageWriteMetadata::default();
@@ -236,5 +239,38 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].key, b"active".to_vec());
+    }
+
+    #[tokio::test]
+    async fn tiered_store_can_use_redb_l2_for_persistent_records() {
+        let dir = tempdir().unwrap();
+        let mut manager = TierManager::new();
+        let mut config = TierConfig::new(StorageTier::L2);
+        config.engine_type = StorageEngineType::Redb;
+        config.engine_config = HashMap::from([(
+            "db_path".to_string(),
+            dir.path()
+                .join("tiered-store.redb")
+                .to_string_lossy()
+                .to_string(),
+        )]);
+        manager.add_tier(config);
+        manager.initialize().await.unwrap();
+
+        let store = TieredStorageStore::new(Arc::new(manager));
+        let record = tagged_record(b"l2", "BTCUSDT")
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L2));
+        store
+            .write_batch(StorageWriteBatch::new(vec![record]))
+            .await
+            .unwrap();
+
+        let result = store
+            .query_storage(&StorageQuery::new("market_data").with_tag("symbol", "BTCUSDT"))
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].key, b"l2".to_vec());
     }
 }
