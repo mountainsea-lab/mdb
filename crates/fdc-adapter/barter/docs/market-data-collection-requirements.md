@@ -8,7 +8,7 @@ Status: design proposal
 
 This document defines what exchange market data the `fdc-barter` adapter should collect for factor research, strategy backtesting, and production realtime analytics.
 
-The adapter currently proves realtime crypto trade acquisition through Barter-rs. The next module-level work should expand the data requirements and capability map before adding more streams or historical fetchers.
+The adapter has moved beyond the original realtime trade proof. It now owns the Barter-rs integration boundary for structured live market data, Binance Spot historical REST acquisition, adapter envelopes, capability declarations, and example binaries. The next module-level work should keep the requirements and capability map accurate while productionizing verification, integration, and operational gaps.
 
 The goal is to make `fdc-barter` a reliable crypto exchange market-data adapter while preserving existing workspace boundaries:
 
@@ -34,45 +34,84 @@ Current models and boundaries:
 - `BarterMarketDataMode`
   - `Live`
   - `Historical`
+- `BarterMarketType`
+  - `Spot`
+  - `Future`
+  - `Perpetual`
+  - `Option`
 - `BarterMarketEvent`
 - `BarterMarketPayload`
-- `TradePayload`
-- `OrderBookL1Payload`
-- `CandlePayload`
-- `RawPayload`
+  - structured `TradePayload`
+  - structured `OrderBookL1Payload`
+  - structured `OrderBookPayload`
+  - structured `CandlePayload`
+  - structured `LiquidationPayload`
+  - `RawPayload` fallback
 - `BarterIngestionEnvelope`
 - `DataQualityFlags`
+- `HistoricalBackfillRequest`
+- `HistoricalBackfillPage`
+- `HistoricalBackfillRunRequest`
+- `HistoricalBackfillRunOutcome`
+- `HistoricalCursor`
 - `HistoricalPageRequest`
 - `BarterCheckpoint`
 - `BarterSourceCapabilities`
+- `HistoricalProviderCapabilities`
 
 Current live acquisition functions:
 
 - `default_binance_spot_trade_subscriptions`
+- `default_binance_spot_market_data_subscriptions`
+- `default_binance_futures_usd_market_data_subscriptions`
 - `init_binance_spot_public_trades`
+- `init_binance_spot_market_data`
+- `init_binance_futures_usd_market_data`
 - `public_trade_result_to_data_kind`
 - `map_live_trade_result`
+- `map_live_market_data_result`
 - `collect_live_trade_envelopes`
+- `collect_live_market_data_envelopes`
+- `collect_live_envelopes_with_summary`
+
+Current historical acquisition functions:
+
+- `binance_spot_ohlcv_capabilities`
+- `binance_spot_historical_trades_capabilities`
+- `binance_spot_ohlcv_rest_request_descriptor`
+- `binance_spot_historical_trades_rest_request_descriptor`
+- `execute_binance_spot_ohlcv_rest`
+- `execute_binance_spot_historical_trades_rest`
+- `run_historical_backfill_pages`
+- `validate_historical_backfill_request`
+- `historical_trade_dedupe_key`
+
+Current examples:
+
+- `historical_binance_spot_ohlcv`
+- `historical_binance_spot_trades`
+- `live_binance_futures_usd_market_data`
+- `live_binance_spot_order_books`
+- `live_binance_spot_trades`
 
 Current production behavior:
 
 - Binance Spot public trades can be collected live through Barter-rs.
-- Collected events can be mapped into mdb envelopes and written through the existing orchestrator/storage path.
+- Binance Spot public trades, Spot L1 order books, Spot L2 order books, and Binance Futures USD liquidations have structured mapper coverage.
+- Binance Spot OHLCV and historical trades can be fetched through adapter-owned REST descriptors/executors.
+- Bounded live and historical helpers provide finite acquisition outcomes for tests, examples, and future pipeline integration.
+- Collected events can be mapped into mdb envelopes and written through the existing orchestrator/storage path where that cross-module path is already wired.
 - Production live smoke has already proven real Binance Spot trades are queryable through the production API.
 
 ### 2.2 Current gaps
 
-The current mapper only maps trades into a structured payload.
+The adapter is no longer trade-only, but several production-level gaps remain:
 
-Current behavior in `mapper/event.rs`:
-
-- `DataKind::Trade` -> `BarterMarketPayload::Trade`
-- `DataKind::OrderBookL1` -> raw placeholder
-- `DataKind::OrderBook` -> raw placeholder
-- `DataKind::Candle` -> raw placeholder
-- `DataKind::Liquidation` -> raw placeholder
-
-The module has request and capability shapes for historical data, but no real historical exchange fetcher is implemented.
+- Historical REST support is currently Binance Spot focused; multi-exchange historical REST providers are future work.
+- Historical support covers Binance Spot OHLCV and trades; historical order-book reconstruction is not implemented.
+- L2 order-book payloads preserve snapshot/update, levels, timestamps, and sequence where available, but durable book reconstruction, gap detection, and out-of-order repair are future work.
+- Live smoke and historical smoke tests require explicit environment variables and public internet access, so routine CI still relies on offline contract tests by default.
+- Cross-module glue from `fdc-barter` bounded helpers to the generic `fdc-ingestion` source pipeline is future work and intentionally outside this document update.
 
 ## 3. Downstream Data Consumers
 
@@ -191,7 +230,7 @@ pub struct OrderBookL1Payload {
 }
 ```
 
-Current status: model exists, mapper is raw placeholder.
+Current status: structured model and mapper coverage exist for live Barter L1 events.
 
 ### 5.3 Level 2 order book
 
@@ -212,7 +251,7 @@ Required mdb direction:
 - Preserve sequence/update id when Barter-rs or exchange-specific data exposes it.
 - Flag gaps and out-of-order updates when detection is added.
 
-Current status: mdb only has `RawPayload` placeholder for L2. A structured L2 payload is needed before L2 can support factors or backtesting.
+Current status: structured L2 payload and mapper coverage exist for snapshots and updates. Durable order-book reconstruction, gap detection, and storage/query semantics remain future work before L2 can fully support execution simulation and production backtesting.
 
 ### 5.4 Candles / OHLCV
 
@@ -244,10 +283,11 @@ pub struct CandlePayload {
 }
 ```
 
-Gap:
+Current status:
 
-- mdb payload lacks `interval` and `trade_count`.
-- Barter-rs candle stream maturity should be verified before relying on it for live candles.
+- `CandlePayload` includes `interval`, open/close time, OHLC, volume, optional trade count, and optional quote volume.
+- Binance Spot historical OHLCV REST execution exists.
+- Barter-rs live candle stream maturity should still be verified before relying on it for live candles.
 - mdb can also derive candles from trades.
 
 ### 5.5 Liquidations
@@ -268,7 +308,7 @@ Required mdb direction:
 - Add structured liquidation payload.
 - Preserve side, price, quantity, exchange timestamp, receive timestamp, exchange, market type, and symbol.
 
-Current status: mdb represents liquidation as raw placeholder.
+Current status: structured liquidation payload and mapper coverage exist for Barter liquidation events. Production use still needs live smoke coverage and downstream storage/query integration.
 
 ## 6. Exchange and Kind Support Matrix
 
@@ -350,7 +390,7 @@ Required fields:
 - `sequence`, when available
 - quality flags
 
-Current status: Barter-rs supports this for several exchanges. mdb needs structured mapping and live acquisition wiring.
+Current status: structured model, mapper coverage, and live acquisition wiring exist for the first Binance Spot and Binance Futures USD targets.
 
 ### R2: Level 2 order book
 
@@ -376,7 +416,7 @@ Required fields:
 - sequence/update id if available
 - quality flags for gaps/out-of-order updates
 
-Current status: Barter-rs supports L2 for Binance Spot, Binance Futures USD, Bybit Spot, and Bybit Perpetuals USD. mdb needs structured L2 payload and mapping.
+Current status: structured L2 payload and mapper coverage exist for Barter snapshots and updates. Binance Spot and Binance Futures USD live initialization exists; durable reconstruction and gap handling remain future work.
 
 ### R3: Liquidations
 
@@ -401,7 +441,7 @@ Required fields:
 - symbol
 - market_type
 
-Current status: Barter-rs supports Binance Futures USD liquidations. mdb needs structured payload and mapping.
+Current status: structured liquidation payload and mapper coverage exist. Binance Futures USD live initialization includes liquidation subscriptions; downstream storage/query integration remains future work.
 
 ### R4: Candles / OHLCV
 
