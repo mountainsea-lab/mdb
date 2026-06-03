@@ -4,7 +4,7 @@
 //! while keeping the storage boundary generic. It stores full
 //! `StorageWriteRecord` values as bytes under a deterministic composite key.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +13,8 @@ use fdc_core::{error::Error, Result};
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
-    StorageQueryMetrics, StorageQueryResult, StorageTier, StorageWriteBatch, StorageWriteOutcome,
+    StorageHealthSnapshot, StorageMaintenanceReport, StorageQueryMetrics, StorageQueryResult,
+    StorageTier, StorageTierHealth, StorageTierHealthStatus, StorageWriteBatch, StorageWriteOutcome,
     StorageWriteRecord, StorageWriteSink, TierConfig, TierLifecycleAction, TierLifecycleReport,
     TierManager,
 };
@@ -148,6 +149,73 @@ impl TieredStorageStore {
         }
 
         Ok(report)
+    }
+
+    pub async fn storage_health_snapshot(&self) -> Result<StorageHealthSnapshot> {
+        let stats = self.tier_manager.get_tier_stats().await?;
+        let initialized: BTreeSet<_> = self.tier_manager.initialized_tiers().into_iter().collect();
+        let mut tiers = BTreeMap::new();
+
+        for tier in self.tier_manager.configured_tiers() {
+            let enabled = self
+                .tier_manager
+                .tier_config(&tier)
+                .map(|config| config.enabled)
+                .unwrap_or(false);
+            let initialized_tier = initialized.contains(&tier);
+            let tier_stats = stats.get(&tier).cloned();
+            let status = if enabled && !initialized_tier {
+                StorageTierHealthStatus::MissingEngine
+            } else if initialized_tier && tier_stats.is_none() {
+                StorageTierHealthStatus::StatsUnavailable
+            } else {
+                StorageTierHealthStatus::Healthy
+            };
+            tiers.insert(
+                tier.clone(),
+                StorageTierHealth {
+                    tier,
+                    enabled,
+                    initialized: initialized_tier,
+                    status,
+                    stats: tier_stats,
+                    error: None,
+                },
+            );
+        }
+
+        Ok(StorageHealthSnapshot {
+            captured_at: Utc::now(),
+            tiers,
+            access_patterns: self.tier_manager.get_access_patterns_count().await,
+            migration_queue_len: self.tier_manager.get_migration_queue_length().await,
+        })
+    }
+
+    pub async fn run_maintenance_once(&self) -> Result<StorageMaintenanceReport> {
+        let started_at = Utc::now();
+        let lifecycle = self.run_lifecycle_once().await?;
+        let mut compacted_tiers = Vec::new();
+        let mut compaction_errors = BTreeMap::new();
+
+        for tier in self.tier_manager.initialized_tiers() {
+            match self.tier_manager.compact_tier(&tier).await {
+                Ok(()) => compacted_tiers.push(tier),
+                Err(error) => {
+                    compaction_errors.insert(tier, error.to_string());
+                }
+            }
+        }
+
+        let health = self.storage_health_snapshot().await?;
+        Ok(StorageMaintenanceReport {
+            started_at,
+            finished_at: Utc::now(),
+            lifecycle,
+            health,
+            compacted_tiers,
+            compaction_errors,
+        })
     }
 }
 
@@ -582,6 +650,46 @@ mod tests {
         assert_eq!(report.retained, 1);
         assert_eq!(report.tier_reports[&StorageTier::L1].scanned_entries, 1);
         assert_eq!(report.tier_reports[&StorageTier::L1].retained, 1);
+    }
+
+    #[tokio::test]
+    async fn storage_health_snapshot_reports_initialized_and_disabled_tiers() {
+        let l1 = memory_tier_config(StorageTier::L1);
+        let mut l2 = memory_tier_config(StorageTier::L2);
+        l2.enabled = false;
+        let store = lifecycle_store_with_tiers(vec![l1, l2]).await;
+
+        let snapshot = store.storage_health_snapshot().await.unwrap();
+
+        assert_eq!(
+            snapshot.tiers[&StorageTier::L1].status,
+            StorageTierHealthStatus::Healthy
+        );
+        assert!(snapshot.tiers[&StorageTier::L1].initialized);
+        assert!(!snapshot.tiers[&StorageTier::L2].enabled);
+        assert!(!snapshot.tiers[&StorageTier::L2].initialized);
+    }
+
+    #[tokio::test]
+    async fn maintenance_pass_runs_lifecycle_and_records_compaction_errors() {
+        let mut l1 = memory_tier_config(StorageTier::L1);
+        l1.retention_duration = Some(Duration::seconds(1));
+        let l2 = memory_tier_config(StorageTier::L2);
+        let store = lifecycle_store_with_tiers(vec![l1, l2]).await;
+        let record = tagged_record(b"maintenance-demote", "BTCUSDT")
+            .with_timestamp(Utc::now() - Duration::seconds(10))
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L1));
+        store
+            .write_batch(StorageWriteBatch::new(vec![record]))
+            .await
+            .unwrap();
+
+        let report = store.run_maintenance_once().await.unwrap();
+
+        assert_eq!(report.lifecycle.retention_demoted, 1);
+        assert!(report.health.tiers.contains_key(&StorageTier::L1));
+        assert!(report.compaction_errors.contains_key(&StorageTier::L1));
+        assert!(report.compaction_errors.contains_key(&StorageTier::L2));
     }
 
     #[tokio::test]
