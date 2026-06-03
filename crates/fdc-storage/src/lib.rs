@@ -6,6 +6,7 @@
 
 pub mod backup; // 备份恢复
 pub mod cache; // 缓存管理
+pub mod codec; // generic typed storage codecs
 pub mod compression; // 压缩算法
 pub mod config; // 配置管理
 pub mod engine; // 存储引擎抽象
@@ -30,6 +31,7 @@ pub mod engines {
 // 重新导出常用类型
 pub use backup::{BackupConfig, BackupManager, RestoreConfig};
 pub use cache::{CacheManager, CachePolicy, CacheStats};
+pub use codec::{BincodeStorageCodec, JsonStorageCodec, StorageCodec};
 pub use compression::{CompressionAlgorithm, CompressionManager};
 pub use config::StorageConfig;
 pub use engine::{EngineCapabilities, StorageEngine, StorageEngineType};
