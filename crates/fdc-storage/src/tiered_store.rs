@@ -14,7 +14,8 @@ use fdc_core::{error::Error, Result};
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
     StorageQueryMetrics, StorageQueryResult, StorageTier, StorageWriteBatch, StorageWriteOutcome,
-    StorageWriteRecord, StorageWriteSink, TierConfig, TierManager,
+    StorageWriteRecord, StorageWriteSink, TierConfig, TierLifecycleAction, TierLifecycleReport,
+    TierManager,
 };
 
 const KEY_SEPARATOR: u8 = 0;
@@ -87,6 +88,66 @@ impl TieredStorageStore {
         metrics.returned_records = records.len();
 
         Ok(StorageQueryResult { records, metrics })
+    }
+
+    pub async fn run_lifecycle_once(&self) -> Result<TierLifecycleReport> {
+        let now = Utc::now();
+        let tiers = self
+            .tier_manager
+            .tiers_for_scope(&crate::StorageTierScope::All);
+        let mut report = TierLifecycleReport::default();
+
+        for tier in tiers {
+            let entries = self
+                .tier_manager
+                .scan_prefix_in_tiers(&[], &[tier.clone()], None)
+                .await?;
+
+            for (_, key, value) in entries {
+                report.record_scanned(tier.clone());
+
+                let record = match decode_record(&value) {
+                    Ok(record) => record,
+                    Err(_) => {
+                        report.record_decode_error(tier.clone());
+                        continue;
+                    }
+                };
+
+                if record_is_expired(&record, now) {
+                    self.tier_manager.delete(&key).await?;
+                    report.record_action(tier.clone(), TierLifecycleAction::TtlExpiredDelete);
+                    continue;
+                }
+
+                let retention_expired = self
+                    .tier_manager
+                    .tier_config(&tier)
+                    .and_then(|config| config.retention_duration)
+                    .map(|retention| record.timestamp + retention < now)
+                    .unwrap_or(false);
+
+                if retention_expired {
+                    if let Some(target_tier) = self.tier_manager.next_colder_available_tier(&tier) {
+                        self.tier_manager
+                            .put_to_specific_tier(&key, &value, &target_tier)
+                            .await?;
+                        self.tier_manager.delete_from_tier(&key, &tier).await?;
+                        report.record_action(tier.clone(), TierLifecycleAction::RetentionDemote);
+                    } else {
+                        self.tier_manager.delete_from_tier(&key, &tier).await?;
+                        report.record_action(
+                            tier.clone(),
+                            TierLifecycleAction::RetentionExpiredDelete,
+                        );
+                    }
+                } else {
+                    report.record_action(tier.clone(), TierLifecycleAction::Retain);
+                }
+            }
+        }
+
+        Ok(report)
     }
 }
 
@@ -200,6 +261,21 @@ mod tests {
         }
         manager.initialize().await.unwrap();
         TieredStorageStore::new(Arc::new(manager))
+    }
+
+    async fn lifecycle_store_with_tiers(configs: Vec<TierConfig>) -> TieredStorageStore {
+        let mut manager = TierManager::new();
+        for config in configs {
+            manager.add_tier(config);
+        }
+        manager.initialize().await.unwrap();
+        TieredStorageStore::new(Arc::new(manager))
+    }
+
+    fn memory_tier_config(tier: StorageTier) -> TierConfig {
+        let mut config = TierConfig::new(tier);
+        config.engine_type = StorageEngineType::Memory;
+        config
     }
 
     #[test]
@@ -401,6 +477,111 @@ mod tests {
         assert_eq!(result.metrics.returned_records, 1);
         assert_eq!(result.metrics.tier_hits.get(&StorageTier::L1), Some(&1));
         assert_eq!(result.metrics.tier_hits.get(&StorageTier::L2), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_hard_deletes_ttl_expired_record_from_all_tiers() {
+        let store = lifecycle_store_with_tiers(vec![
+            memory_tier_config(StorageTier::L1),
+            memory_tier_config(StorageTier::L2),
+        ])
+        .await;
+
+        let record = tagged_record(b"ttl", "BTCUSDT")
+            .with_timestamp(Utc::now() - Duration::seconds(10))
+            .with_placement(
+                StoragePlacementHint::for_tier(StorageTier::L1).with_ttl(Duration::seconds(1)),
+            );
+        let key = TieredStorageStore::storage_key_for_record(&record);
+        let value = encode_record(&record).unwrap();
+
+        store
+            .tier_manager()
+            .put_to_specific_tier(&key, &value, &StorageTier::L1)
+            .await
+            .unwrap();
+        store
+            .tier_manager()
+            .put_to_specific_tier(&key, &value, &StorageTier::L2)
+            .await
+            .unwrap();
+
+        let report = store.run_lifecycle_once().await.unwrap();
+
+        assert_eq!(report.scanned_entries, 1);
+        assert_eq!(report.ttl_deleted, 1);
+        assert!(store.tier_manager().get(&key).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_demotes_retention_expired_record_to_next_colder_tier() {
+        let mut l1 = memory_tier_config(StorageTier::L1);
+        l1.retention_duration = Some(Duration::seconds(1));
+        let l2 = memory_tier_config(StorageTier::L2);
+        let store = lifecycle_store_with_tiers(vec![l1, l2]).await;
+
+        let record = tagged_record(b"demote", "BTCUSDT")
+            .with_timestamp(Utc::now() - Duration::seconds(10))
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L1));
+        store
+            .write_batch(StorageWriteBatch::new(vec![record]))
+            .await
+            .unwrap();
+
+        let report = store.run_lifecycle_once().await.unwrap();
+        let query = StorageQuery::new("market_data")
+            .with_tier_scope(StorageTierScope::Only(StorageTier::L2));
+        let result = store.query_storage_with_metrics(&query).await.unwrap();
+
+        assert_eq!(report.retention_demoted, 1);
+        assert_eq!(result.records.len(), 1);
+        assert_eq!(result.records[0].key, b"demote".to_vec());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_deletes_retention_expired_record_when_no_colder_tier_exists() {
+        let mut l4 = memory_tier_config(StorageTier::L4);
+        l4.retention_duration = Some(Duration::seconds(1));
+        let store = lifecycle_store_with_tiers(vec![l4]).await;
+
+        let record = tagged_record(b"delete", "BTCUSDT")
+            .with_timestamp(Utc::now() - Duration::seconds(10))
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L4));
+        store
+            .write_batch(StorageWriteBatch::new(vec![record]))
+            .await
+            .unwrap();
+
+        let report = store.run_lifecycle_once().await.unwrap();
+        let result = store
+            .query_storage_with_metrics(&StorageQuery::new("market_data"))
+            .await
+            .unwrap();
+
+        assert_eq!(report.retention_deleted, 1);
+        assert!(result.records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_report_counts_retained_and_per_tier_actions() {
+        let mut l1 = memory_tier_config(StorageTier::L1);
+        l1.retention_duration = Some(Duration::days(1));
+        let store = lifecycle_store_with_tiers(vec![l1]).await;
+
+        let record = tagged_record(b"keep", "BTCUSDT")
+            .with_timestamp(Utc::now())
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L1));
+        store
+            .write_batch(StorageWriteBatch::new(vec![record]))
+            .await
+            .unwrap();
+
+        let report = store.run_lifecycle_once().await.unwrap();
+
+        assert_eq!(report.scanned_entries, 1);
+        assert_eq!(report.retained, 1);
+        assert_eq!(report.tier_reports[&StorageTier::L1].scanned_entries, 1);
+        assert_eq!(report.tier_reports[&StorageTier::L1].retained, 1);
     }
 
     #[tokio::test]
