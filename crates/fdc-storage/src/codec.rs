@@ -104,7 +104,10 @@ mod tests {
         let decoded = codec.decode(&encoded).unwrap();
 
         assert_eq!(decoded, value);
-        assert!(matches!(codec.serialization_format(), SerializationFormat::Json));
+        assert!(matches!(
+            codec.serialization_format(),
+            SerializationFormat::Json
+        ));
     }
 
     #[test]
@@ -119,6 +122,9 @@ mod tests {
         let decoded = codec.decode(&encoded).unwrap();
 
         assert_eq!(decoded, value);
-        assert!(matches!(codec.serialization_format(), SerializationFormat::Binary));
+        assert!(matches!(
+            codec.serialization_format(),
+            SerializationFormat::Binary
+        ));
     }
 }

@@ -121,7 +121,11 @@ impl<T> TypedStorageRecord<T> {
         self
     }
 
-    pub fn encode<C>(&self, codec: &C, descriptor: &StorageTypeDescriptor) -> Result<StorageWriteRecord>
+    pub fn encode<C>(
+        &self,
+        codec: &C,
+        descriptor: &StorageTypeDescriptor,
+    ) -> Result<StorageWriteRecord>
     where
         C: StorageCodec<T>,
     {
@@ -137,7 +141,9 @@ impl<T> TypedStorageRecord<T> {
             ));
         }
         if self.key.is_empty() {
-            return Err(Error::validation("typed storage record key must not be empty"));
+            return Err(Error::validation(
+                "typed storage record key must not be empty",
+            ));
         }
 
         let mut metadata = StorageWriteMetadata {
@@ -236,7 +242,10 @@ mod tests {
 
         assert_eq!(raw.namespace, "demo");
         assert_eq!(raw.collection, "values");
-        assert_eq!(raw.metadata.content_type.as_deref(), Some("application/json"));
+        assert_eq!(
+            raw.metadata.content_type.as_deref(),
+            Some("application/json")
+        );
         assert_eq!(raw.metadata.schema.as_deref(), Some("DemoValue"));
         assert_eq!(raw.metadata.schema_version.as_deref(), Some("1.0.0"));
         assert_eq!(
@@ -253,7 +262,8 @@ mod tests {
     async fn typed_query_decodes_business_values() {
         let store = InMemoryQueryableStorage::new();
         let codec = JsonStorageCodec::<DemoValue>::new();
-        let descriptor = StorageTypeDescriptor::new("DemoValue", "1.0.0", SerializationFormat::Json);
+        let descriptor =
+            StorageTypeDescriptor::new("DemoValue", "1.0.0", SerializationFormat::Json);
         let typed = TypedStorageRecord::new(
             "demo",
             "values",
