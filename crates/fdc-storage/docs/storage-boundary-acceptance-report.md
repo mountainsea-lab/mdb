@@ -21,7 +21,7 @@ Status: pre-integration-ready module baseline
 | L4 engine | Done | RocksDB persistent cold KV |
 | Tier-scoped query | Done | all/only/hot/warm/cold scope with metrics |
 | Lifecycle | Done | explicit TTL hard-delete, retention demotion, retention delete |
-| Maintenance/health | Done | explicit maintenance pass, health snapshot, compaction error capture |
+| Maintenance/health | Done | explicit maintenance pass, health snapshot, guarded options-based maintenance, typed compaction outcomes, metrics snapshot |
 | Business dependency isolation | Guarded | `fdc-storage` must not depend on barter/ingestion/transform/api/server/orchestrator |
 
 ## Verification
@@ -32,7 +32,7 @@ Run:
 rtk cargo test -p fdc-storage
 ```
 
-Expected result as of S9: all `fdc-storage` tests pass.
+Expected result as of S10: all `fdc-storage` tests pass.
 
 ## Integration Readiness Statement
 
@@ -41,8 +41,8 @@ Expected result as of S9: all `fdc-storage` tests pass.
 ## Known Limitations
 
 - Maintenance is explicit and caller-driven, not scheduled.
-- Compaction semantics are engine-specific; unsupported compaction is captured as an error in maintenance reports.
-- Health snapshot is module-local and not yet exported as API/Prometheus metrics.
+- Compaction unsupported detection is classified separately from failures, but S10 still uses string-based detection until engine-level capability/error typing is added.
+- Health snapshot and maintenance metrics can render module-local Prometheus text, but are not yet wired into an API/exporter runtime.
 - Index, physical shard routing, and backup orchestration are intentionally deferred.
 - Lifecycle hard-delete deletes all tier copies for the same storage key when TTL is expired.
 

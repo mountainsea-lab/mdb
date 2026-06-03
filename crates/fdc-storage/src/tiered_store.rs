@@ -5,7 +5,10 @@
 //! `StorageWriteRecord` values as bytes under a deterministic composite key.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -13,10 +16,11 @@ use fdc_core::{error::Error, Result};
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
-    StorageHealthSnapshot, StorageMaintenanceReport, StorageQuery, StorageQueryMetrics,
-    StorageQueryResult, StorageTier, StorageTierHealth, StorageTierHealthStatus, StorageWriteBatch,
-    StorageWriteOutcome, StorageWriteRecord, StorageWriteSink, TierConfig, TierLifecycleAction,
-    TierLifecycleReport, TierManager,
+    StorageCompactionOutcome, StorageHealthSnapshot, StorageMaintenanceAuditEntry,
+    StorageMaintenanceErrorKind, StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery,
+    StorageQueryMetrics, StorageQueryResult, StorageTier, StorageTierHealth,
+    StorageTierHealthStatus, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord,
+    StorageWriteSink, TierConfig, TierLifecycleAction, TierLifecycleReport, TierManager,
 };
 
 const KEY_SEPARATOR: u8 = 0;
@@ -24,11 +28,15 @@ const KEY_SEPARATOR: u8 = 0;
 #[derive(Clone)]
 pub struct TieredStorageStore {
     tier_manager: Arc<TierManager>,
+    maintenance_running: Arc<AtomicBool>,
 }
 
 impl TieredStorageStore {
     pub fn new(tier_manager: Arc<TierManager>) -> Self {
-        Self { tier_manager }
+        Self {
+            tier_manager,
+            maintenance_running: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     pub async fn memory_only() -> Result<Self> {
@@ -193,16 +201,83 @@ impl TieredStorageStore {
     }
 
     pub async fn run_maintenance_once(&self) -> Result<StorageMaintenanceReport> {
+        self.run_maintenance_once_with_options(StorageMaintenanceOptions::default())
+            .await
+    }
+
+    pub async fn run_maintenance_once_with_options(
+        &self,
+        options: StorageMaintenanceOptions,
+    ) -> Result<StorageMaintenanceReport> {
+        let _guard = self.acquire_maintenance_guard()?;
+        let timeout = options.timeout;
+        if matches!(timeout, Some(timeout) if timeout.is_zero()) {
+            return Err(StorageMaintenanceErrorKind::Timeout
+                .storage_error("timed out before maintenance started"));
+        }
+        let maintenance = self.run_maintenance_once_inner();
+        let report = if let Some(timeout) = timeout {
+            tokio::time::timeout(timeout, maintenance)
+                .await
+                .map_err(|_| {
+                    StorageMaintenanceErrorKind::Timeout
+                        .storage_error(format!("timed out after {}ms", timeout.as_millis()))
+                })??
+        } else {
+            maintenance.await?
+        };
+
+        if let Some(audit_sink) = options.audit_sink {
+            let entry = StorageMaintenanceAuditEntry::from_report(&report);
+            audit_sink
+                .record_maintenance(entry)
+                .await
+                .map_err(|error| {
+                    StorageMaintenanceErrorKind::AuditFailed.storage_error(error.to_string())
+                })?;
+        }
+
+        Ok(report)
+    }
+
+    fn acquire_maintenance_guard(&self) -> Result<MaintenanceRunGuard> {
+        self.maintenance_running
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map_err(|_| {
+                StorageMaintenanceErrorKind::AlreadyRunning
+                    .storage_error("another maintenance run is already active")
+            })?;
+        Ok(MaintenanceRunGuard {
+            running: Arc::clone(&self.maintenance_running),
+        })
+    }
+
+    async fn run_maintenance_once_inner(&self) -> Result<StorageMaintenanceReport> {
         let started_at = Utc::now();
         let lifecycle = self.run_lifecycle_once().await?;
         let mut compacted_tiers = Vec::new();
         let mut compaction_errors = BTreeMap::new();
+        let mut compaction_outcomes = Vec::new();
+        let mut compaction_unsupported = 0;
+        let mut compaction_failed = 0;
 
         for tier in self.tier_manager.initialized_tiers() {
             match self.tier_manager.compact_tier(&tier).await {
-                Ok(()) => compacted_tiers.push(tier),
+                Ok(()) => {
+                    compacted_tiers.push(tier.clone());
+                    compaction_outcomes.push(StorageCompactionOutcome::compacted(tier));
+                }
                 Err(error) => {
-                    compaction_errors.insert(tier, error.to_string());
+                    let message = error.to_string();
+                    if is_unsupported_compaction_error(&error) {
+                        compaction_unsupported += 1;
+                        compaction_outcomes
+                            .push(StorageCompactionOutcome::unsupported(tier, message));
+                    } else {
+                        compaction_failed += 1;
+                        compaction_errors.insert(tier.clone(), message.clone());
+                        compaction_outcomes.push(StorageCompactionOutcome::failed(tier, message));
+                    }
                 }
             }
         }
@@ -215,7 +290,30 @@ impl TieredStorageStore {
             health,
             compacted_tiers,
             compaction_errors,
+            compaction_outcomes,
+            compaction_unsupported,
+            compaction_failed,
         })
+    }
+}
+
+struct MaintenanceRunGuard {
+    running: Arc<AtomicBool>,
+}
+
+impl Drop for MaintenanceRunGuard {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Release);
+    }
+}
+
+fn is_unsupported_compaction_error(error: &Error) -> bool {
+    match error {
+        Error::Unimplemented { .. } => true,
+        _ => error
+            .to_string()
+            .to_ascii_lowercase()
+            .contains("not supported"),
     }
 }
 
@@ -299,10 +397,18 @@ pub fn validate_storage_record_roundtrip(record: &StorageWriteRecord) -> Result<
 mod tests {
     use chrono::{Duration, TimeZone};
     use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::Duration as StdDuration;
+
+    use async_trait::async_trait;
+    use fdc_core::Result;
 
     use super::*;
     use crate::StorageEngineType;
-    use crate::{StoragePlacementHint, StorageQueryOrder, StorageTierScope, StorageWriteMetadata};
+    use crate::{
+        StorageMaintenanceAuditEntry, StorageMaintenanceAuditSink, StorageMaintenanceOptions,
+        StoragePlacementHint, StorageQueryOrder, StorageTierScope, StorageWriteMetadata,
+    };
     use tempfile::tempdir;
 
     fn tagged_record(key: &[u8], symbol: &str) -> StorageWriteRecord {
@@ -688,8 +794,77 @@ mod tests {
 
         assert_eq!(report.lifecycle.retention_demoted, 1);
         assert!(report.health.tiers.contains_key(&StorageTier::L1));
-        assert!(report.compaction_errors.contains_key(&StorageTier::L1));
-        assert!(report.compaction_errors.contains_key(&StorageTier::L2));
+        assert!(report.compaction_errors.is_empty());
+        assert_eq!(report.compaction_unsupported, 2);
+        assert_eq!(report.compaction_failed, 0);
+        assert_eq!(report.compaction_outcomes.len(), 2);
+        assert!(report
+            .metrics_snapshot()
+            .to_prometheus_text()
+            .contains("outcome=\"unsupported\""));
+    }
+
+    #[derive(Default)]
+    struct RecordingAuditSink {
+        entries: Mutex<Vec<StorageMaintenanceAuditEntry>>,
+    }
+
+    #[async_trait]
+    impl StorageMaintenanceAuditSink for RecordingAuditSink {
+        async fn record_maintenance(&self, entry: StorageMaintenanceAuditEntry) -> Result<()> {
+            self.entries.lock().unwrap().push(entry);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn maintenance_with_options_records_audit_entry() {
+        let store = lifecycle_store_with_tiers(vec![memory_tier_config(StorageTier::L1)]).await;
+        let audit = Arc::new(RecordingAuditSink::default());
+
+        let report = store
+            .run_maintenance_once_with_options(
+                StorageMaintenanceOptions::new().with_audit_sink(audit.clone()),
+            )
+            .await
+            .unwrap();
+
+        let entries = audit.entries.lock().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].scanned_entries, report.lifecycle.scanned_entries);
+        assert_eq!(
+            entries[0].compaction_unsupported,
+            report.compaction_unsupported
+        );
+    }
+
+    #[tokio::test]
+    async fn maintenance_timeout_releases_guard_for_next_run() {
+        let store = lifecycle_store_with_tiers(vec![memory_tier_config(StorageTier::L1)]).await;
+
+        let error = store
+            .run_maintenance_once_with_options(
+                StorageMaintenanceOptions::new().with_timeout(StdDuration::ZERO),
+            )
+            .await
+            .expect_err("near-zero timeout should fail");
+
+        assert!(error.to_string().contains("Timeout"));
+        let report = store.run_maintenance_once().await.unwrap();
+        assert!(report.finished_at >= report.started_at);
+    }
+
+    #[tokio::test]
+    async fn maintenance_reentry_guard_rejects_concurrent_attempt() {
+        let store = lifecycle_store_with_tiers(vec![memory_tier_config(StorageTier::L1)]).await;
+        let _guard = store.acquire_maintenance_guard().unwrap();
+
+        let error = store
+            .run_maintenance_once()
+            .await
+            .expect_err("held guard should reject maintenance re-entry");
+
+        assert!(error.to_string().contains("AlreadyRunning"));
     }
 
     #[tokio::test]
