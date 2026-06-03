@@ -230,11 +230,12 @@ impl TierManager {
                 continue;
             }
 
-            let engine = crate::engine::StorageEngineFactory::create_engine(
+            let mut engine = crate::engine::StorageEngineFactory::create_engine(
                 config.engine_type.clone(),
                 config.engine_config.clone(),
             )
             .await?;
+            engine.initialize().await?;
 
             self.engines
                 .insert(tier.clone(), Arc::new(RwLock::new(engine)));
