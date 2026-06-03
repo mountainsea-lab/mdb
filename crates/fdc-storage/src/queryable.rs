@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use fdc_core::Result;
 use parking_lot::RwLock;
 
-use crate::{StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord, StorageWriteSink};
+use crate::{
+    apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
+    StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord, StorageWriteSink,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketDataQuery {
@@ -52,6 +55,19 @@ impl MarketDataQuery {
         self.limit = Some(limit);
         self
     }
+
+    pub fn to_storage_query(&self) -> StorageQuery {
+        let mut query = StorageQuery::new(self.namespace.clone());
+        query.collection = self.collection.clone();
+        if let Some(symbol) = &self.symbol {
+            query.tags.insert("symbol".to_string(), symbol.clone());
+        }
+        if let Some(kind) = &self.kind {
+            query.tags.insert("kind".to_string(), kind.clone());
+        }
+        query.limit = self.limit;
+        query
+    }
 }
 
 impl Default for MarketDataQuery {
@@ -61,34 +77,13 @@ impl Default for MarketDataQuery {
 }
 
 #[derive(Debug, Default)]
-pub struct QueryableMarketDataStore {
+pub struct InMemoryQueryableStorage {
     records: RwLock<Vec<StorageWriteRecord>>,
 }
 
-impl QueryableMarketDataStore {
+impl InMemoryQueryableStorage {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn query(&self, query: &MarketDataQuery) -> Vec<StorageWriteRecord> {
-        let records = self.records.read();
-        let mut matches = Vec::new();
-
-        for record in records.iter() {
-            if !record_matches_query(record, query) {
-                continue;
-            }
-
-            matches.push(record.clone());
-
-            if let Some(limit) = query.limit {
-                if matches.len() >= limit {
-                    break;
-                }
-            }
-        }
-
-        matches
     }
 
     pub fn all_records(&self) -> Vec<StorageWriteRecord> {
@@ -101,7 +96,7 @@ impl QueryableMarketDataStore {
 }
 
 #[async_trait]
-impl StorageWriteSink for QueryableMarketDataStore {
+impl StorageWriteSink for InMemoryQueryableStorage {
     async fn write_batch(&self, batch: StorageWriteBatch) -> Result<StorageWriteOutcome> {
         batch.validate()?;
 
@@ -111,28 +106,109 @@ impl StorageWriteSink for QueryableMarketDataStore {
     }
 }
 
-fn record_matches_query(record: &StorageWriteRecord, query: &MarketDataQuery) -> bool {
-    if record.namespace != query.namespace {
-        return false;
+#[async_trait]
+impl QueryableStorage for InMemoryQueryableStorage {
+    async fn query_storage(&self, query: &StorageQuery) -> Result<Vec<StorageWriteRecord>> {
+        query.validate()?;
+
+        let matches = self
+            .records
+            .read()
+            .iter()
+            .filter(|record| record_matches_storage_query(record, query))
+            .cloned()
+            .collect();
+
+        Ok(apply_query_order_and_limit(matches, query))
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct QueryableMarketDataStore {
+    inner: InMemoryQueryableStorage,
+}
+
+impl QueryableMarketDataStore {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    if let Some(collection) = &query.collection {
-        if &record.collection != collection {
-            return false;
-        }
+    pub fn query(&self, query: &MarketDataQuery) -> Vec<StorageWriteRecord> {
+        futures::executor::block_on(self.inner.query_storage(&query.to_storage_query()))
+            .expect("market data query should be valid")
     }
 
-    if let Some(symbol) = &query.symbol {
-        if record.metadata.tags.get("symbol") != Some(symbol) {
-            return false;
-        }
+    pub fn all_records(&self) -> Vec<StorageWriteRecord> {
+        self.inner.all_records()
     }
 
-    if let Some(kind) = &query.kind {
-        if record.metadata.tags.get("kind") != Some(kind) {
-            return false;
-        }
+    pub fn record_count(&self) -> usize {
+        self.inner.record_count()
+    }
+}
+
+#[async_trait]
+impl StorageWriteSink for QueryableMarketDataStore {
+    async fn write_batch(&self, batch: StorageWriteBatch) -> Result<StorageWriteOutcome> {
+        self.inner.write_batch(batch).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{StorageWriteBatch, StorageWriteMetadata};
+
+    fn record(
+        namespace: &str,
+        collection: &str,
+        key: &[u8],
+        symbol: &str,
+        kind: &str,
+    ) -> StorageWriteRecord {
+        let mut metadata = StorageWriteMetadata::default();
+        metadata
+            .tags
+            .insert("symbol".to_string(), symbol.to_string());
+        metadata.tags.insert("kind".to_string(), kind.to_string());
+        StorageWriteRecord::new(namespace, collection, key.to_vec(), b"value".to_vec())
+            .with_metadata(metadata)
     }
 
-    true
+    #[tokio::test]
+    async fn in_memory_queryable_storage_filters_generic_query() {
+        let store = InMemoryQueryableStorage::new();
+        store
+            .write_batch(StorageWriteBatch::new(vec![
+                record("market_data", "trades", b"1", "BTCUSDT", "trade"),
+                record("market_data", "trades", b"2", "ETHUSDT", "trade"),
+            ]))
+            .await
+            .unwrap();
+
+        let result = store
+            .query_storage(&StorageQuery::new("market_data").with_tag("symbol", "BTCUSDT"))
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].key, b"1".to_vec());
+    }
+
+    #[tokio::test]
+    async fn market_data_query_remains_compatible() {
+        let store = QueryableMarketDataStore::new();
+        store
+            .write_batch(StorageWriteBatch::new(vec![
+                record("market_data", "trades", b"1", "BTCUSDT", "trade"),
+                record("market_data", "candles", b"2", "BTCUSDT", "candle"),
+            ]))
+            .await
+            .unwrap();
+
+        let result = store.query(&MarketDataQuery::for_trades().with_symbol("BTCUSDT"));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].collection, "trades");
+    }
 }
