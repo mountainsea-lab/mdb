@@ -1,7 +1,7 @@
 # fdc-storage Storage Boundary Acceptance Report
 
 Date: 2026-06-03
-Status: pre-integration-ready module baseline
+Status: S11 P1-closed pre-integration-ready module baseline
 
 ## Scope
 
@@ -22,6 +22,7 @@ Status: pre-integration-ready module baseline
 | Tier-scoped query | Done | all/only/hot/warm/cold scope with metrics |
 | Lifecycle | Done | explicit TTL hard-delete, retention demotion, retention delete |
 | Maintenance/health | Done | explicit maintenance pass, health snapshot, guarded options-based maintenance, typed compaction outcomes, metrics snapshot |
+| P1 closure | Done | engine feature-based compaction classification, tracing spans, duplicate-key TTL semantics, API stability docs |
 | Business dependency isolation | Guarded | `fdc-storage` must not depend on barter/ingestion/transform/api/server/orchestrator |
 
 ## Verification
@@ -32,20 +33,30 @@ Run:
 rtk cargo test -p fdc-storage
 ```
 
-Expected result as of S10: all `fdc-storage` tests pass.
+Expected result as of S11: all `fdc-storage` tests pass.
 
 ## Integration Readiness Statement
 
 `fdc-storage` is ready for business modules to depend on its generic write/query/typed APIs. It is not yet wired into full ingestion or server runtime in this module-completion phase.
 
+## S11 P1 Closure Notes
+
+- Compaction unsupported classification is based on engine feature support instead of error-string matching.
+- TTL hard-delete semantics are explicit: when one logical storage key expires, lifecycle deletes that key from all initialized tiers. Duplicate tier copies are treated as copies of the same logical record, not independent versions.
+- Structured tracing spans exist around storage write/query/lifecycle/maintenance boundaries without logging payload bytes or business DTO fields.
+- Public API stability rules are documented in `public-api-stability.md`.
+
 ## Known Limitations
 
 - Maintenance is explicit and caller-driven, not scheduled.
-- Compaction unsupported detection is classified separately from failures, but S10 still uses string-based detection until engine-level capability/error typing is added.
 - Health snapshot and maintenance metrics can render module-local Prometheus text, but are not yet wired into an API/exporter runtime.
 - Index, physical shard routing, and backup orchestration are intentionally deferred.
-- Lifecycle hard-delete deletes all tier copies for the same storage key when TTL is expired.
+- Durable audit persistence, disk health, and richer degraded health states remain production deployment follow-ups.
+
+## Public API Stability
+
+The integration-facing API stability policy is documented in `public-api-stability.md`. Public re-exports from `crates/fdc-storage/src/lib.rs` define the preferred consumer surface.
 
 ## Production Follow-up Reference
 
-See `production-hardening-followups.md` for P1/P2/P3 follow-up items.
+See `production-hardening-followups.md` for remaining P2/P3 follow-up items.

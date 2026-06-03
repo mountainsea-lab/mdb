@@ -319,6 +319,14 @@ impl TierManager {
         Ok(())
     }
 
+    pub async fn get_from_tier(&self, key: &[u8], tier: &StorageTier) -> Result<Option<Vec<u8>>> {
+        if let Some(engine) = self.engines.get(tier) {
+            let engine_guard = engine.read().await;
+            return engine_guard.get(key).await;
+        }
+        Ok(None)
+    }
+
     /// 按 prefix 跨层扫描数据。较热层级优先，调用方负责去重。
     pub async fn scan_prefix(
         &self,

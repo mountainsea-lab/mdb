@@ -17,10 +17,9 @@ use tracing::{debug, info, instrument, warn};
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
-    StorageCompactionOutcome, StorageHealthSnapshot, StorageMaintenanceAuditEntry,
-    StorageMaintenanceErrorKind, StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery,
-    StorageQueryMetrics, StorageQueryResult, StorageTier, StorageTierHealth,
-    StorageTierHealthStatus, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord,
+    StorageHealthSnapshot, StorageMaintenanceAuditEntry, StorageMaintenanceErrorKind,
+    StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery, StorageQueryMetrics,
+    StorageQueryResult, StorageTier, StorageTierHealth, StorageTierHealthStatus, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord,
     StorageWriteSink, TierConfig, TierLifecycleAction, TierLifecycleReport, TierManager,
 };
 
@@ -717,6 +716,63 @@ mod tests {
         assert_eq!(report.scanned_entries, 1);
         assert_eq!(report.ttl_deleted, 1);
         assert!(store.tier_manager().get(&key).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn lifecycle_ttl_delete_removes_duplicate_key_from_each_tier_copy() {
+        let store = lifecycle_store_with_tiers(vec![
+            memory_tier_config(StorageTier::L1),
+            memory_tier_config(StorageTier::L2),
+        ])
+        .await;
+
+        let record = tagged_record(b"ttl-duplicate", "BTCUSDT")
+            .with_timestamp(Utc::now() - Duration::seconds(10))
+            .with_placement(
+                StoragePlacementHint::for_tier(StorageTier::L1).with_ttl(Duration::seconds(1)),
+            );
+        let key = TieredStorageStore::storage_key_for_record(&record);
+        let value = encode_record(&record).unwrap();
+
+        store
+            .tier_manager()
+            .put_to_specific_tier(&key, &value, &StorageTier::L1)
+            .await
+            .unwrap();
+        store
+            .tier_manager()
+            .put_to_specific_tier(&key, &value, &StorageTier::L2)
+            .await
+            .unwrap();
+
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L1)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L2)
+            .await
+            .unwrap()
+            .is_some());
+
+        let report = store.run_lifecycle_once().await.unwrap();
+
+        assert_eq!(report.ttl_deleted, 1);
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L1)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&key, &StorageTier::L2)
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
