@@ -262,22 +262,26 @@ impl TieredStorageStore {
         let mut compaction_failed = 0;
 
         for tier in self.tier_manager.initialized_tiers() {
-            match self.tier_manager.compact_tier(&tier).await {
-                Ok(()) => {
+            let outcome = self.tier_manager.compact_tier_with_outcome(&tier).await?;
+            match outcome.kind {
+                crate::StorageCompactionOutcomeKind::Compacted => {
                     compacted_tiers.push(tier.clone());
-                    compaction_outcomes.push(StorageCompactionOutcome::compacted(tier));
+                    compaction_outcomes.push(outcome);
                 }
-                Err(error) => {
-                    let message = error.to_string();
-                    if is_unsupported_compaction_error(&error) {
-                        compaction_unsupported += 1;
-                        compaction_outcomes
-                            .push(StorageCompactionOutcome::unsupported(tier, message));
-                    } else {
-                        compaction_failed += 1;
-                        compaction_errors.insert(tier.clone(), message.clone());
-                        compaction_outcomes.push(StorageCompactionOutcome::failed(tier, message));
-                    }
+                crate::StorageCompactionOutcomeKind::Unsupported => {
+                    compaction_unsupported += 1;
+                    compaction_outcomes.push(outcome);
+                }
+                crate::StorageCompactionOutcomeKind::Failed => {
+                    compaction_failed += 1;
+                    compaction_errors.insert(
+                        tier.clone(),
+                        outcome
+                            .message
+                            .clone()
+                            .unwrap_or_else(|| "storage compaction failed".to_string()),
+                    );
+                    compaction_outcomes.push(outcome);
                 }
             }
         }
@@ -304,16 +308,6 @@ struct MaintenanceRunGuard {
 impl Drop for MaintenanceRunGuard {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Release);
-    }
-}
-
-fn is_unsupported_compaction_error(error: &Error) -> bool {
-    match error {
-        Error::Unimplemented { .. } => true,
-        _ => error
-            .to_string()
-            .to_ascii_lowercase()
-            .contains("not supported"),
     }
 }
 
