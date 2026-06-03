@@ -11,8 +11,9 @@
 1. 复用并演进现有 `StorageEngine`、`StorageTier`、`StorageWriteRecord`、`StorageWriteSink`、`QueryableMarketDataStore` 等边界。
 2. 提供通用写入、冷热分级、索引和查询能力。
 3. 具体业务数据类型由业务侧通过泛型、codec、schema、namespace、collection 和 metadata tags 指定。
-4. `fdc-storage` 不依赖 `fdc-barter`、`fdc-ingestion`、`fdc-transform`、`fdc-orchestrator`、`fdc-api`。
-5. 全流程贯通暂不执行，先完成 storage 模块内部可测试能力。
+4. 框架通用类型优先复用 `fdc-types` 中已有的 `TypeDefinition`、`TypeSchema`、`TypeRegistry`、`TypeValidator`、`SerializationFormat`、`TypeSerializer` 和金融基础类型，避免在 storage 内重复定义类型系统。
+5. `fdc-storage` 不依赖 `fdc-barter`、`fdc-ingestion`、`fdc-transform`、`fdc-orchestrator`、`fdc-api`。
+6. 全流程贯通暂不执行，先完成 storage 模块内部可测试能力。
 
 因此，市场数据只是第一个高价值业务场景，不应该把存储模块设计成只认识 market data 的专用模块。
 
