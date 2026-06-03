@@ -307,4 +307,38 @@ mod tests {
         assert_eq!(result[0].key, b"l3".to_vec());
         assert_eq!(result[0].value, b"value".to_vec());
     }
+
+    #[tokio::test]
+    async fn tiered_store_can_use_rocksdb_l4_for_cold_records() {
+        let dir = tempdir().unwrap();
+        let mut manager = TierManager::new();
+        let mut config = TierConfig::new(StorageTier::L4);
+        config.engine_type = StorageEngineType::RocksDB;
+        config.engine_config = HashMap::from([(
+            "db_path".to_string(),
+            dir.path()
+                .join("tiered-store-rocksdb")
+                .to_string_lossy()
+                .to_string(),
+        )]);
+        manager.add_tier(config);
+        manager.initialize().await.unwrap();
+
+        let store = TieredStorageStore::new(Arc::new(manager));
+        let record = tagged_record(b"l4", "BTCUSDT")
+            .with_placement(StoragePlacementHint::for_tier(StorageTier::L4));
+        store
+            .write_batch(StorageWriteBatch::new(vec![record]))
+            .await
+            .unwrap();
+
+        let result = store
+            .query_storage(&StorageQuery::new("market_data").with_tag("symbol", "BTCUSDT"))
+            .await
+            .unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].key, b"l4".to_vec());
+        assert_eq!(result[0].value, b"value".to_vec());
+    }
 }
