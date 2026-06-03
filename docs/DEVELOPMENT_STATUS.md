@@ -1,11 +1,34 @@
 # Development Status
 
-Last updated: 2026-06-02
+Last updated: 2026-06-03
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: `e1fe868` (`Document historical barter example run commands`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record barter smoke verification`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-03 fdc-barter Documentation and Smoke Verification Checkpoint
+
+Completed today:
+
+- Calibrated `crates/fdc-adapter/barter/docs/market-data-collection-requirements.md` so the current-state section matches the implemented structured live mappings, Binance Spot historical REST paths, bounded acquisition helpers, and example binaries.
+- Preserved remaining gaps for multi-exchange historical REST, historical order-book reconstruction, L2 gap/out-of-order handling, real-network smoke coverage, and future cross-module source-pipeline glue.
+
+Verification performed:
+
+- `CARGO_NET_OFFLINE=true rtk cargo test -p fdc-barter`
+  - Result: `62 passed, 6 ignored`
+- Checked all five fdc-barter examples with `CARGO_NET_OFFLINE=true rtk cargo check -p fdc-barter --example ...`
+  - Result: all five examples built with `0 errors`.
+- Historical Binance smoke with `FDC_BARTER_HISTORICAL_SMOKE=1`
+  - Result: attempted; Binance Spot OHLCV smoke passed, Binance Spot historical trades smoke failed with `HistoricalRest("HTTP request timed out")`, treated as a real-network/Binance availability result rather than an offline contract failure.
+- Live Binance smoke with `FDC_BARTER_LIVE_SMOKE=1`
+  - Result: `3 passed, 65 filtered out` for the requested ignored live smoke tests.
+
+Scope note:
+
+- No `fdc-barter` to `fdc-ingestion` glue was designed or implemented in this slice.
+- Existing uncommitted `fdc-server` health file moves remain unrelated and must be handled separately.
 
 ## 2026-06-02 Development Checkpoint
 
