@@ -277,7 +277,7 @@ impl TierManager {
         // 根据数据大小和访问模式决定初始层级
         let target_tier = self.determine_initial_tier(key, value.len()).await;
 
-        self.put_to_tier(key, value, &target_tier).await
+        self.put_to_specific_tier(key, value, &target_tier).await
     }
 
     /// 根据 placement hint 设置数据。
@@ -291,10 +291,15 @@ impl TierManager {
             .determine_tier_for_placement(key, value.len(), placement)
             .await;
 
-        self.put_to_tier(key, value, &target_tier).await
+        self.put_to_specific_tier(key, value, &target_tier).await
     }
 
-    async fn put_to_tier(&self, key: &[u8], value: &[u8], target_tier: &StorageTier) -> Result<()> {
+    pub async fn put_to_specific_tier(
+        &self,
+        key: &[u8],
+        value: &[u8],
+        target_tier: &StorageTier,
+    ) -> Result<()> {
         if !self.engines.contains_key(target_tier) {
             return Err(Error::validation(format!(
                 "storage tier {:?} is not initialized",
@@ -412,6 +417,31 @@ impl TierManager {
         self.access_patterns.write().await.remove(key);
 
         Ok(())
+    }
+
+    /// 删除指定层级中的数据，不影响其它层级。
+    pub async fn delete_from_tier(&self, key: &[u8], tier: &StorageTier) -> Result<()> {
+        if let Some(engine) = self.engines.get(tier) {
+            let engine_guard = engine.read().await;
+            engine_guard.delete(key).await?;
+        }
+        Ok(())
+    }
+
+    /// 返回当前层级之后最近的已初始化更冷层级。
+    pub fn next_colder_available_tier(&self, current_tier: &StorageTier) -> Option<StorageTier> {
+        let mut tiers: Vec<_> = self
+            .engines
+            .keys()
+            .filter(|tier| tier.priority() > current_tier.priority())
+            .cloned()
+            .collect();
+        tiers.sort_by_key(|tier| tier.priority());
+        tiers.into_iter().next()
+    }
+
+    pub fn tier_config(&self, tier: &StorageTier) -> Option<&TierConfig> {
+        self.tiers.get(tier)
     }
 
     /// 记录访问模式
@@ -677,5 +707,61 @@ mod tests {
         assert_eq!(l2_results[0].0, StorageTier::L2);
         assert_eq!(l2_results[0].1, b"scope/b".to_vec());
         assert_eq!(l2_results[0].2, b"l2".to_vec());
+    }
+
+    #[tokio::test]
+    async fn tier_manager_finds_next_colder_initialized_tier() {
+        let mut manager = TierManager::new();
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        manager.add_tier(TierConfig::new(StorageTier::L3));
+        manager.add_tier(TierConfig::new(StorageTier::L4));
+        manager.initialize().await.unwrap();
+
+        assert_eq!(
+            manager.next_colder_available_tier(&StorageTier::L1),
+            Some(StorageTier::L3)
+        );
+        assert_eq!(
+            manager.next_colder_available_tier(&StorageTier::L3),
+            Some(StorageTier::L4)
+        );
+        assert_eq!(manager.next_colder_available_tier(&StorageTier::L4), None);
+    }
+
+    #[tokio::test]
+    async fn tier_manager_deletes_only_from_requested_tier() {
+        let mut manager = TierManager::new();
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        let mut l2 = TierConfig::new(StorageTier::L2);
+        l2.engine_type = StorageEngineType::Memory;
+        manager.add_tier(l2);
+        manager.initialize().await.unwrap();
+
+        manager
+            .put_to_specific_tier(b"same", b"l1", &StorageTier::L1)
+            .await
+            .unwrap();
+        manager
+            .put_to_specific_tier(b"same", b"l2", &StorageTier::L2)
+            .await
+            .unwrap();
+
+        manager
+            .delete_from_tier(b"same", &StorageTier::L1)
+            .await
+            .unwrap();
+
+        let l1 = manager
+            .scan_prefix_in_tiers(b"same", &[StorageTier::L1], None)
+            .await
+            .unwrap();
+        let l2 = manager
+            .scan_prefix_in_tiers(b"same", &[StorageTier::L2], None)
+            .await
+            .unwrap();
+
+        assert!(l1.is_empty());
+        assert_eq!(l2.len(), 1);
+        assert_eq!(l2[0].2, b"l2".to_vec());
     }
 }
