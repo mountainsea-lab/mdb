@@ -11,6 +11,7 @@ pub mod config; // 配置管理
 pub mod engine; // 存储引擎抽象
 pub mod index; // 索引系统
 pub mod metrics; // 存储指标
+pub mod query; // generic storage query boundary
 pub mod queryable; // queryable in-memory market-data storage boundary
 pub mod replication; // 数据复制
 pub mod shard; // 数据分片
@@ -34,6 +35,7 @@ pub use config::StorageConfig;
 pub use engine::{EngineCapabilities, StorageEngine, StorageEngineType};
 pub use index::{IndexConfig, IndexManager, IndexType};
 pub use metrics::StorageMetrics;
+pub use query::{QueryableStorage, StorageQuery, StorageQueryOrder};
 pub use queryable::{MarketDataQuery, QueryableMarketDataStore};
 pub use replication::{ReplicationConfig, ReplicationManager};
 pub use shard::{ShardKey, ShardManager, ShardStrategy};
