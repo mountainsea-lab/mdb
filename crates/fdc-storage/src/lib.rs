@@ -39,7 +39,10 @@ pub use cache::{CacheManager, CachePolicy, CacheStats};
 pub use codec::{BincodeStorageCodec, JsonStorageCodec, StorageCodec};
 pub use compression::{CompressionAlgorithm, CompressionManager};
 pub use config::StorageConfig;
-pub use engine::{EngineCapabilities, StorageEngine, StorageEngineType};
+pub use engine::{
+    EngineCapabilities, StorageEngine, StorageEngineFeature, StorageEngineFeatureError,
+    StorageEngineType,
+};
 pub use index::{IndexConfig, IndexManager, IndexType};
 pub use lifecycle::{TierLifecycleAction, TierLifecycleReport, TierLifecycleTierReport};
 pub use maintenance::{
