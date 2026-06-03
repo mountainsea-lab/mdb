@@ -367,6 +367,29 @@ impl TierManager {
         tiers
     }
 
+    pub fn configured_tiers(&self) -> Vec<StorageTier> {
+        let mut tiers: Vec<_> = self.tiers.keys().cloned().collect();
+        tiers.sort_by_key(|tier| tier.priority());
+        tiers
+    }
+
+    pub fn initialized_tiers(&self) -> Vec<StorageTier> {
+        let mut tiers: Vec<_> = self.engines.keys().cloned().collect();
+        tiers.sort_by_key(|tier| tier.priority());
+        tiers
+    }
+
+    pub async fn compact_tier(&self, tier: &StorageTier) -> Result<()> {
+        if let Some(engine) = self.engines.get(tier) {
+            let engine_guard = engine.read().await;
+            return engine_guard.compact().await;
+        }
+        Err(Error::validation(format!(
+            "storage tier {:?} is not initialized",
+            tier
+        )))
+    }
+
     /// Scan a prefix only in the requested tiers. Returned entries keep their tier origin.
     pub async fn scan_prefix_in_tiers(
         &self,
@@ -763,5 +786,31 @@ mod tests {
         assert!(l1.is_empty());
         assert_eq!(l2.len(), 1);
         assert_eq!(l2[0].2, b"l2".to_vec());
+    }
+
+    #[tokio::test]
+    async fn tier_manager_lists_configured_and_initialized_tiers() {
+        let mut manager = TierManager::new();
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        let mut disabled = TierConfig::new(StorageTier::L2);
+        disabled.enabled = false;
+        manager.add_tier(disabled);
+        manager.initialize().await.unwrap();
+
+        assert_eq!(
+            manager.configured_tiers(),
+            vec![StorageTier::L1, StorageTier::L2]
+        );
+        assert_eq!(manager.initialized_tiers(), vec![StorageTier::L1]);
+    }
+
+    #[tokio::test]
+    async fn tier_manager_compact_tier_reports_engine_result() {
+        let mut manager = TierManager::new();
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        manager.initialize().await.unwrap();
+
+        let error = manager.compact_tier(&StorageTier::L1).await.unwrap_err();
+        assert!(error.to_string().contains("Compaction not supported"));
     }
 }
