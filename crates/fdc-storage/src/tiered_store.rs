@@ -388,7 +388,9 @@ mod tests {
             .unwrap();
 
         let result = store
-            .query_storage_with_metrics(&StorageQuery::new("market_data").with_tag("symbol", "BTCUSDT"))
+            .query_storage_with_metrics(
+                &StorageQuery::new("market_data").with_tag("symbol", "BTCUSDT"),
+            )
             .await
             .unwrap();
 
