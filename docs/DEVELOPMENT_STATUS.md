@@ -3,9 +3,50 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record storage runtime status hardening status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record durable path health hardening status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P29 Durable Path/Disk Health Hardening
+
+Completed:
+
+- Extended read-only `GET /market-data/storage/health` tier rows with safe durable path readiness metadata:
+  - `durable_path_configured`
+  - `path_hint`
+  - `path_exists`
+  - `path_parent_exists`
+  - `path_parent_writable`
+- Preserved path safety: only basename hints are exposed, never full configured paths.
+- Kept path checks read-only: no probe files or directories are created.
+- Added missing-parent helper coverage to verify readiness reports false without creating paths.
+- Preserved read-only health behavior: no maintenance, compaction, lifecycle deletion, demotion, audit clear, or audit reset is triggered.
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-durable-path-disk-health-hardening-design.md`
+- `docs/superpowers/plans/2026-06-07-durable-path-disk-health-hardening.md`
+
+Commits:
+
+- `d0362f0 docs(server): design durable path health hardening`
+- `c797641 docs(server): plan durable path health hardening`
+- `2c3924f feat(server): report durable path health metadata`
+- `c3f34a4 test(server): cover missing durable path parents`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 3 passed, 31 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_status` - 3 passed, 31 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 30 filtered out
+- `rtk cargo test -p fdc-server durable_path_readiness_reports_missing_parent_without_creating_paths` - 1 passed, 79 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P30 maintenance scheduler design**: design a default-disabled scheduler/status surface for periodic storage maintenance, keeping destructive/costly behavior explicitly gated and observable before implementation.
 
 ## 2026-06-07 P28 Storage Runtime Status Surface Hardening
 
