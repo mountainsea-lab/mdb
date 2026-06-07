@@ -3,9 +3,50 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record durable path health hardening status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record maintenance scheduler design status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P30 Maintenance Scheduler Design
+
+Completed:
+
+- Wrote design-only scheduler blueprint for default-disabled periodic storage maintenance.
+- Defined a separate future scheduler gate so manual run-once enablement does not enable background maintenance.
+- Defined future runtime config candidates:
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES`
+- Defined future read-only scheduler status route shape:
+  - `GET /market-data/storage/maintenance/scheduler/status`
+- Defined future implementation trigger criteria and follow-on slices:
+  - P31 scheduler config and read-only status surface
+  - P32 scheduler task skeleton, disabled by default
+  - P33 scheduler failure handling and suppression
+- Preserved safety boundary: P30 does not implement automatic maintenance, background tasks, config parsing, or routes.
+- Preserved the `fdc-storage` boundary: scheduler/runtime/admin semantics remain server-owned.
+
+Design:
+
+- `docs/superpowers/specs/2026-06-07-maintenance-scheduler-design.md`
+
+Commits:
+
+- `75e8aef docs(server): design maintenance scheduler`
+
+Verification:
+
+- Design-only review: no code changes beyond docs.
+- Design explicitly keeps scheduler default-disabled.
+- Design separates manual maintenance gate from future scheduler gate.
+- Design defines concrete P31/P32/P33 implementation criteria and acceptance gates.
+- `rtk git status --short` before design commit was clean.
+
+Recommended next slice:
+
+- **P31 scheduler config and read-only status surface**: implement only runtime config parsing, scheduler state DTO, and `GET /market-data/storage/maintenance/scheduler/status`; do not spawn a background task yet.
 
 ## 2026-06-07 P29 Durable Path/Disk Health Hardening
 
