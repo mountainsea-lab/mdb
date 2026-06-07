@@ -1,11 +1,37 @@
 # Development Status
 
-Last updated: 2026-06-03
+Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record barter smoke verification`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record post-s12 development status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 Post-S12 Development Status Checkpoint
+
+Completed since the previous status entry:
+
+- Completed and committed fdc-storage S12 market-data integration at `049f5c8` (`feat(storage): validate tiered market data integration`).
+- Validated `QueryableMarketDataStore` with both in-memory and `TieredStorageStore` backends.
+- Added storage-backed market-data route coverage across `fdc-storage`, `fdc-server`, and `fdc-api`.
+- Recorded S12 handoff and targeted verification evidence in `docs/superpowers/progress/2026-06-03-mdb-storage-s12-progress.md`.
+- Cleaned unrelated working-tree noise: restored the accidental `README.md` append and removed the duplicate untracked `crates/fdc-server/src/bin/health/` copy. The tracked health module remains at `crates/fdc-server/src/health/`.
+
+Current status:
+
+- Stage-level tasks recorded in this document through S12 are complete on `mdb-mqdev`.
+- The branch is ahead of `origin/mdb-mqdev`; push/merge policy should be decided before treating this branch as shared state.
+- The project is not production-complete. Remaining work is now roadmap work rather than unfinished S12 work.
+
+Recommended near-term route:
+
+1. **Runtime storage backend selection**: add server/runtime config that chooses the market-data store backend instead of relying on tests to inject memory-tiered stores.
+2. **Cross-module ingestion → transform → storage glue**: connect bounded source pipeline helpers through orchestrator-owned mapping into the storage-backed market-data facade while preserving crate boundaries.
+3. **Production hardening slice P2**: start storage runtime maintenance/metrics with scheduler, exporter adapter, audit persistence, and disk/path health as separate small plans.
+4. **Market-data quality/replay roadmap**: address historical order-book reconstruction and L2 gap/out-of-order handling after the storage-backed runtime path is configurable.
+5. **Warning cleanup**: continue B20b crate-by-crate cleanup only after functional routing slices are stable.
+
+Recommended first next slice: **runtime storage backend selection**, because it is the smallest bridge from S12 validation to usable production configuration and unlocks realistic server/API smoke testing without broad pipeline refactoring.
 
 ## 2026-06-03 fdc-barter Documentation and Smoke Verification Checkpoint
 
