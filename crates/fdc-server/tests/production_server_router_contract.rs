@@ -220,6 +220,42 @@ async fn production_trade_query_reads_tiered_backed_market_data_store() {
     assert_eq!(json["data"]["records"][0]["symbol"], "BTCUSDT");
 }
 
+#[tokio::test]
+async fn production_state_try_new_uses_tiered_runtime_storage_config() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "compatibility"),
+    ])
+    .expect("tiered runtime config should parse");
+
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("state should assemble from runtime config");
+    state
+        .ingest_test_trade("BTCUSDT", "tiered-state")
+        .await
+        .expect("fixture ingest should write through configured store");
+
+    let router = build_production_router(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/trades?symbol=BTCUSDT")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("query should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_records"], 1);
+}
+
 #[test]
 fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start() {
     use fdc_server::market_data::{

@@ -5,6 +5,7 @@ use fdc_core::Result;
 use fdc_storage::QueryableMarketDataStore;
 
 use crate::{
+    build_market_data_store_from_runtime_config,
     health::build_health_router,
     market_data::{build_market_data_router, ingest_test_trade, supervisor::MarketDataSupervisor},
     ServerRuntimeConfig,
@@ -24,6 +25,16 @@ impl ProductionServerState {
             market_data_store: Arc::new(QueryableMarketDataStore::new()),
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
         }
+    }
+
+    pub async fn try_new(config: ServerRuntimeConfig) -> Result<Self> {
+        let market_data_store =
+            build_market_data_store_from_runtime_config(config.market_data_storage).await?;
+        Ok(Self {
+            config,
+            market_data_store: Arc::new(market_data_store),
+            market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
+        })
     }
 
     pub fn with_market_data_store(
