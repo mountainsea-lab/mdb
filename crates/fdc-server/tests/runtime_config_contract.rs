@@ -72,10 +72,24 @@ fn runtime_config_rejects_invalid_market_data_storage_env_values() {
 
     let profile_error = ServerRuntimeConfig::from_env_pairs([(
         "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE",
-        "market_data_realtime",
+        "typed_market_data",
     )])
     .expect_err("unsupported profile should be rejected");
     assert!(profile_error
         .to_string()
         .contains("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE must be compatibility"));
+}
+
+#[test]
+fn runtime_config_accepts_generic_realtime_storage_policy_profile() {
+    let config = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE",
+        "generic_realtime",
+    )])
+    .expect("generic realtime profile should parse");
+
+    assert_eq!(
+        config.market_data_storage.policy_profile,
+        MarketDataStoragePolicyProfileConfig::GenericRealtime
+    );
 }

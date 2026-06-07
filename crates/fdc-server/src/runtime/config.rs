@@ -18,6 +18,7 @@ pub enum MarketDataStorageBackendConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarketDataStoragePolicyProfileConfig {
     Compatibility,
+    GenericRealtime,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,9 +109,10 @@ impl ServerRuntimeConfig {
                 "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE" => {
                     market_data_storage.policy_profile = match value.as_ref() {
                         "compatibility" => MarketDataStoragePolicyProfileConfig::Compatibility,
+                        "generic_realtime" => MarketDataStoragePolicyProfileConfig::GenericRealtime,
                         other => {
                             return Err(Error::config(format!(
-                                "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE must be compatibility, got {other}"
+                                "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE must be compatibility or generic_realtime, got {other}"
                             )));
                         }
                     };
