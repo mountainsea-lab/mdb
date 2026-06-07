@@ -3,9 +3,47 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record storage runtime observability hardening status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record storage runtime status hardening status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P28 Storage Runtime Status Surface Hardening
+
+Completed:
+
+- Extended read-only `GET /market-data/storage/status` with safe runtime/admin metadata:
+  - `tiered`
+  - `durable_tiers_configured`
+  - `maintenance_enabled`
+  - `maintenance_audit_reset_enabled`
+  - `maintenance_audit_capacity`
+- Kept existing status fields for `backend`, `policy_profile`, and L1-L4 tier summaries.
+- Preserved path safety: response still exposes only basename `path_hint` values, never full configured paths.
+- Preserved read-only behavior: status does not trigger maintenance, compaction, lifecycle deletion, demotion, audit clear, or audit reset.
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-storage-runtime-status-surface-hardening-design.md`
+- `docs/superpowers/plans/2026-06-07-storage-runtime-status-surface-hardening.md`
+
+Commits:
+
+- `e5af6b5 docs(server): design storage runtime status hardening`
+- `229f4bf docs(server): plan storage runtime status hardening`
+- `28c9582 feat(server): harden storage runtime status metadata`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_status` - 3 passed, 30 filtered out
+- `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance` - 2 passed, 7 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 2 passed, 31 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P29 durable path/disk health hardening**: add safe read-only durable path existence/writability/free-space signals to health/status without exposing full paths and without triggering maintenance.
 
 ## 2026-06-07 P27 Storage Runtime Observability Hardening
 
