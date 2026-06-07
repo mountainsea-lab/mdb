@@ -5,7 +5,10 @@ use fdc_barter::{
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_orchestrator::pipeline::run_barter_envelopes_to_storage_once;
-use fdc_storage::{MarketDataQuery, QueryableMarketDataStore};
+use fdc_storage::{
+    MarketDataQuery, QueryableMarketDataStore, QueryableStorage, StorageQuery, StorageTier,
+    StorageTierScope, StorageTieringPolicy,
+};
 use rust_decimal::Decimal;
 
 fn sample_trade_event() -> BarterMarketEvent {
@@ -44,6 +47,20 @@ fn sample_envelope() -> BarterIngestionEnvelope {
     envelope
 }
 
+fn sample_backfill_envelope() -> BarterIngestionEnvelope {
+    let mut envelope = sample_envelope();
+    envelope.envelope_id = "backfill-env-1".to_string();
+    envelope.event.sequence = Some("backfill-seq-1".to_string());
+    envelope.quality = DataQualityFlags {
+        is_replay: false,
+        is_backfill: true,
+        is_duplicate_candidate: false,
+        has_gap_before: false,
+        is_out_of_order: false,
+    };
+    envelope
+}
+
 #[tokio::test]
 async fn barter_fixture_flows_into_queryable_market_data_store() {
     let store = QueryableMarketDataStore::new();
@@ -73,4 +90,48 @@ async fn barter_fixture_flows_into_queryable_market_data_store() {
     assert_eq!(json["event_id"], "env-1");
     assert_eq!(json["symbol"], "BTCUSDT");
     assert_eq!(json["payload"]["Trade"]["trade_id"], "trade-1");
+}
+
+#[tokio::test]
+async fn orchestrator_tags_drive_generic_realtime_tier_routing() {
+    let store = QueryableMarketDataStore::memory_tiered_with_policy(
+        StorageTieringPolicy::generic_realtime(),
+    )
+    .await
+    .expect("tiered store should initialize");
+
+    let result = run_barter_envelopes_to_storage_once(
+        vec![sample_envelope(), sample_backfill_envelope()],
+        &store,
+    )
+    .await
+    .expect("finite fixtures should write to tiered store");
+
+    assert_eq!(result.storage_records_written, 2);
+
+    let hot = store
+        .query_storage(
+            &StorageQuery::new("market_data")
+                .with_tier_scope(StorageTierScope::Only(StorageTier::L2)),
+        )
+        .await
+        .expect("hot tier query should succeed");
+    let warm = store
+        .query_storage(
+            &StorageQuery::new("market_data")
+                .with_tier_scope(StorageTierScope::Only(StorageTier::L3)),
+        )
+        .await
+        .expect("warm tier query should succeed");
+
+    assert_eq!(hot.len(), 1);
+    assert_eq!(
+        hot[0].metadata.tags.get("mode").map(String::as_str),
+        Some("live")
+    );
+    assert_eq!(warm.len(), 1);
+    assert_eq!(
+        warm[0].metadata.tags.get("mode").map(String::as_str),
+        Some("backfill")
+    );
 }
