@@ -54,6 +54,7 @@ pub struct ServerRuntimeConfig {
     pub live_default_timeout_secs: u64,
     pub live_default_max_envelopes: usize,
     pub market_data_storage_maintenance_enabled: bool,
+    pub market_data_storage_maintenance_audit_capacity: usize,
     pub market_data_storage: MarketDataStorageRuntimeConfig,
 }
 
@@ -75,6 +76,7 @@ impl ServerRuntimeConfig {
         let mut live_default_timeout_secs = 30_u64;
         let mut live_default_max_envelopes = 100_usize;
         let mut market_data_storage_maintenance_enabled = false;
+        let mut market_data_storage_maintenance_audit_capacity = 32_usize;
         let mut market_data_storage = MarketDataStorageRuntimeConfig::default();
 
         for (key, value) in pairs {
@@ -109,6 +111,21 @@ impl ServerRuntimeConfig {
                 "FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED" => {
                     market_data_storage_maintenance_enabled =
                         matches!(value.as_ref(), "1" | "true" | "yes" | "on");
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY" => {
+                    market_data_storage_maintenance_audit_capacity = value
+                        .as_ref()
+                        .parse::<usize>()
+                        .map_err(|error| {
+                            Error::config(format!(
+                                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY must be between 1 and 1024: {error}"
+                            ))
+                        })?;
+                    if !(1..=1024).contains(&market_data_storage_maintenance_audit_capacity) {
+                        return Err(Error::config(
+                            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY must be between 1 and 1024",
+                        ));
+                    }
                 }
                 "FDC_MARKET_DATA_STORAGE_BACKEND" => {
                     market_data_storage.backend = match value.as_ref() {
@@ -166,6 +183,7 @@ impl ServerRuntimeConfig {
             live_default_timeout_secs,
             live_default_max_envelopes,
             market_data_storage_maintenance_enabled,
+            market_data_storage_maintenance_audit_capacity,
             market_data_storage,
         })
     }
@@ -197,4 +215,54 @@ fn parse_non_empty_path(name: &str, value: &str) -> Result<PathBuf> {
     }
 
     Ok(PathBuf::from(value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runtime_config_storage_maintenance_audit_capacity_defaults_to_32() {
+        let config = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0])
+            .expect("runtime config should parse");
+
+        assert_eq!(config.market_data_storage_maintenance_audit_capacity, 32);
+    }
+
+    #[test]
+    fn runtime_config_storage_maintenance_audit_capacity_accepts_override() {
+        let config = ServerRuntimeConfig::from_env_pairs([(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY",
+            "7",
+        )])
+        .expect("runtime config should parse");
+
+        assert_eq!(config.market_data_storage_maintenance_audit_capacity, 7);
+    }
+
+    #[test]
+    fn runtime_config_storage_maintenance_audit_capacity_rejects_zero() {
+        let error = ServerRuntimeConfig::from_env_pairs([(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY",
+            "0",
+        )])
+        .expect_err("zero capacity should be rejected");
+
+        assert!(error.to_string().contains(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY must be between 1 and 1024"
+        ));
+    }
+
+    #[test]
+    fn runtime_config_storage_maintenance_audit_capacity_rejects_oversized_value() {
+        let error = ServerRuntimeConfig::from_env_pairs([(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY",
+            "1025",
+        )])
+        .expect_err("oversized capacity should be rejected");
+
+        assert!(error.to_string().contains(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY must be between 1 and 1024"
+        ));
+    }
 }
