@@ -16,6 +16,8 @@ fdc-core = { path = "../fdc-core" }
 fdc-storage = { path = "../fdc-storage" }
 fdc-orchestrator = { path = "../fdc-orchestrator" }
 fdc-barter = { path = "../fdc-adapter/barter" }
+async-trait = { workspace = true }
+chrono = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true, features = ["time", "signal"] }
 axum = "0.7"
