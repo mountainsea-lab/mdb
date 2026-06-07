@@ -106,6 +106,31 @@ pub struct MarketDataStorageMaintenanceRunResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceAuditResponse {
+    pub returned_entries: usize,
+    pub entries: Vec<MarketDataStorageMaintenanceAuditEntryResponse>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceAuditEntryResponse {
+    pub recorded_at: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub duration_ms: i64,
+    pub scanned_entries: usize,
+    pub ttl_deleted: usize,
+    pub retention_demoted: usize,
+    pub retention_deleted: usize,
+    pub retained: usize,
+    pub decode_errors: usize,
+    pub compacted_tiers: usize,
+    pub compaction_unsupported: usize,
+    pub compaction_failed: usize,
+    pub healthy_tiers: usize,
+    pub degraded_tiers: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopLiveMarketDataResponse {
     pub state: MarketDataLiveState,
     pub task_id: Option<String>,

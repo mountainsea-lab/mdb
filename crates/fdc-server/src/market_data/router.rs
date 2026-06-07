@@ -10,14 +10,15 @@ use crate::{
     market_data::{
         model::{
             LiveMarketDataStatusResponse, MarketDataStorageHealthResponse,
-            MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
-            MarketDataStorageStatusResponse, MarketDataTradesResponse, StartLiveMarketDataRequest,
-            StartLiveMarketDataResponse, StopLiveMarketDataResponse,
+            MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
+            MarketDataStorageMaintenanceRunResponse, MarketDataStorageStatusResponse,
+            MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
+            StopLiveMarketDataResponse,
         },
         service::{
             live_status, query_trades, run_storage_maintenance_once, start_live,
-            start_live_disabled, stop_live, storage_health, storage_status,
-            StorageMaintenanceHttpStatus,
+            start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
+            storage_status, StorageMaintenanceHttpStatus,
         },
     },
     ProductionServerState,
@@ -26,6 +27,11 @@ use crate::{
 #[derive(Debug, Clone, Deserialize)]
 pub struct TradeQueryParams {
     pub symbol: Option<String>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MaintenanceAuditQueryParams {
     pub limit: Option<usize>,
 }
 
@@ -64,6 +70,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route(
             "/market-data/storage/maintenance/run-once",
             post(storage_maintenance_run_once_handler),
+        )
+        .route(
+            "/market-data/storage/maintenance/audit",
+            get(storage_maintenance_audit_handler),
         )
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
@@ -156,6 +166,15 @@ fn storage_maintenance_status_code(status: StorageMaintenanceHttpStatus) -> Stat
         StorageMaintenanceHttpStatus::Conflict => StatusCode::CONFLICT,
         StorageMaintenanceHttpStatus::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+async fn storage_maintenance_audit_handler(
+    State(state): State<ProductionServerState>,
+    Query(params): Query<MaintenanceAuditQueryParams>,
+) -> Json<ServerApiResponse<MarketDataStorageMaintenanceAuditResponse>> {
+    Json(ServerApiResponse::success(
+        storage_maintenance_audit(&state, params.limit).await,
+    ))
 }
 
 async fn query_trades_handler(

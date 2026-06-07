@@ -451,6 +451,88 @@ async fn storage_maintenance_run_once_completes_for_enabled_tiered_backend() {
 }
 
 #[tokio::test]
+async fn storage_maintenance_audit_route_returns_empty_log() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_entries"], 0);
+    assert!(json["data"]["entries"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_route_returns_successful_run_entry() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::try_new(config).await.unwrap();
+    let router = build_production_router(state);
+
+    let run_response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("run_maintenance_once"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+    assert_eq!(run_response.status(), StatusCode::OK);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit?limit=10")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_entries"], 1);
+    let entries = json["data"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["scanned_entries"], 0);
+    assert_eq!(entries[0]["healthy_tiers"], 4);
+    assert!(entries[0]
+        .get("recorded_at")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains('T'));
+}
+
+#[tokio::test]
 async fn production_live_start_is_explicitly_disabled_by_default() {
     let state = ProductionServerState::new(
         ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),

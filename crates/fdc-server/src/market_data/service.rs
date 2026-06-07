@@ -11,15 +11,18 @@ use fdc_core::{
     Result,
 };
 use fdc_storage::{
-    MarketDataQuery, QueryableMarketDataStore, StorageMaintenanceOptions, StorageMaintenanceReport,
-    StorageTier, StorageTierHealthStatus, StorageWriteRecord,
+    MarketDataQuery, QueryableMarketDataStore, StorageMaintenanceAuditEntry,
+    StorageMaintenanceOptions, StorageMaintenanceReport, StorageTier, StorageTierHealthStatus,
+    StorageWriteRecord,
 };
 use futures::stream;
 use rust_decimal::Decimal;
 
 use crate::{
+    market_data::maintenance_audit::MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY,
     market_data::model::{
         MarketDataLiveState, MarketDataStorageHealthResponse,
+        MarketDataStorageMaintenanceAuditEntryResponse, MarketDataStorageMaintenanceAuditResponse,
         MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
         MarketDataStorageStatusResponse, MarketDataStorageTierHealth, MarketDataStorageTierStatus,
         MarketDataTradeRecord, MarketDataTradesResponse, StartLiveMarketDataRequest,
@@ -201,6 +204,51 @@ pub fn storage_status(state: &ProductionServerState) -> MarketDataStorageStatusR
                 storage.tiers.l4_rocksdb_path.as_deref(),
             ),
         ],
+    }
+}
+
+pub async fn storage_maintenance_audit(
+    state: &ProductionServerState,
+    limit: Option<usize>,
+) -> MarketDataStorageMaintenanceAuditResponse {
+    let limit = limit
+        .unwrap_or(10)
+        .min(MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY);
+    let snapshot = state
+        .market_data_storage_maintenance_audit()
+        .recent(limit)
+        .await;
+    let entries: Vec<_> = snapshot
+        .entries
+        .into_iter()
+        .map(audit_entry_response)
+        .collect();
+
+    MarketDataStorageMaintenanceAuditResponse {
+        returned_entries: entries.len(),
+        entries,
+    }
+}
+
+fn audit_entry_response(
+    entry: StorageMaintenanceAuditEntry,
+) -> MarketDataStorageMaintenanceAuditEntryResponse {
+    MarketDataStorageMaintenanceAuditEntryResponse {
+        recorded_at: entry.recorded_at.to_rfc3339(),
+        started_at: entry.started_at.to_rfc3339(),
+        finished_at: entry.finished_at.to_rfc3339(),
+        duration_ms: entry.duration_ms,
+        scanned_entries: entry.scanned_entries,
+        ttl_deleted: entry.ttl_deleted,
+        retention_demoted: entry.retention_demoted,
+        retention_deleted: entry.retention_deleted,
+        retained: entry.retained,
+        decode_errors: entry.decode_errors,
+        compacted_tiers: entry.compacted_tiers,
+        compaction_unsupported: entry.compaction_unsupported,
+        compaction_failed: entry.compaction_failed,
+        healthy_tiers: entry.healthy_tiers,
+        degraded_tiers: entry.degraded_tiers,
     }
 }
 
