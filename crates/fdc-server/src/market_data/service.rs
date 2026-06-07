@@ -82,7 +82,8 @@ pub async fn run_storage_maintenance_once(
         );
     }
 
-    let mut options = StorageMaintenanceOptions::default();
+    let mut options = StorageMaintenanceOptions::default()
+        .with_audit_sink(state.market_data_storage_maintenance_audit());
     if let Some(timeout_ms) = request.timeout_ms {
         options = options.with_timeout(Duration::from_millis(timeout_ms));
     }
@@ -685,6 +686,7 @@ fn test_trade_envelope(symbol: &str, trade_id: &str) -> BarterIngestionEnvelope 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{ProductionServerState, ServerRuntimeConfig};
 
     #[test]
     fn live_subscription_label_formats_binance_futures_usd() {
@@ -714,5 +716,33 @@ mod tests {
                 "binance_spot:ETHUSDT:order_book".to_string(),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn successful_tiered_maintenance_records_audit_entry() {
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ])
+        .unwrap();
+        let state = ProductionServerState::try_new(config).await.unwrap();
+
+        let result = run_storage_maintenance_once(
+            &state,
+            MarketDataStorageMaintenanceRunRequest {
+                confirm: "run_maintenance_once".to_string(),
+                timeout_ms: None,
+                reason: Some("unit-test".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(result.http_status, StorageMaintenanceHttpStatus::Ok);
+        let audit = state
+            .market_data_storage_maintenance_audit()
+            .recent(10)
+            .await;
+        assert_eq!(audit.entries.len(), 1);
+        assert_eq!(audit.entries[0].healthy_tiers, 4);
     }
 }

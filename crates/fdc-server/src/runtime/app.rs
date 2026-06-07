@@ -7,7 +7,10 @@ use fdc_storage::QueryableMarketDataStore;
 use crate::{
     build_market_data_store_from_runtime_config,
     health::build_health_router,
-    market_data::{build_market_data_router, ingest_test_trade, supervisor::MarketDataSupervisor},
+    market_data::{
+        build_market_data_router, ingest_test_trade,
+        maintenance_audit::MarketDataStorageMaintenanceAuditLog, supervisor::MarketDataSupervisor,
+    },
     ServerRuntimeConfig,
 };
 
@@ -16,6 +19,7 @@ pub struct ProductionServerState {
     config: ServerRuntimeConfig,
     market_data_store: Arc<QueryableMarketDataStore>,
     market_data_supervisor: Arc<MarketDataSupervisor>,
+    market_data_storage_maintenance_audit: Arc<MarketDataStorageMaintenanceAuditLog>,
 }
 
 impl ProductionServerState {
@@ -24,6 +28,9 @@ impl ProductionServerState {
             config,
             market_data_store: Arc::new(QueryableMarketDataStore::new()),
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
+            market_data_storage_maintenance_audit: Arc::new(
+                MarketDataStorageMaintenanceAuditLog::default(),
+            ),
         }
     }
 
@@ -34,6 +41,9 @@ impl ProductionServerState {
             config,
             market_data_store: Arc::new(market_data_store),
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
+            market_data_storage_maintenance_audit: Arc::new(
+                MarketDataStorageMaintenanceAuditLog::default(),
+            ),
         })
     }
 
@@ -45,6 +55,9 @@ impl ProductionServerState {
             config,
             market_data_store,
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
+            market_data_storage_maintenance_audit: Arc::new(
+                MarketDataStorageMaintenanceAuditLog::default(),
+            ),
         }
     }
 
@@ -58,6 +71,12 @@ impl ProductionServerState {
 
     pub fn market_data_supervisor(&self) -> Arc<MarketDataSupervisor> {
         Arc::clone(&self.market_data_supervisor)
+    }
+
+    pub fn market_data_storage_maintenance_audit(
+        &self,
+    ) -> Arc<MarketDataStorageMaintenanceAuditLog> {
+        Arc::clone(&self.market_data_storage_maintenance_audit)
     }
 
     pub async fn ingest_test_trade(&self, symbol: &str, trade_id: &str) -> Result<()> {
