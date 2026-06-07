@@ -42,6 +42,13 @@ impl MarketDataStorageMaintenanceAuditLog {
             entries: recent,
         }
     }
+
+    pub async fn clear(&self) -> usize {
+        let mut entries = self.entries.lock().await;
+        let cleared = entries.len();
+        entries.clear();
+        cleared
+    }
 }
 
 #[async_trait]
@@ -119,6 +126,32 @@ mod tests {
         let snapshot = log.recent(0).await;
 
         assert_eq!(snapshot.total_entries, 1);
+        assert!(snapshot.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn audit_log_clear_removes_entries_and_returns_count() {
+        let log = MarketDataStorageMaintenanceAuditLog::new(3);
+        log.record_maintenance(audit_entry(1)).await.unwrap();
+        log.record_maintenance(audit_entry(2)).await.unwrap();
+
+        let cleared = log.clear().await;
+        let snapshot = log.recent(10).await;
+
+        assert_eq!(cleared, 2);
+        assert_eq!(snapshot.total_entries, 0);
+        assert!(snapshot.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn audit_log_clear_empty_log_returns_zero() {
+        let log = MarketDataStorageMaintenanceAuditLog::new(3);
+
+        let cleared = log.clear().await;
+        let snapshot = log.recent(10).await;
+
+        assert_eq!(cleared, 0);
+        assert_eq!(snapshot.total_entries, 0);
         assert!(snapshot.entries.is_empty());
     }
 }
