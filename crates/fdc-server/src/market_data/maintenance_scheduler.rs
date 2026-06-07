@@ -298,6 +298,12 @@ mod tests {
         let started = Utc::now();
         assert!(state.mark_started(started).await);
         assert!(!state.mark_started(started).await);
+        let overlap_snapshot = state.snapshot().await;
+        assert_eq!(overlap_snapshot.skipped_runs, 1);
+        assert_eq!(
+            overlap_snapshot.last_status.as_deref(),
+            Some("skipped_overlap")
+        );
         let next_run_at = Utc::now();
         state.mark_completed(Utc::now(), next_run_at).await;
 
