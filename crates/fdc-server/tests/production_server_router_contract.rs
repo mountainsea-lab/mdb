@@ -428,7 +428,72 @@ async fn production_storage_health_tiered_backend_reports_initialized_tiers() {
         assert_eq!(tier["status"], "healthy");
         assert!(tier.get("key_count").is_some());
         assert!(tier.get("total_size").is_some());
+        assert_eq!(tier["durable_path_configured"], false);
+        assert!(tier["path_hint"].is_null());
+        assert!(tier["path_exists"].is_null());
+        assert!(tier["path_parent_exists"].is_null());
+        assert!(tier["path_parent_writable"].is_null());
     }
+}
+
+#[tokio::test]
+async fn production_storage_health_reports_durable_path_readiness_without_full_paths() {
+    let root = unique_test_path("storage-health-paths");
+    std::fs::create_dir_all(&root).expect("durable root should be created");
+    let env = durable_tier_env(&root);
+    let config = ServerRuntimeConfig::from_env_pairs(
+        env.iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    )
+    .expect("durable runtime config should parse");
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("production state should build");
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/health")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage health should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    let tiers = json["data"]["tiers"].as_array().unwrap();
+
+    let l1 = tiers.iter().find(|tier| tier["tier"] == "L1").unwrap();
+    assert_eq!(l1["durable_path_configured"], false);
+    assert!(l1["path_hint"].is_null());
+    assert!(l1["path_exists"].is_null());
+    assert!(l1["path_parent_exists"].is_null());
+    assert!(l1["path_parent_writable"].is_null());
+
+    for (tier_name, hint) in [("L2", "l2.redb"), ("L3", "l3.duckdb"), ("L4", "l4-rocksdb")]
+    {
+        let tier = tiers
+            .iter()
+            .find(|tier| tier["tier"] == tier_name)
+            .unwrap_or_else(|| panic!("missing tier {tier_name}"));
+        assert_eq!(tier["durable_path_configured"], true);
+        assert_eq!(tier["path_hint"], hint);
+        assert_eq!(tier["path_exists"], true);
+        assert_eq!(tier["path_parent_exists"], true);
+        assert_eq!(tier["path_parent_writable"], true);
+    }
+
+    let body_text = String::from_utf8(body.to_vec()).expect("body should be utf8");
+    assert!(
+        !body_text.contains(root.to_string_lossy().as_ref()),
+        "storage health must not leak full configured paths: {body_text}"
+    );
 }
 
 #[tokio::test]

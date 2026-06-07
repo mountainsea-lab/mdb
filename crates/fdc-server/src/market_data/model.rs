@@ -82,6 +82,11 @@ pub struct MarketDataStorageTierHealth {
     pub status: String,
     pub key_count: Option<u64>,
     pub total_size: Option<u64>,
+    pub durable_path_configured: bool,
+    pub path_hint: Option<String>,
+    pub path_exists: Option<bool>,
+    pub path_parent_exists: Option<bool>,
+    pub path_parent_writable: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

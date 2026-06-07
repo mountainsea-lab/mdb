@@ -370,13 +370,24 @@ pub async fn storage_health(state: &ProductionServerState) -> MarketDataStorageH
             let tiers: Vec<_> = snapshot
                 .tiers
                 .values()
-                .map(|tier| MarketDataStorageTierHealth {
-                    tier: storage_tier_label(&tier.tier).to_string(),
-                    enabled: tier.enabled,
-                    initialized: tier.initialized,
-                    status: storage_tier_health_status_label(&tier.status).to_string(),
-                    key_count: tier.stats.as_ref().map(|stats| stats.key_count),
-                    total_size: tier.stats.as_ref().map(|stats| stats.total_size),
+                .map(|tier| {
+                    let readiness = durable_path_readiness(configured_durable_path_for_tier(
+                        state,
+                        &tier.tier,
+                    ));
+                    MarketDataStorageTierHealth {
+                        tier: storage_tier_label(&tier.tier).to_string(),
+                        enabled: tier.enabled,
+                        initialized: tier.initialized,
+                        status: storage_tier_health_status_label(&tier.status).to_string(),
+                        key_count: tier.stats.as_ref().map(|stats| stats.key_count),
+                        total_size: tier.stats.as_ref().map(|stats| stats.total_size),
+                        durable_path_configured: readiness.durable_path_configured,
+                        path_hint: readiness.path_hint,
+                        path_exists: readiness.path_exists,
+                        path_parent_exists: readiness.path_parent_exists,
+                        path_parent_writable: readiness.path_parent_writable,
+                    }
                 })
                 .collect();
             let status = if tiers.iter().all(|tier| tier.status == "healthy") {
@@ -411,6 +422,61 @@ pub async fn storage_health(state: &ProductionServerState) -> MarketDataStorageH
             access_patterns: 0,
             migration_queue_len: 0,
         },
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DurablePathReadiness {
+    durable_path_configured: bool,
+    path_hint: Option<String>,
+    path_exists: Option<bool>,
+    path_parent_exists: Option<bool>,
+    path_parent_writable: Option<bool>,
+}
+
+impl DurablePathReadiness {
+    fn unconfigured() -> Self {
+        Self {
+            durable_path_configured: false,
+            path_hint: None,
+            path_exists: None,
+            path_parent_exists: None,
+            path_parent_writable: None,
+        }
+    }
+}
+
+fn durable_path_readiness(path: Option<&std::path::Path>) -> DurablePathReadiness {
+    let Some(path) = path else {
+        return DurablePathReadiness::unconfigured();
+    };
+
+    let path_parent = path.parent();
+    let path_parent_exists = path_parent.map(std::path::Path::exists).unwrap_or(false);
+    let path_parent_writable = path_parent
+        .and_then(|parent| std::fs::metadata(parent).ok())
+        .map(|metadata| !metadata.permissions().readonly())
+        .unwrap_or(false);
+
+    DurablePathReadiness {
+        durable_path_configured: true,
+        path_hint: path.file_name().map(|name| name.to_string_lossy().to_string()),
+        path_exists: Some(path.exists()),
+        path_parent_exists: Some(path_parent_exists),
+        path_parent_writable: Some(path_parent_exists && path_parent_writable),
+    }
+}
+
+fn configured_durable_path_for_tier<'a>(
+    state: &'a ProductionServerState,
+    tier: &StorageTier,
+) -> Option<&'a std::path::Path> {
+    let tiers = &state.config().market_data_storage.tiers;
+    match tier {
+        StorageTier::L1 => None,
+        StorageTier::L2 => tiers.l2_redb_path.as_deref(),
+        StorageTier::L3 => tiers.l3_duckdb_path.as_deref(),
+        StorageTier::L4 => tiers.l4_rocksdb_path.as_deref(),
     }
 }
 
