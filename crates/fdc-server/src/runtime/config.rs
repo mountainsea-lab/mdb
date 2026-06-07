@@ -53,6 +53,7 @@ pub struct ServerRuntimeConfig {
     pub live_autostart: bool,
     pub live_default_timeout_secs: u64,
     pub live_default_max_envelopes: usize,
+    pub market_data_storage_maintenance_enabled: bool,
     pub market_data_storage: MarketDataStorageRuntimeConfig,
 }
 
@@ -73,6 +74,7 @@ impl ServerRuntimeConfig {
         let mut live_autostart = false;
         let mut live_default_timeout_secs = 30_u64;
         let mut live_default_max_envelopes = 100_usize;
+        let mut market_data_storage_maintenance_enabled = false;
         let mut market_data_storage = MarketDataStorageRuntimeConfig::default();
 
         for (key, value) in pairs {
@@ -103,6 +105,10 @@ impl ServerRuntimeConfig {
                 "FDC_LIVE_DEFAULT_MAX_ENVELOPES" => {
                     live_default_max_envelopes =
                         parse_positive_usize("FDC_LIVE_DEFAULT_MAX_ENVELOPES", value.as_ref())?;
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED" => {
+                    market_data_storage_maintenance_enabled =
+                        matches!(value.as_ref(), "1" | "true" | "yes" | "on");
                 }
                 "FDC_MARKET_DATA_STORAGE_BACKEND" => {
                     market_data_storage.backend = match value.as_ref() {
@@ -159,6 +165,7 @@ impl ServerRuntimeConfig {
             live_autostart,
             live_default_timeout_secs,
             live_default_max_envelopes,
+            market_data_storage_maintenance_enabled,
             market_data_storage,
         })
     }

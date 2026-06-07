@@ -15,6 +15,7 @@ fn runtime_config_defaults_are_safe_for_local_production_server() {
     assert!(!config.live_autostart);
     assert_eq!(config.live_default_timeout_secs, 30);
     assert_eq!(config.live_default_max_envelopes, 100);
+    assert!(!config.market_data_storage_maintenance_enabled);
     assert_eq!(
         config.market_data_storage,
         MarketDataStorageRuntimeConfig {
@@ -23,6 +24,22 @@ fn runtime_config_defaults_are_safe_for_local_production_server() {
             tiers: Default::default(),
         }
     );
+}
+
+#[test]
+fn storage_maintenance_hook_is_disabled_by_default() {
+    let config = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).unwrap();
+
+    assert!(!config.market_data_storage_maintenance_enabled);
+}
+
+#[test]
+fn storage_maintenance_hook_can_be_enabled_by_env() {
+    let config =
+        ServerRuntimeConfig::from_env_pairs([("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1")])
+            .unwrap();
+
+    assert!(config.market_data_storage_maintenance_enabled);
 }
 
 #[test]
