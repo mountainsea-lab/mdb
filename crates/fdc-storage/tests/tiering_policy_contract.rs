@@ -2,7 +2,8 @@ use std::collections::BTreeMap;
 
 use fdc_storage::{
     StorageAccessPatternHint, StorageDurabilityHint, StoragePlacementHint, StorageRetentionClass,
-    StorageTier, StorageTieringContext, StorageTieringPolicy, StorageTieringReason,
+    StorageTier, StorageTieringContext, StorageTieringPolicy, StorageTieringPolicyProfile,
+    StorageTieringReason,
 };
 
 fn context<'a>(
@@ -88,4 +89,39 @@ fn public_policy_api_maps_durability_without_explicit_tier_choice() {
     assert!(decision
         .reasons
         .contains(&StorageTieringReason::DurabilityHint));
+}
+
+#[test]
+fn generic_realtime_policy_profile_is_public_and_generic() {
+    let tags = BTreeMap::from([("mode".to_string(), "live".to_string())]);
+    let hint = StoragePlacementHint::default();
+    let tiers = vec![
+        StorageTier::L1,
+        StorageTier::L2,
+        StorageTier::L3,
+        StorageTier::L4,
+    ];
+    let context = StorageTieringContext {
+        namespace: "caller_defined_namespace",
+        collection: "caller_defined_collection",
+        key_len: 4,
+        value_len: 128,
+        timestamp_age_seconds: 1,
+        metadata_tags: &tags,
+        placement_hint: &hint,
+        available_tiers: &tiers,
+        prior_access: None,
+    };
+
+    let policy = StorageTieringPolicy::generic_realtime();
+    assert_eq!(
+        policy.profile(),
+        StorageTieringPolicyProfile::GenericRealtime
+    );
+
+    let decision = policy.decide_initial_placement(&context);
+    assert_eq!(decision.initial_tier, StorageTier::L2);
+    assert!(decision
+        .reasons
+        .contains(&StorageTieringReason::LiveRecentWrite));
 }

@@ -14,6 +14,7 @@ use crate::{StorageAccessPatternHint, StorageDurabilityHint, StoragePlacementHin
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StorageTieringPolicyProfile {
     Compatibility,
+    GenericRealtime,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -61,6 +62,11 @@ pub enum StorageTieringReason {
     AccessPatternHint,
     DurabilityHint,
     ExistingAccessPattern,
+    LiveRecentWrite,
+    BackfillOrReplay,
+    AggregateRecord,
+    LargePayload,
+    OldTimestamp,
     NearestAvailableTierFallback,
     DefaultProfile,
 }
@@ -77,6 +83,12 @@ impl StorageTieringPolicy {
         }
     }
 
+    pub fn generic_realtime() -> Self {
+        Self {
+            profile: StorageTieringPolicyProfile::GenericRealtime,
+        }
+    }
+
     pub fn profile(&self) -> StorageTieringPolicyProfile {
         self.profile
     }
@@ -87,6 +99,7 @@ impl StorageTieringPolicy {
     ) -> StorageTieringDecision {
         match self.profile {
             StorageTieringPolicyProfile::Compatibility => self.decide_compatibility(context),
+            StorageTieringPolicyProfile::GenericRealtime => self.decide_generic_realtime(context),
         }
     }
 
@@ -122,6 +135,62 @@ impl StorageTieringPolicy {
             reasons,
         }
     }
+
+    fn decide_generic_realtime(
+        &self,
+        context: &StorageTieringContext<'_>,
+    ) -> StorageTieringDecision {
+        if context.placement_hint.target_tier.is_some() {
+            return self.decide_compatibility(context);
+        }
+
+        let mut reasons = Vec::new();
+        let (desired_tier, retention_class) =
+            if context.timestamp_age_seconds >= ARCHIVE_RECORD_SECONDS {
+                reasons.push(StorageTieringReason::OldTimestamp);
+                (StorageTier::L4, StorageRetentionClass::ArchiveCold)
+            } else if context.timestamp_age_seconds >= OLD_RECORD_SECONDS {
+                reasons.push(StorageTieringReason::OldTimestamp);
+                (StorageTier::L3, StorageRetentionClass::AnalyticalWarm)
+            } else if context.value_len >= LARGE_PAYLOAD_BYTES {
+                reasons.push(StorageTieringReason::LargePayload);
+                (StorageTier::L3, StorageRetentionClass::AnalyticalWarm)
+            } else if is_backfill_or_replay(context) {
+                reasons.push(StorageTieringReason::BackfillOrReplay);
+                (StorageTier::L3, StorageRetentionClass::AnalyticalWarm)
+            } else if is_aggregate_record(context) {
+                reasons.push(StorageTieringReason::AggregateRecord);
+                (StorageTier::L3, StorageRetentionClass::AnalyticalWarm)
+            } else if has_tag_value(context, "mode", "live")
+                && context.timestamp_age_seconds <= LIVE_RECENT_SECONDS
+            {
+                reasons.push(StorageTieringReason::LiveRecentWrite);
+                let desired = if matches!(
+                    context.placement_hint.durability,
+                    StorageDurabilityHint::Ephemeral
+                ) {
+                    StorageTier::L1
+                } else {
+                    StorageTier::L2
+                };
+                (desired, StorageRetentionClass::RealtimeHot)
+            } else {
+                return self.decide_compatibility(context);
+            };
+
+        let initial_tier = nearest_available_tier(&desired_tier, context.available_tiers)
+            .unwrap_or_else(|| desired_tier.clone());
+        if initial_tier != desired_tier {
+            reasons.push(StorageTieringReason::NearestAvailableTierFallback);
+        }
+
+        StorageTieringDecision {
+            initial_tier,
+            ttl: context.placement_hint.ttl,
+            retention_class,
+            reasons,
+        }
+    }
 }
 
 impl Default for StorageTieringPolicy {
@@ -148,6 +217,34 @@ fn durability_tier(durability: &StorageDurabilityHint) -> Option<StorageTier> {
         StorageDurabilityHint::Archival => Some(StorageTier::L4),
         StorageDurabilityHint::Unspecified => None,
     }
+}
+
+const LARGE_PAYLOAD_BYTES: usize = 1024 * 1024;
+const OLD_RECORD_SECONDS: i64 = 7 * 24 * 60 * 60;
+const ARCHIVE_RECORD_SECONDS: i64 = 90 * 24 * 60 * 60;
+const LIVE_RECENT_SECONDS: i64 = 60 * 60;
+
+fn tag_value<'a>(context: &'a StorageTieringContext<'_>, key: &str) -> Option<&'a str> {
+    context.metadata_tags.get(key).map(String::as_str)
+}
+
+fn has_tag_value(context: &StorageTieringContext<'_>, key: &str, value: &str) -> bool {
+    tag_value(context, key).is_some_and(|actual| actual == value)
+}
+
+fn is_backfill_or_replay(context: &StorageTieringContext<'_>) -> bool {
+    has_tag_value(context, "mode", "backfill")
+        || has_tag_value(context, "quality.is_replay", "true")
+}
+
+fn is_aggregate_record(context: &StorageTieringContext<'_>) -> bool {
+    matches!(
+        tag_value(context, "data.kind"),
+        Some("aggregate" | "candle")
+    ) || matches!(
+        tag_value(context, "record.kind"),
+        Some("aggregate" | "candle")
+    )
 }
 
 fn nearest_available_tier(
@@ -346,5 +443,115 @@ mod tests {
             .decide_initial_placement(&context_with_hint(&hint, &tiers, &tags));
 
         assert_eq!(decision.ttl, Some(Duration::seconds(30)));
+    }
+
+    fn context_with_tags<'a>(
+        metadata_tags: &'a BTreeMap<String, String>,
+        timestamp_age_seconds: i64,
+        value_len: usize,
+    ) -> StorageTieringContext<'a> {
+        static HINT: StoragePlacementHint = StoragePlacementHint {
+            target_tier: None,
+            access_pattern: StorageAccessPatternHint::Unspecified,
+            durability: StorageDurabilityHint::Unspecified,
+            shard_key: None,
+            ttl: None,
+        };
+        static TIERS: [StorageTier; 4] = [
+            StorageTier::L1,
+            StorageTier::L2,
+            StorageTier::L3,
+            StorageTier::L4,
+        ];
+        StorageTieringContext {
+            namespace: "generic",
+            collection: "records",
+            key_len: 8,
+            value_len,
+            timestamp_age_seconds,
+            metadata_tags,
+            placement_hint: &HINT,
+            available_tiers: &TIERS,
+            prior_access: None,
+        }
+    }
+
+    #[test]
+    fn generic_realtime_profile_routes_live_recent_records_to_hot_storage() {
+        let mut tags = BTreeMap::new();
+        tags.insert("mode".to_string(), "live".to_string());
+
+        let decision = StorageTieringPolicy::generic_realtime()
+            .decide_initial_placement(&context_with_tags(&tags, 30, 256));
+
+        assert_eq!(decision.initial_tier, StorageTier::L2);
+        assert_eq!(decision.retention_class, StorageRetentionClass::RealtimeHot);
+        assert!(decision
+            .reasons
+            .contains(&StorageTieringReason::LiveRecentWrite));
+    }
+
+    #[test]
+    fn generic_realtime_profile_routes_backfill_and_replay_to_analytical_storage() {
+        for tags in [
+            BTreeMap::from([("mode".to_string(), "backfill".to_string())]),
+            BTreeMap::from([("quality.is_replay".to_string(), "true".to_string())]),
+        ] {
+            let decision = StorageTieringPolicy::generic_realtime()
+                .decide_initial_placement(&context_with_tags(&tags, 60, 256));
+
+            assert_eq!(decision.initial_tier, StorageTier::L3);
+            assert_eq!(
+                decision.retention_class,
+                StorageRetentionClass::AnalyticalWarm
+            );
+            assert!(decision
+                .reasons
+                .contains(&StorageTieringReason::BackfillOrReplay));
+        }
+    }
+
+    #[test]
+    fn generic_realtime_profile_routes_aggregate_tags_to_analytical_storage() {
+        for tags in [
+            BTreeMap::from([("data.kind".to_string(), "aggregate".to_string())]),
+            BTreeMap::from([("record.kind".to_string(), "candle".to_string())]),
+        ] {
+            let decision = StorageTieringPolicy::generic_realtime()
+                .decide_initial_placement(&context_with_tags(&tags, 60, 256));
+
+            assert_eq!(decision.initial_tier, StorageTier::L3);
+            assert!(decision
+                .reasons
+                .contains(&StorageTieringReason::AggregateRecord));
+        }
+    }
+
+    #[test]
+    fn generic_realtime_profile_avoids_hot_tiers_for_large_or_old_records() {
+        let tags = BTreeMap::from([("mode".to_string(), "live".to_string())]);
+
+        let large = StorageTieringPolicy::generic_realtime()
+            .decide_initial_placement(&context_with_tags(&tags, 30, 2 * 1024 * 1024));
+        assert_eq!(large.initial_tier, StorageTier::L3);
+        assert!(large.reasons.contains(&StorageTieringReason::LargePayload));
+
+        let old = StorageTieringPolicy::generic_realtime()
+            .decide_initial_placement(&context_with_tags(&tags, 91 * 24 * 60 * 60, 256));
+        assert_eq!(old.initial_tier, StorageTier::L4);
+        assert!(old.reasons.contains(&StorageTieringReason::OldTimestamp));
+    }
+
+    #[test]
+    fn generic_realtime_profile_falls_back_to_compatibility_for_unknown_tags() {
+        let tags = BTreeMap::from([("domain".to_string(), "caller-defined".to_string())]);
+
+        let decision = StorageTieringPolicy::generic_realtime()
+            .decide_initial_placement(&context_with_tags(&tags, 60, 256));
+
+        assert_eq!(decision.initial_tier, StorageTier::L2);
+        assert!(decision
+            .reasons
+            .contains(&StorageTieringReason::DefaultProfile));
     }
 }
