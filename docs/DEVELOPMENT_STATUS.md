@@ -3,9 +3,64 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record explicit storage maintenance hook status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record maintenance audit visibility status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P24 Maintenance Audit Visibility
+
+Completed:
+
+- Added server-owned bounded in-memory maintenance audit log:
+  - `MarketDataStorageMaintenanceAuditLog`
+  - capacity: 32 entries
+  - newest-first reads
+  - oldest entries dropped at capacity
+- Implemented generic `fdc_storage::StorageMaintenanceAuditSink` in `fdc-server`.
+- Extended `ProductionServerState` with a shared maintenance audit log and accessor.
+- Wired P23 explicit maintenance runs to pass the audit sink through `StorageMaintenanceOptions::with_audit_sink(...)`.
+- Added read-only route:
+  - `GET /market-data/storage/maintenance/audit?limit=10`
+- Added server-owned audit response DTOs:
+  - `MarketDataStorageMaintenanceAuditResponse`
+  - `MarketDataStorageMaintenanceAuditEntryResponse`
+- Audit route returns only safe counters/timestamps:
+  - recorded/started/finished timestamps
+  - duration
+  - lifecycle counters
+  - compaction counters
+  - healthy/degraded tier counts
+- Successful tiered maintenance runs record audit entries.
+- Disabled, confirmation-required, unsupported-backend, and failed-before-report requests do not create audit entries.
+- The audit route is read-only and does not trigger maintenance.
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-maintenance-audit-visibility-design.md`
+- `docs/superpowers/plans/2026-06-07-maintenance-audit-visibility.md`
+
+Commits:
+
+- `32b1258 docs(server): design maintenance audit visibility`
+- `93c2f33 docs(server): plan maintenance audit visibility`
+- `aef93b9 feat(server): add storage maintenance audit log`
+- `4b5dfc0 feat(server): record storage maintenance audit entries`
+- `4801558 feat(server): expose storage maintenance audit route`
+
+Verification:
+
+- `rtk cargo test -p fdc-server maintenance_audit` - 4 passed
+- `rtk cargo test -p fdc-server successful_tiered_maintenance_records_audit_entry` - 1 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_route` - 2 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 2 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P25 storage maintenance audit hardening**: add optional audit reset/test hook or configurable audit capacity, plus route tests for limit clamping/newest-first behavior under multiple successful runs.
 
 ## 2026-06-07 P23 Explicit Storage Maintenance Admin/Test Hook
 
