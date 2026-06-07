@@ -3,9 +3,43 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record durable tier configuration status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record durable runtime persistence reopen status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P20 Durable Runtime Persistence Reopen
+
+Completed:
+
+- Added a production server contract smoke for configured durable tier paths across runtime rebuild.
+- The smoke builds `ProductionServerState::try_new(config)` with:
+  - `FDC_MARKET_DATA_STORAGE_BACKEND=tiered`
+  - `FDC_MARKET_DATA_STORAGE_POLICY_PROFILE=generic_realtime`
+  - configured L2 redb, L3 DuckDB, and L4 RocksDB temp paths
+- It writes through existing `state.ingest_test_trade("BTCUSDT", "durable-reopen-live-1")`.
+- It verifies the live trade lands in L2 before rebuild through `QueryableStorage`.
+- It drops the state, rebuilds a new state with the same durable paths, and verifies the L2 record is still present.
+- It verifies `GET /market-data/trades?symbol=BTCUSDT&limit=10` serves the persisted trade after rebuild.
+- No storage engine code changes were needed: the acceptance smoke passed before implementation changes, so P20 committed the regression/acceptance coverage only.
+- Preserved the `fdc-storage` boundary: storage remains generic and receives only generic tier configs and metadata.
+
+Commits:
+
+- `c827f94 docs(server): design durable runtime persistence reopen`
+- `fd1a9f8 docs(server): plan durable runtime persistence reopen`
+- `128be02 test(server): verify durable runtime tier reopen`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test production_server_router_contract runtime_server_reopens_configured_durable_tiers_and_serves_persisted_trade` - 1 passed
+- `rtk cargo test -p fdc-server tiered_runtime_config_uses_configured_durable_tier_paths` - 1 passed
+- `rtk cargo test -p fdc-server --test runtime_config_contract` - 7 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P21 runtime storage observability / config introspection**: expose a safe runtime/storage summary that reports backend, policy profile, configured tier engines, and configured path presence without leaking full sensitive paths by default. This would help operators verify durable tier assembly before live ingestion.
 
 ## 2026-06-07 P19 Durable Tier Configuration
 
