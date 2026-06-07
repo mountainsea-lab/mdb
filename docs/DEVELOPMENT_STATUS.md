@@ -3,9 +3,64 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler failure suppression status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler recovery controls status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P34 Scheduler Recovery Controls
+
+Completed:
+
+- Added default-disabled scheduler reset runtime gate:
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESET_ENABLED`
+- Added explicit confirmation-protected scheduler reset route:
+  - `POST /market-data/storage/maintenance/scheduler/reset`
+  - confirmation string: `reset_scheduler_suppression`
+- Reset clears scheduler retry/suppression state without running maintenance or restarting scheduler tasks.
+- Reset sets `consecutive_failures=0`, clears `last_error`, sets `last_status="reset"`, and clears `next_run_at`.
+- Reset preserves scheduler run counters and audit entries.
+- Preserved manual maintenance, audit reset, and scheduler gates as separate controls.
+- Preserved the `fdc-storage` boundary: no server/runtime/admin semantics were added to storage.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-scheduler-recovery-controls-design.md`
+- `docs/superpowers/plans/2026-06-07-scheduler-recovery-controls.md`
+
+Commits:
+
+- `27e3017 docs(server): design scheduler recovery controls`
+- `87b1343 docs(server): plan scheduler recovery controls`
+- `53d8f6e feat(server): add scheduler reset config gate`
+- `2020ae6 feat(server): reset scheduler suppression state`
+- `9a802fb feat(server): add scheduler reset route`
+
+Verification:
+
+- RED config tests failed before implementation because `market_data_storage_maintenance_scheduler_reset_enabled` did not exist.
+- `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance_scheduler_reset` - failed before implementation, then 1 passed, 11 filtered out.
+- RED scheduler state tests failed before implementation because `reset_suppression()` did not exist.
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler_reset_clears_retry_state_only` - failed before implementation, then 1 passed, 98 filtered out.
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler_reset_rejects_running_attempt` - failed before implementation, then 1 passed, 98 filtered out.
+- RED route tests failed before implementation with 404 for `/market-data/storage/maintenance/scheduler/reset`.
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_reset` - failed before implementation, then 3 passed, 41 filtered out.
+- Final verification:
+  - `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance_scheduler_reset` - 1 passed, 11 filtered out
+  - `rtk cargo test -p fdc-server storage_maintenance_scheduler` - 21 passed, 81 filtered out
+  - `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_reset` - 3 passed, 41 filtered out
+  - `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler` - 9 passed, 35 filtered out
+  - `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 40 filtered out
+  - `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_reset` - 4 passed, 40 filtered out
+  - `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+  - `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Operational note:
+
+- One final verification launch timed out because the command wrapper timeout was accidentally set to 1s. The suite was immediately rerun with a normal timeout. Tests were green; `cargo fmt --check` reported formatting diffs, package-scoped formatting was applied, and the final suite then passed.
+
+Recommended next slice:
+
+- **P35 scheduler restart/resume controls**, if runtime recovery without process restart is required; otherwise move to live collection hardening.
 
 ## 2026-06-07 P33 Scheduler Failure Handling and Suppression
 
