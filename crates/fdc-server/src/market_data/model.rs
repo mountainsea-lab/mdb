@@ -163,6 +163,28 @@ pub struct MarketDataStorageMaintenanceAuditEntryResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceSchedulerStatusResponse {
+    pub enabled: bool,
+    pub running: bool,
+    pub backend: String,
+    pub tiered: bool,
+    pub interval_seconds: u64,
+    pub timeout_ms: u64,
+    pub jitter_seconds: u64,
+    pub max_consecutive_failures: u32,
+    pub consecutive_failures: u32,
+    pub total_runs: u64,
+    pub successful_runs: u64,
+    pub failed_runs: u64,
+    pub skipped_runs: u64,
+    pub last_started_at: Option<String>,
+    pub last_finished_at: Option<String>,
+    pub last_status: Option<String>,
+    pub last_error: Option<String>,
+    pub next_run_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopLiveMarketDataResponse {
     pub state: MarketDataLiveState,
     pub task_id: Option<String>,

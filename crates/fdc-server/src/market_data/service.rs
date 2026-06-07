@@ -26,9 +26,10 @@ use crate::{
         MarketDataStorageMaintenanceAuditResetRequest,
         MarketDataStorageMaintenanceAuditResetResponse, MarketDataStorageMaintenanceAuditResponse,
         MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
-        MarketDataStorageStatusResponse, MarketDataStorageTierHealth, MarketDataStorageTierStatus,
-        MarketDataTradeRecord, MarketDataTradesResponse, StartLiveMarketDataRequest,
-        StartLiveMarketDataResponse, StopLiveMarketDataResponse,
+        MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
+        MarketDataStorageTierHealth, MarketDataStorageTierStatus, MarketDataTradeRecord,
+        MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
+        StopLiveMarketDataResponse,
     },
     run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
     MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
@@ -263,6 +264,36 @@ pub async fn storage_maintenance_audit(
             .last_reset_at
             .map(|timestamp| timestamp.to_rfc3339()),
         entries,
+    }
+}
+
+pub fn storage_maintenance_scheduler_status(
+    state: &ProductionServerState,
+) -> MarketDataStorageMaintenanceSchedulerStatusResponse {
+    let config = state.config();
+    let backend = config.market_data_storage.backend;
+    let tiered = backend == MarketDataStorageBackendConfig::Tiered;
+
+    MarketDataStorageMaintenanceSchedulerStatusResponse {
+        enabled: config.market_data_storage_maintenance_scheduler_enabled,
+        running: false,
+        backend: backend_label(backend).to_string(),
+        tiered,
+        interval_seconds: config.market_data_storage_maintenance_scheduler_interval_seconds,
+        timeout_ms: config.market_data_storage_maintenance_scheduler_timeout_ms,
+        jitter_seconds: config.market_data_storage_maintenance_scheduler_jitter_seconds,
+        max_consecutive_failures: config
+            .market_data_storage_maintenance_scheduler_max_consecutive_failures,
+        consecutive_failures: 0,
+        total_runs: 0,
+        successful_runs: 0,
+        failed_runs: 0,
+        skipped_runs: 0,
+        last_started_at: None,
+        last_finished_at: None,
+        last_status: None,
+        last_error: None,
+        next_run_at: None,
     }
 }
 

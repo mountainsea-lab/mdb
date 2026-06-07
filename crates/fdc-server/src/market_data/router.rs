@@ -13,15 +13,16 @@ use crate::{
             MarketDataStorageMaintenanceAuditResetRequest,
             MarketDataStorageMaintenanceAuditResetResponse,
             MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
-            MarketDataStorageMaintenanceRunResponse, MarketDataStorageStatusResponse,
+            MarketDataStorageMaintenanceRunResponse,
+            MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
             MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
             StopLiveMarketDataResponse,
         },
         service::{
             live_status, query_trades, reset_storage_maintenance_audit,
             run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
-            storage_health, storage_maintenance_audit, storage_status,
-            StorageMaintenanceHttpStatus,
+            storage_health, storage_maintenance_audit, storage_maintenance_scheduler_status,
+            storage_status, StorageMaintenanceHttpStatus,
         },
     },
     ProductionServerState,
@@ -81,6 +82,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route(
             "/market-data/storage/maintenance/audit/reset",
             post(storage_maintenance_audit_reset_handler),
+        )
+        .route(
+            "/market-data/storage/maintenance/scheduler/status",
+            get(storage_maintenance_scheduler_status_handler),
         )
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
@@ -204,6 +209,14 @@ async fn storage_maintenance_audit_reset_handler(
         )
     };
     (status, Json(envelope))
+}
+
+async fn storage_maintenance_scheduler_status_handler(
+    State(state): State<ProductionServerState>,
+) -> Json<ServerApiResponse<MarketDataStorageMaintenanceSchedulerStatusResponse>> {
+    Json(ServerApiResponse::success(
+        storage_maintenance_scheduler_status(&state),
+    ))
 }
 
 async fn query_trades_handler(

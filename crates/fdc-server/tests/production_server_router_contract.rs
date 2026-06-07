@@ -527,6 +527,98 @@ async fn storage_maintenance_run_once_is_disabled_by_default() {
 }
 
 #[tokio::test]
+async fn storage_maintenance_scheduler_status_reports_disabled_defaults() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    );
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/scheduler/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler status should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    let data = &json["data"];
+    assert_eq!(data["enabled"], false);
+    assert_eq!(data["running"], false);
+    assert_eq!(data["backend"], "memory");
+    assert_eq!(data["tiered"], false);
+    assert_eq!(data["interval_seconds"], 3600);
+    assert_eq!(data["timeout_ms"], 30000);
+    assert_eq!(data["jitter_seconds"], 0);
+    assert_eq!(data["max_consecutive_failures"], 3);
+    assert_eq!(data["consecutive_failures"], 0);
+    assert_eq!(data["total_runs"], 0);
+    assert_eq!(data["successful_runs"], 0);
+    assert_eq!(data["failed_runs"], 0);
+    assert_eq!(data["skipped_runs"], 0);
+    assert!(data["last_started_at"].is_null());
+    assert!(data["last_finished_at"].is_null());
+    assert!(data["last_status"].is_null());
+    assert!(data["last_error"].is_null());
+    assert!(data["next_run_at"].is_null());
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_status_reports_configured_values_without_running() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS",
+            "120",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS",
+            "45000",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS",
+            "30",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+            "5",
+        ),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/scheduler/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler status should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    let data = &json["data"];
+    assert_eq!(data["enabled"], true);
+    assert_eq!(data["running"], false);
+    assert_eq!(data["backend"], "tiered");
+    assert_eq!(data["tiered"], true);
+    assert_eq!(data["interval_seconds"], 120);
+    assert_eq!(data["timeout_ms"], 45000);
+    assert_eq!(data["jitter_seconds"], 30);
+    assert_eq!(data["max_consecutive_failures"], 5);
+    assert_eq!(data["total_runs"], 0);
+    assert!(data["next_run_at"].is_null());
+}
+
+#[tokio::test]
 async fn storage_maintenance_run_once_requires_confirmation() {
     let config = ServerRuntimeConfig::from_env_pairs([
         ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
