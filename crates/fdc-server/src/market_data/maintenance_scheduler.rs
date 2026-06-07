@@ -45,6 +45,13 @@ pub struct StorageMaintenanceSchedulerState {
     inner: Arc<Mutex<StorageMaintenanceSchedulerStateInner>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageMaintenanceSchedulerAttemptResult {
+    Completed,
+    Unsupported,
+    Failed(String),
+}
+
 impl StorageMaintenanceSchedulerState {
     pub fn from_config(config: &ServerRuntimeConfig) -> Self {
         let backend = config.market_data_storage.backend;
@@ -223,6 +230,10 @@ async fn run_scheduler_loop(
     let interval = scheduler_interval(&config);
     let mut next_delay = first_delay;
     loop {
+        if state.is_suppressed().await {
+            state.mark_suppressed().await;
+            break;
+        }
         let next_run_at = Utc::now()
             + chrono::Duration::from_std(next_delay)
                 .unwrap_or_else(|_| chrono::Duration::seconds(0));
@@ -235,6 +246,10 @@ async fn run_scheduler_loop(
             state.clone(),
         )
         .await;
+        if state.is_suppressed().await {
+            state.mark_suppressed().await;
+            break;
+        }
         next_delay = interval;
     }
 }
@@ -245,6 +260,28 @@ pub async fn run_scheduler_attempt(
     audit: Arc<MarketDataStorageMaintenanceAuditLog>,
     state: StorageMaintenanceSchedulerState,
 ) {
+    run_scheduler_attempt_with_executor(config, audit, state, move |options| {
+        let store = Arc::clone(&store);
+        async move {
+            match store.run_maintenance_once_with_options(options).await {
+                Ok(Some(_report)) => StorageMaintenanceSchedulerAttemptResult::Completed,
+                Ok(None) => StorageMaintenanceSchedulerAttemptResult::Unsupported,
+                Err(error) => StorageMaintenanceSchedulerAttemptResult::Failed(format!("{error}")),
+            }
+        }
+    })
+    .await;
+}
+
+pub async fn run_scheduler_attempt_with_executor<F, Fut>(
+    config: &ServerRuntimeConfig,
+    audit: Arc<MarketDataStorageMaintenanceAuditLog>,
+    state: StorageMaintenanceSchedulerState,
+    executor: F,
+) where
+    F: FnOnce(StorageMaintenanceOptions) -> Fut,
+    Fut: std::future::Future<Output = StorageMaintenanceSchedulerAttemptResult>,
+{
     let started_at = Utc::now();
     if !state.mark_started(started_at).await {
         return;
@@ -257,17 +294,15 @@ pub async fn run_scheduler_attempt(
         .with_timeout(scheduler_timeout(config))
         .with_audit_sink(audit);
 
-    match store.run_maintenance_once_with_options(options).await {
-        Ok(Some(_report)) => {
+    match executor(options).await {
+        StorageMaintenanceSchedulerAttemptResult::Completed => {
             state.mark_completed(Utc::now(), next_run_at).await;
         }
-        Ok(None) => {
+        StorageMaintenanceSchedulerAttemptResult::Unsupported => {
             state.mark_unsupported(Utc::now(), next_run_at).await;
         }
-        Err(error) => {
-            state
-                .mark_failed(Utc::now(), next_run_at, format!("{error}"))
-                .await;
+        StorageMaintenanceSchedulerAttemptResult::Failed(error) => {
+            state.mark_failed(Utc::now(), next_run_at, error).await;
         }
     }
 }
@@ -455,5 +490,110 @@ mod tests {
         );
         assert!(!error.contains('\n'));
         assert!(!error.contains('\t'));
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_attempts_stop_after_suppression() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                "1",
+            ),
+        ])
+        .expect("config parses");
+        let audit = Arc::new(MarketDataStorageMaintenanceAuditLog::new(10));
+        let state = StorageMaintenanceSchedulerState::from_config(&config);
+        let calls = Arc::new(AtomicUsize::new(0));
+
+        let first_calls = Arc::clone(&calls);
+        run_scheduler_attempt_with_executor(
+            &config,
+            Arc::clone(&audit),
+            state.clone(),
+            move |_options| {
+                let first_calls = Arc::clone(&first_calls);
+                async move {
+                    first_calls.fetch_add(1, Ordering::SeqCst);
+                    StorageMaintenanceSchedulerAttemptResult::Failed(
+                        "simulated failure".to_string(),
+                    )
+                }
+            },
+        )
+        .await;
+
+        let second_calls = Arc::clone(&calls);
+        run_scheduler_attempt_with_executor(
+            &config,
+            Arc::clone(&audit),
+            state.clone(),
+            move |_options| {
+                let second_calls = Arc::clone(&second_calls);
+                async move {
+                    second_calls.fetch_add(1, Ordering::SeqCst);
+                    StorageMaintenanceSchedulerAttemptResult::Completed
+                }
+            },
+        )
+        .await;
+
+        let snapshot = state.snapshot().await;
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(snapshot.total_runs, 1);
+        assert_eq!(snapshot.failed_runs, 1);
+        assert_eq!(snapshot.successful_runs, 0);
+        assert_eq!(snapshot.consecutive_failures, 1);
+        assert_eq!(
+            snapshot.last_status.as_deref(),
+            Some("suppressed_after_failures")
+        );
+        assert!(snapshot.next_run_at.is_none());
+        assert!(audit.recent(10).await.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_attempt_executor_success_resets_failures() {
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                "2",
+            ),
+        ])
+        .expect("config parses");
+        let audit = Arc::new(MarketDataStorageMaintenanceAuditLog::new(10));
+        let state = StorageMaintenanceSchedulerState::from_config(&config);
+
+        run_scheduler_attempt_with_executor(
+            &config,
+            Arc::clone(&audit),
+            state.clone(),
+            |_options| async {
+                StorageMaintenanceSchedulerAttemptResult::Failed("temporary failure".to_string())
+            },
+        )
+        .await;
+        run_scheduler_attempt_with_executor(
+            &config,
+            Arc::clone(&audit),
+            state.clone(),
+            |_options| async { StorageMaintenanceSchedulerAttemptResult::Completed },
+        )
+        .await;
+
+        let snapshot = state.snapshot().await;
+        assert_eq!(snapshot.total_runs, 2);
+        assert_eq!(snapshot.failed_runs, 1);
+        assert_eq!(snapshot.successful_runs, 1);
+        assert_eq!(snapshot.consecutive_failures, 0);
+        assert_eq!(snapshot.last_status.as_deref(), Some("completed"));
+        assert!(snapshot.last_error.is_none());
+        assert!(snapshot.next_run_at.is_some());
+        assert!(!state.is_suppressed().await);
     }
 }
