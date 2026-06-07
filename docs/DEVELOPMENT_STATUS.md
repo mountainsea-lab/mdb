@@ -3,9 +3,53 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record maintenance audit visibility status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record storage audit hardening status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P25 Storage Maintenance Audit Hardening
+
+Completed:
+
+- Made server-owned maintenance audit retention capacity configurable:
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY`
+  - default remains 32 entries
+  - values outside `1..=1024` are rejected during runtime config parsing
+- Added `ServerRuntimeConfig::market_data_storage_maintenance_audit_capacity`.
+- Updated all `ProductionServerState` constructors to create `MarketDataStorageMaintenanceAuditLog` with the configured capacity.
+- Added `total_entries` to `MarketDataStorageMaintenanceAuditResponse` so callers can distinguish stored audit count from returned audit count.
+- Added audit-log hardening coverage for `recent(0)`.
+- Added route contract coverage for:
+  - configured capacity clamping under multiple successful maintenance runs
+  - newest-first ordering
+  - `limit=1` returning only the newest entry
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-storage-maintenance-audit-hardening-design.md`
+- `docs/superpowers/plans/2026-06-07-storage-maintenance-audit-hardening.md`
+
+Commits:
+
+- `df421ae docs(server): design storage audit hardening`
+- `92d3d64 docs(server): plan storage audit hardening`
+- `20837a1 feat(server): configure storage audit capacity`
+- `da85a99 feat(server): harden storage audit retention`
+
+Verification:
+
+- `rtk cargo test -p fdc-server runtime_config_storage_maintenance_audit_capacity` - 4 passed
+- `rtk cargo test -p fdc-server maintenance_audit` - 11 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_route` - 4 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 2 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P26 maintenance audit admin reset hook**, if operationally useful: add a separate gated explicit reset endpoint or test-only harness helper with clear safety policy. Otherwise, move to the next storage runtime observability/retention priority.
 
 ## 2026-06-07 P24 Maintenance Audit Visibility
 
