@@ -3,9 +3,57 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record runtime storage observability status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record storage health runtime surface status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P22 Storage Health Runtime Surface
+
+Completed:
+
+- Added read-only `GET /market-data/storage/health` to the production market-data router.
+- Added `QueryableMarketDataStore::storage_health_snapshot().await` in `fdc-storage` as a generic facade:
+  - in-memory backend returns `Ok(None)`
+  - tiered backend delegates to `TieredStorageStore::storage_health_snapshot()`
+- Added server-owned response models:
+  - `MarketDataStorageHealthResponse`
+  - `MarketDataStorageTierHealth`
+- The endpoint reports runtime health separately from P21 config status:
+  - `backend`: `memory` or `tiered`
+  - `tiered`: boolean
+  - overall `status`: `healthy`, `degraded`, or `unavailable`
+  - `access_patterns`
+  - `migration_queue_len`
+  - per-tier `tier`, `enabled`, `initialized`, `status`, `key_count`, and `total_size`
+- Memory backend reports healthy with no tiers.
+- Tiered backend reports initialized L1-L4 health using the existing generic storage snapshot.
+- No maintenance, compaction, lifecycle deletion, TTL deletion, or retention demotion is triggered by the HTTP route.
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-storage-health-runtime-surface-design.md`
+- `docs/superpowers/plans/2026-06-07-storage-health-runtime-surface.md`
+
+Commits:
+
+- `fbb087b docs(server): design storage health runtime surface`
+- `6c24641 docs(server): plan storage health runtime surface`
+- `9844026 feat(storage): expose market data storage health facade`
+- `d203529 feat(server): expose storage health runtime route`
+
+Verification:
+
+- `rtk cargo test -p fdc-storage storage_health_snapshot` - 3 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 2 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_status` - 2 passed
+- `rtk cargo test -p fdc-server --test runtime_config_contract` - 7 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P23 explicit storage maintenance admin/test hook**: expose a strictly opt-in maintenance trigger or test-only/admin route around `run_maintenance_once_with_options`, with timeout/audit controls and clear protection from accidental destructive lifecycle effects.
 
 ## 2026-06-07 P21 Runtime Storage Observability
 
