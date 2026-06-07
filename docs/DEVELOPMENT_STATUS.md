@@ -8,6 +8,23 @@ Latest checkpoint commit when this file was written: this document update commit
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
 
+
+## 2026-06-07 P15 Generic Tag-Aware Tiering Policy
+
+Completed:
+
+- Added `StorageTieringPolicyProfile::GenericRealtime` and `StorageTieringPolicy::generic_realtime()`.
+- Added generic tag-aware rules based only on `StorageTieringContext` facts and metadata tags.
+- Added server runtime parsing for `FDC_MARKET_DATA_STORAGE_POLICY_PROFILE=generic_realtime`.
+- Preserved the `fdc-storage` boundary: no business or market-data crate dependency was introduced.
+
+Verification:
+
+- `rtk cargo test -p fdc-storage policy::tests::generic_realtime_profile`
+- `rtk cargo test -p fdc-storage --test tiering_policy_contract`
+- `rtk cargo test -p fdc-storage --test dependency_guard`
+- `rtk cargo test -p fdc-server --test runtime_config_contract`
+
 ## 2026-06-07 P14 Runtime Storage Backend Selection
 
 Completed:

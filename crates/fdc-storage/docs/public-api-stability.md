@@ -51,3 +51,9 @@ The P13 intelligent tiering policy API is additive. It introduces public policy 
 - `AccessPatternSnapshot`
 
 Compatibility policy behavior intentionally mirrors the pre-P13 placement routing rules. Business modules should treat `StoragePlacementHint` as advisory and should not depend on hand-selecting physical tiers for ordinary writes. Explicit `target_tier` remains supported for tests, migrations, and operator override scenarios.
+
+## P15 Generic Tag-Aware Policy API Additions
+
+P15 extends the additive policy API with `StorageTieringPolicyProfile::GenericRealtime` and `StorageTieringPolicy::generic_realtime()`. This profile is generic: it reads only `StorageTieringContext` facts and caller-provided metadata tags such as `mode=live`, `mode=backfill`, `quality.is_replay=true`, `data.kind=aggregate`, or `record.kind=candle`.
+
+The profile is not a market-data typed API. Callers remain responsible for mapping any concrete DTO or domain concept into generic storage metadata. `fdc-storage` must not depend on business crates to make these decisions.

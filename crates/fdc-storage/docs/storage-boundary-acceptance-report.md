@@ -62,6 +62,12 @@ Expected result as of S11: all `fdc-storage` tests pass.
 - Business modules can continue to provide `StoragePlacementHint`, but the storage module owns the final tier decision.
 - Market-data-specific adaptive routing remains future work and must use generic metadata/tags rather than depending on business DTO crates.
 
+## P15 Generic Tag-Aware Tiering Notes
+
+- `GenericRealtime` adds deterministic tag-aware initial placement while preserving `fdc-storage` as a generic storage layer.
+- The profile uses generic metadata tags and storage facts only; it does not depend on market-data DTOs or business crates.
+- Server runtime config can accept `generic_realtime`, but full runtime policy injection into the tiered store is deferred to a later slice.
+
 ## Known Limitations
 
 - Maintenance is explicit and caller-driven, not scheduled.
