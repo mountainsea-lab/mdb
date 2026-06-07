@@ -7,6 +7,41 @@ Latest checkpoint commit when this file was written: this document update commit
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
+## 2026-06-07 P16 Runtime Tiering Policy Injection
+
+Completed:
+
+- Added runtime tiering policy injection to the tiered storage write path.
+- Added `TierManager::with_policy(...)` and `TierManager::policy()` while preserving compatibility defaults through `TierManager::new()`.
+- Added metadata-aware tiered writes so `TieredStorageStore::write_batch()` passes namespace, collection, metadata tags, timestamp age, value size, and placement hints into `StorageTieringPolicy`.
+- Added policy-aware tiered constructors:
+  - `TieredStorageStore::memory_only_with_policy(...)`
+  - `QueryableMarketDataStore::memory_tiered_with_policy(...)`
+- Updated server runtime storage assembly so `FDC_MARKET_DATA_STORAGE_BACKEND=tiered` with `FDC_MARKET_DATA_STORAGE_POLICY_PROFILE=generic_realtime` injects `StorageTieringPolicy::generic_realtime()`.
+- Preserved the `fdc-storage` boundary: no market-data DTO, barter, ingestion, transform, orchestrator, server, or API dependency was introduced into storage.
+
+Commit:
+
+- `fef4f93 feat(storage): inject tiering policy at runtime`
+
+Verification:
+
+- `rtk cargo fmt --package fdc-storage --package fdc-server --check`
+- `rtk cargo test -p fdc-storage` - 138 passed
+- `rtk cargo test -p fdc-storage --test tiering_policy_contract` - 4 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `rtk cargo test -p fdc-server --test runtime_config_contract` - 5 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract` - 12 passed, 1 ignored
+
+Current gap:
+
+- Runtime policy injection is complete, but the real orchestrator write path currently emits only basic storage tags such as `adapter`, `exchange`, `symbol`, and `kind`.
+- The `generic_realtime` profile needs generic facts such as `mode=live`, `mode=backfill`, `quality.is_replay=true`, and aggregate/candle tags to make useful decisions for real DTO writes.
+
+Recommended next slice:
+
+- **P17 Generic Storage Tag Mapping in Orchestrator**: map existing `MarketDataDto` quality and kind facts into generic `StorageWriteMetadata.tags` in `fdc-orchestrator`, then verify `tiered + generic_realtime` routes real orchestrator writes as intended.
+
 
 
 ## 2026-06-07 P15 Generic Tag-Aware Tiering Policy
