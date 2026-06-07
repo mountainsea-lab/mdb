@@ -55,6 +55,7 @@ pub struct ServerRuntimeConfig {
     pub live_default_max_envelopes: usize,
     pub market_data_storage_maintenance_enabled: bool,
     pub market_data_storage_maintenance_audit_capacity: usize,
+    pub market_data_storage_maintenance_audit_reset_enabled: bool,
     pub market_data_storage: MarketDataStorageRuntimeConfig,
 }
 
@@ -77,6 +78,7 @@ impl ServerRuntimeConfig {
         let mut live_default_max_envelopes = 100_usize;
         let mut market_data_storage_maintenance_enabled = false;
         let mut market_data_storage_maintenance_audit_capacity = 32_usize;
+        let mut market_data_storage_maintenance_audit_reset_enabled = false;
         let mut market_data_storage = MarketDataStorageRuntimeConfig::default();
 
         for (key, value) in pairs {
@@ -126,6 +128,10 @@ impl ServerRuntimeConfig {
                             "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY must be between 1 and 1024",
                         ));
                     }
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_RESET_ENABLED" => {
+                    market_data_storage_maintenance_audit_reset_enabled =
+                        matches!(value.as_ref(), "1" | "true" | "yes" | "on");
                 }
                 "FDC_MARKET_DATA_STORAGE_BACKEND" => {
                     market_data_storage.backend = match value.as_ref() {
@@ -184,6 +190,7 @@ impl ServerRuntimeConfig {
             live_default_max_envelopes,
             market_data_storage_maintenance_enabled,
             market_data_storage_maintenance_audit_capacity,
+            market_data_storage_maintenance_audit_reset_enabled,
             market_data_storage,
         })
     }
@@ -264,5 +271,24 @@ mod tests {
         assert!(error.to_string().contains(
             "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY must be between 1 and 1024"
         ));
+    }
+
+    #[test]
+    fn runtime_config_storage_maintenance_audit_reset_defaults_disabled() {
+        let config = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0])
+            .expect("runtime config should parse");
+
+        assert!(!config.market_data_storage_maintenance_audit_reset_enabled);
+    }
+
+    #[test]
+    fn runtime_config_storage_maintenance_audit_reset_accepts_truthy_override() {
+        let config = ServerRuntimeConfig::from_env_pairs([(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_RESET_ENABLED",
+            "yes",
+        )])
+        .expect("runtime config should parse");
+
+        assert!(config.market_data_storage_maintenance_audit_reset_enabled);
     }
 }
