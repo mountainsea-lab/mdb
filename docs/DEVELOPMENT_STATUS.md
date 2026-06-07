@@ -3,9 +3,49 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record post-s12 development status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record durable tier configuration status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P19 Durable Tier Configuration
+
+Completed:
+
+- Added server runtime env parsing for durable tier paths:
+  - `FDC_MARKET_DATA_STORAGE_L2_REDB_PATH`
+  - `FDC_MARKET_DATA_STORAGE_L3_DUCKDB_PATH`
+  - `FDC_MARKET_DATA_STORAGE_L4_ROCKSDB_PATH`
+- Added `MarketDataStorageTierRuntimeConfig` to `MarketDataStorageRuntimeConfig` with optional L2/L3/L4 physical paths.
+- Kept test/development-safe defaults: if a tier path is absent, the server still builds that tier with the memory engine.
+- Added `TieredStorageStore::with_policy_and_tier_configs(...)` so callers can pass generic `TierConfig`s into storage.
+- Added `QueryableMarketDataStore::tiered_with_policy_and_configs(...)` for runtime assembly.
+- Updated server storage assembly so configured paths are translated into generic `TierConfig.engine_config["db_path"]` values:
+  - L2 path -> `StorageEngineType::Redb`
+  - L3 path -> `StorageEngineType::DuckDB`
+  - L4 path -> `StorageEngineType::RocksDB`
+- Verified `tiered + generic_realtime` still routes live records to L2 and backfill records to L3 under both memory-backed and configured durable-tier runtime assembly.
+- Preserved the `fdc-storage` boundary: no market-data DTO, barter, ingestion, transform, orchestrator, server, or API dependency was introduced into storage.
+
+Commits:
+
+- `fc0e4b6 docs(server): design durable tier configuration`
+- `8f4c2b2 docs(server): plan durable tier configuration`
+- `18f2ce2 feat(server): parse durable storage tier paths`
+- `e8024d9 feat(storage): accept generic tier configs for tiered stores`
+- `d3dc6c7 feat(server): assemble durable tier configs`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test runtime_config_contract` - 7 passed
+- `rtk cargo test -p fdc-server tiered_runtime_config_injects_generic_realtime_policy` - 1 passed
+- `rtk cargo test -p fdc-server tiered_runtime_config_uses_configured_durable_tier_paths` - 1 passed
+- `rtk cargo test -p fdc-storage tiered_store_accepts_caller_provided_tier_configs` - 1 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P20 durable runtime server smoke / persistence reopen**: verify a server/runtime configured with durable tier paths can write data, drop/rebuild the store with the same paths, and query the data back through `QueryableStorage` or the production router. Keep this as a persistence contract, not a market-data DTO change.
 
 ## 2026-06-07 P18 Runtime Server Tiered Generic Realtime Smoke
 
