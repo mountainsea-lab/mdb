@@ -215,7 +215,7 @@ async fn storage_maintenance_scheduler_status_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<MarketDataStorageMaintenanceSchedulerStatusResponse>> {
     Json(ServerApiResponse::success(
-        storage_maintenance_scheduler_status(&state),
+        storage_maintenance_scheduler_status(&state).await,
     ))
 }
 

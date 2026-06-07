@@ -69,7 +69,9 @@ impl StorageMaintenanceSchedulerState {
         }
 
         Self {
-            inner: Arc::new(Mutex::new(StorageMaintenanceSchedulerStateInner { snapshot })),
+            inner: Arc::new(Mutex::new(StorageMaintenanceSchedulerStateInner {
+                snapshot,
+            })),
         }
     }
 

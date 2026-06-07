@@ -133,6 +133,35 @@ async fn response_body_json(response: axum::response::Response) -> serde_json::V
     serde_json::from_slice(&body).expect("response body should be json")
 }
 
+async fn wait_for_scheduler_status_field_at_least(
+    router: axum::Router,
+    field: &str,
+    minimum: u64,
+) -> serde_json::Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/market-data/storage/maintenance/scheduler/status")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("scheduler status should respond");
+        assert_eq!(response.status(), StatusCode::OK);
+        let json = response_body_json(response).await;
+        if json["data"][field].as_u64().unwrap_or(0) >= minimum {
+            return json;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("scheduler field {field} did not reach {minimum}: {json}");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+}
+
 #[tokio::test]
 async fn runtime_builder_creates_memory_market_data_store() {
     let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
@@ -616,6 +645,183 @@ async fn storage_maintenance_scheduler_status_reports_configured_values_without_
     assert_eq!(data["max_consecutive_failures"], 5);
     assert_eq!(data["total_runs"], 0);
     assert!(data["next_run_at"].is_null());
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_disabled_default_does_not_spawn_or_audit() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    let router = build_production_router(state);
+
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+
+    let status_response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/scheduler/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler status should respond");
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_json = response_body_json(status_response).await;
+    assert_eq!(status_json["data"]["enabled"], false);
+    assert_eq!(status_json["data"]["running"], false);
+    assert_eq!(status_json["data"]["total_runs"], 0);
+    assert_eq!(status_json["data"]["successful_runs"], 0);
+    assert_eq!(status_json["data"]["failed_runs"], 0);
+    assert_eq!(status_json["data"]["skipped_runs"], 0);
+    assert!(status_json["data"]["next_run_at"].is_null());
+
+    let audit_response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+    assert_eq!(audit_response.status(), StatusCode::OK);
+    let audit_json = response_body_json(audit_response).await;
+    assert_eq!(audit_json["data"]["total_entries"], 0);
+    assert_eq!(audit_json["data"]["total_recorded_entries"], 0);
+}
+
+#[tokio::test]
+async fn storage_maintenance_manual_gate_does_not_enable_scheduler() {
+    let config =
+        ServerRuntimeConfig::from_env_pairs([("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1")])
+            .expect("config should parse");
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("production state should build");
+    let router = build_production_router(state);
+
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/scheduler/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler status should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["data"]["enabled"], false);
+    assert_eq!(json["data"]["total_runs"], 0);
+    assert_eq!(json["data"]["skipped_runs"], 0);
+    assert!(json["data"]["next_run_at"].is_null());
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_enabled_memory_backend_reports_unsupported_without_audit() {
+    let config = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED",
+        "1",
+    )])
+    .expect("config should parse");
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("production state should build");
+    let router = build_production_router(state);
+
+    tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+
+    let status_response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/scheduler/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler status should respond");
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_json = response_body_json(status_response).await;
+    assert_eq!(status_json["data"]["enabled"], true);
+    assert_eq!(status_json["data"]["backend"], "memory");
+    assert_eq!(status_json["data"]["tiered"], false);
+    assert_eq!(status_json["data"]["running"], false);
+    assert_eq!(status_json["data"]["total_runs"], 0);
+    assert_eq!(status_json["data"]["successful_runs"], 0);
+    assert_eq!(status_json["data"]["failed_runs"], 0);
+    assert_eq!(status_json["data"]["skipped_runs"], 1);
+    assert_eq!(status_json["data"]["last_status"], "unsupported_backend");
+    assert!(status_json["data"]["next_run_at"].is_null());
+
+    let audit_response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+    assert_eq!(audit_response.status(), StatusCode::OK);
+    let audit_json = response_body_json(audit_response).await;
+    assert_eq!(audit_json["data"]["total_entries"], 0);
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_enabled_tiered_backend_runs_and_records_audit() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime"),
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS",
+            "60",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS",
+            "5000",
+        ),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("production state should build");
+    let router = build_production_router(state);
+
+    let status_json =
+        wait_for_scheduler_status_field_at_least(router.clone(), "successful_runs", 1).await;
+    assert_eq!(status_json["data"]["enabled"], true);
+    assert_eq!(status_json["data"]["backend"], "tiered");
+    assert_eq!(status_json["data"]["tiered"], true);
+    assert_eq!(status_json["data"]["total_runs"], 1);
+    assert_eq!(status_json["data"]["successful_runs"], 1);
+    assert_eq!(status_json["data"]["failed_runs"], 0);
+    assert_eq!(status_json["data"]["consecutive_failures"], 0);
+    assert_eq!(status_json["data"]["last_status"], "completed");
+    assert!(status_json["data"]["last_started_at"].is_string());
+    assert!(status_json["data"]["last_finished_at"].is_string());
+    assert!(status_json["data"]["next_run_at"].is_string());
+
+    let audit_response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+    assert_eq!(audit_response.status(), StatusCode::OK);
+    let audit_json = response_body_json(audit_response).await;
+    assert_eq!(audit_json["data"]["total_entries"], 1);
+    assert_eq!(audit_json["data"]["total_recorded_entries"], 1);
+    assert_eq!(audit_json["data"]["entries"][0]["healthy_tiers"], 4);
 }
 
 #[tokio::test]
