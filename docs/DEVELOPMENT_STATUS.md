@@ -7,6 +7,22 @@ Latest checkpoint commit when this file was written: this document update commit
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
+
+## 2026-06-07 P14 Runtime Storage Backend Selection
+
+Completed:
+
+- Added `FDC_MARKET_DATA_STORAGE_BACKEND=memory|tiered` runtime config.
+- Added `FDC_MARKET_DATA_STORAGE_POLICY_PROFILE=compatibility` runtime config.
+- Added server-owned market-data store assembly from runtime config via `build_market_data_store_from_runtime_config` and `ProductionServerState::try_new`.
+- Preserved storage crate boundaries: `fdc-storage` remains generic and does not depend on server/business crates.
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test runtime_config_contract`
+- `rtk cargo test -p fdc-server --test production_server_router_contract`
+- `rtk cargo test -p fdc-storage --test dependency_guard`
+
 ## 2026-06-07 Post-S12 Development Status Checkpoint
 
 Completed since the previous status entry:
