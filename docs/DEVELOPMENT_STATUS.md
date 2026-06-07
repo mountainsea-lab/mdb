@@ -7,6 +7,34 @@ Latest checkpoint commit when this file was written: this document update commit
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
+## 2026-06-07 P18 Runtime Server Tiered Generic Realtime Smoke
+
+Completed:
+
+- Added a production server contract smoke test for `FDC_MARKET_DATA_STORAGE_BACKEND=tiered` with `FDC_MARKET_DATA_STORAGE_POLICY_PROFILE=generic_realtime`.
+- Verified `ProductionServerState::try_new(config)` assembles the configured tiered market-data store.
+- Verified existing server fixture ingestion writes through the configured store and lands live trade data in generic hot tier L2.
+- Verified `GET /market-data/trades` reads the same shared store through the production router.
+- Preserved `fdc-storage` as a generic storage layer.
+
+Commits:
+
+- `f41b30d docs(server): design tiered generic realtime runtime smoke`
+- `0d53d2a docs(server): plan tiered generic realtime runtime smoke`
+- `9e86042 test(server): smoke tiered generic realtime runtime path`
+
+Verification:
+
+- `rtk cargo fmt --package fdc-server --package fdc-storage --check`
+- `rtk cargo test -p fdc-server --test production_server_router_contract runtime_server_path_routes_live_fixture_with_tiered_generic_realtime` - 1 passed
+- `rtk cargo test -p fdc-server --test runtime_config_contract` - 5 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract` - 13 passed, 1 ignored
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+
+Recommended next slice:
+
+- **P19 durable tier configuration design**: decide how runtime config should provide physical tier paths/engines for L2/L3/L4 without making `fdc-storage` market-data-specific.
+
 ## 2026-06-07 P17 Generic Storage Tag Mapping in Orchestrator
 
 Completed:
