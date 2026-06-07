@@ -3,9 +3,55 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler task skeleton status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler failure suppression status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P33 Scheduler Failure Handling and Suppression
+
+Completed:
+
+- Added server-owned scheduler suppression after the configured consecutive failure threshold.
+- Suppressed scheduler attempts report `last_status="suppressed_after_failures"` and clear `next_run_at`.
+- Added sanitized single-line bounded failure reporting through existing scheduler status fields.
+- Added a scheduler attempt test seam inside `fdc-server` without modifying `fdc-storage`.
+- Proved suppressed attempts do not keep invoking maintenance executors.
+- Proved a success after a non-threshold failure resets `consecutive_failures`.
+- Added route-level coverage for suppressed scheduler status visibility.
+- Preserved the read-only scheduler status route and manual run-once gate separation.
+- Preserved the `fdc-storage` boundary: no server/runtime/admin semantics were added to storage.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-scheduler-failure-suppression-design.md`
+- `docs/superpowers/plans/2026-06-07-scheduler-failure-suppression.md`
+
+Commits:
+
+- `336392e docs(server): design scheduler failure suppression`
+- `e2bc7f6 docs(server): plan scheduler failure suppression`
+- `885b354 feat(server): suppress scheduler after repeated failures`
+- `7f94613 feat(server): stop scheduler attempts after suppression`
+- `23961ff test(server): cover scheduler suppression status route`
+
+Verification:
+
+- RED scheduler suppression tests failed before implementation because suppression helpers and attempt seam did not exist.
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler_state_suppresses_after_failure_threshold` - failed before implementation, then passed
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler_error_sanitization_bounds_status_text` - failed before implementation, then passed
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler_attempts_stop_after_suppression` - failed before implementation, then passed
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler_attempt_executor_success_resets_failures` - failed before implementation, then passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_status_reports_suppressed_failures` - 1 passed, 40 filtered out
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler` - 15 passed, 81 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler` - 6 passed, 35 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 37 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_route` - 5 passed, 36 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P34 scheduler recovery controls**: add an explicit gated admin route to clear suppression/retry state if operators need runtime recovery without restart.
 
 ## 2026-06-07 P32 Scheduler Task Skeleton
 
