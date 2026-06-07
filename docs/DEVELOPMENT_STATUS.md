@@ -3,9 +3,60 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record maintenance scheduler design status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler config status surface`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P31 Scheduler Config and Read-Only Status Surface
+
+Completed:
+
+- Implemented future scheduler runtime config parsing on `ServerRuntimeConfig`:
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS`
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES`
+- Added range validation for scheduler interval, timeout, jitter, and max consecutive failures, including jitter cross-field validation.
+- Added read-only scheduler status route:
+  - `GET /market-data/storage/maintenance/scheduler/status`
+- Scheduler status reports configured values and zero runtime counters because P31 intentionally does not spawn a background scheduler task.
+- Preserved safety boundary: P31 does not run maintenance automatically and does not create background work.
+- Preserved read-only status behavior: scheduler status does not trigger maintenance, compaction, lifecycle deletion, demotion, audit clear, or audit reset.
+- Preserved the `fdc-storage` boundary: scheduler config/status semantics remain server-owned and no storage DTO/runtime dependency was introduced.
+
+Design and plan:
+
+- Design inherited from `docs/superpowers/specs/2026-06-07-maintenance-scheduler-design.md`
+- `docs/superpowers/plans/2026-06-07-scheduler-config-status-surface.md`
+
+Commits:
+
+- `65e0787 docs(server): plan scheduler config status surface`
+- `dbfc82e feat(server): parse storage maintenance scheduler config`
+- `ad7cc2b feat(server): expose storage maintenance scheduler status`
+
+Verification:
+
+- RED config test: `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance_scheduler` failed before implementation because scheduler config fields did not exist.
+- GREEN config test: `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance_scheduler` - 2 passed, 9 filtered out.
+- RED route test: `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_status` failed before implementation with 404 for the new scheduler status route.
+- GREEN route test: `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_status` - 2 passed, 34 filtered out.
+- Focused regression:
+  - `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance_scheduler` - 2 passed, 9 filtered out
+  - `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_status` - 2 passed, 34 filtered out
+  - `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 32 filtered out
+  - `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_route` - 5 passed, 31 filtered out
+  - `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+  - `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Operational note:
+
+- During verification, `/Volumes/wdata` was full and linker failed with `ld: write() failed, errno=28`; `cargo clean` removed build artifacts and restored approximately 88GiB free. No source files were removed.
+
+Recommended next slice:
+
+- **P32 scheduler task skeleton**: add a default-disabled scheduler lifecycle skeleton and state counters without changing default behavior or running maintenance unless the new scheduler gate is explicitly enabled.
 
 ## 2026-06-07 P30 Maintenance Scheduler Design
 
