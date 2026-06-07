@@ -4,9 +4,71 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use fdc_server::{build_production_router, ProductionServerState, ServerRuntimeConfig};
-use fdc_storage::QueryableMarketDataStore;
+use fdc_server::{
+    build_market_data_store_from_runtime_config, build_production_router,
+    MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig,
+    MarketDataStorageRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
+};
+use fdc_storage::{
+    QueryableMarketDataStore, StorageWriteBatch, StorageWriteMetadata, StorageWriteRecord,
+    StorageWriteSink,
+};
 use tower::ServiceExt;
+
+fn runtime_storage_record(key: &str) -> StorageWriteRecord {
+    let mut metadata = StorageWriteMetadata::default();
+    metadata
+        .tags
+        .insert("symbol".to_string(), "BTCUSDT".to_string());
+    metadata
+        .tags
+        .insert("kind".to_string(), "trade".to_string());
+    StorageWriteRecord::new(
+        "market_data",
+        "trades",
+        key.as_bytes().to_vec(),
+        b"value".to_vec(),
+    )
+    .with_metadata(metadata)
+}
+
+#[tokio::test]
+async fn runtime_builder_creates_memory_market_data_store() {
+    let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
+        backend: MarketDataStorageBackendConfig::Memory,
+        policy_profile: MarketDataStoragePolicyProfileConfig::Compatibility,
+    })
+    .await
+    .expect("memory store should build");
+
+    store
+        .write_batch(StorageWriteBatch::new(vec![runtime_storage_record(
+            "memory-runtime",
+        )]))
+        .await
+        .expect("memory write should succeed");
+
+    assert_eq!(store.record_count(), 1);
+}
+
+#[tokio::test]
+async fn runtime_builder_creates_tiered_market_data_store() {
+    let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
+        backend: MarketDataStorageBackendConfig::Tiered,
+        policy_profile: MarketDataStoragePolicyProfileConfig::Compatibility,
+    })
+    .await
+    .expect("tiered store should build");
+
+    store
+        .write_batch(StorageWriteBatch::new(vec![runtime_storage_record(
+            "tiered-runtime",
+        )]))
+        .await
+        .expect("tiered write should succeed");
+
+    assert_eq!(store.record_count(), 1);
+}
 
 #[tokio::test]
 async fn production_router_exposes_health_and_readiness() {
