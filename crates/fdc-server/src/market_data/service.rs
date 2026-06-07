@@ -11,18 +11,19 @@ use fdc_core::{
     Result,
 };
 use fdc_storage::{
-    MarketDataQuery, QueryableMarketDataStore, StorageTier, StorageTierHealthStatus,
-    StorageWriteRecord,
+    MarketDataQuery, QueryableMarketDataStore, StorageMaintenanceOptions, StorageMaintenanceReport,
+    StorageTier, StorageTierHealthStatus, StorageWriteRecord,
 };
 use futures::stream;
 use rust_decimal::Decimal;
 
 use crate::{
     market_data::model::{
-        MarketDataLiveState, MarketDataStorageHealthResponse, MarketDataStorageStatusResponse,
-        MarketDataStorageTierHealth, MarketDataStorageTierStatus, MarketDataTradeRecord,
-        MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
-        StopLiveMarketDataResponse,
+        MarketDataLiveState, MarketDataStorageHealthResponse,
+        MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
+        MarketDataStorageStatusResponse, MarketDataStorageTierHealth, MarketDataStorageTierStatus,
+        MarketDataTradeRecord, MarketDataTradesResponse, StartLiveMarketDataRequest,
+        StartLiveMarketDataResponse, StopLiveMarketDataResponse,
     },
     run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
     MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
@@ -32,6 +33,148 @@ pub fn live_status(
     state: &ProductionServerState,
 ) -> crate::market_data::model::LiveMarketDataStatusResponse {
     state.market_data_supervisor().status()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageMaintenanceHttpStatus {
+    Ok,
+    BadRequest,
+    Forbidden,
+    Conflict,
+    InternalServerError,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageMaintenanceServiceResult {
+    pub http_status: StorageMaintenanceHttpStatus,
+    pub response: MarketDataStorageMaintenanceRunResponse,
+    pub message: Option<String>,
+}
+
+pub async fn run_storage_maintenance_once(
+    state: &ProductionServerState,
+    request: MarketDataStorageMaintenanceRunRequest,
+) -> StorageMaintenanceServiceResult {
+    if !state.config().market_data_storage_maintenance_enabled {
+        return maintenance_error(
+            StorageMaintenanceHttpStatus::Forbidden,
+            "disabled",
+            request.reason,
+            "storage maintenance hook is disabled",
+        );
+    }
+
+    if request.confirm != "run_maintenance_once" {
+        return maintenance_error(
+            StorageMaintenanceHttpStatus::BadRequest,
+            "confirmation_required",
+            request.reason,
+            "confirm must be run_maintenance_once",
+        );
+    }
+
+    if matches!(request.timeout_ms, Some(0)) {
+        return maintenance_error(
+            StorageMaintenanceHttpStatus::BadRequest,
+            "confirmation_required",
+            request.reason,
+            "timeout_ms must be greater than zero",
+        );
+    }
+
+    let mut options = StorageMaintenanceOptions::default();
+    if let Some(timeout_ms) = request.timeout_ms {
+        options = options.with_timeout(Duration::from_millis(timeout_ms));
+    }
+
+    match state
+        .market_data_store()
+        .run_maintenance_once_with_options(options)
+        .await
+    {
+        Ok(Some(report)) => StorageMaintenanceServiceResult {
+            http_status: StorageMaintenanceHttpStatus::Ok,
+            response: maintenance_response_from_report(request.reason, report),
+            message: None,
+        },
+        Ok(None) => maintenance_error(
+            StorageMaintenanceHttpStatus::Conflict,
+            "unsupported_backend",
+            request.reason,
+            "storage maintenance requires tiered storage backend",
+        ),
+        Err(error) => maintenance_error(
+            StorageMaintenanceHttpStatus::InternalServerError,
+            "failed",
+            request.reason,
+            format!("storage maintenance failed: {error}"),
+        ),
+    }
+}
+
+fn maintenance_error(
+    http_status: StorageMaintenanceHttpStatus,
+    status: &str,
+    reason: Option<String>,
+    message: impl Into<String>,
+) -> StorageMaintenanceServiceResult {
+    StorageMaintenanceServiceResult {
+        http_status,
+        response: empty_maintenance_response(false, status, reason),
+        message: Some(message.into()),
+    }
+}
+
+fn empty_maintenance_response(
+    accepted: bool,
+    status: &str,
+    reason: Option<String>,
+) -> MarketDataStorageMaintenanceRunResponse {
+    MarketDataStorageMaintenanceRunResponse {
+        accepted,
+        status: status.to_string(),
+        reason,
+        duration_ms: None,
+        scanned_entries: 0,
+        ttl_deleted: 0,
+        retention_demoted: 0,
+        retention_deleted: 0,
+        retained: 0,
+        decode_errors: 0,
+        compacted_tiers: 0,
+        compaction_unsupported: 0,
+        compaction_failed: 0,
+        healthy_tiers: 0,
+        degraded_tiers: 0,
+    }
+}
+
+fn maintenance_response_from_report(
+    reason: Option<String>,
+    report: StorageMaintenanceReport,
+) -> MarketDataStorageMaintenanceRunResponse {
+    MarketDataStorageMaintenanceRunResponse {
+        accepted: true,
+        status: "completed".to_string(),
+        reason,
+        duration_ms: Some(
+            report
+                .finished_at
+                .signed_duration_since(report.started_at)
+                .num_milliseconds(),
+        ),
+        scanned_entries: report.lifecycle.scanned_entries,
+        ttl_deleted: report.lifecycle.ttl_deleted,
+        retention_demoted: report.lifecycle.retention_demoted,
+        retention_deleted: report.lifecycle.retention_deleted,
+        retained: report.lifecycle.retained,
+        decode_errors: report.lifecycle.decode_errors,
+        compacted_tiers: report.compacted_tiers.len(),
+        compaction_unsupported: report.compaction_unsupported,
+        compaction_failed: report.compaction_failed,
+        healthy_tiers: report.healthy_tier_count(),
+        degraded_tiers: report.degraded_tier_count(),
+    }
 }
 
 pub fn storage_status(state: &ProductionServerState) -> MarketDataStorageStatusResponse {

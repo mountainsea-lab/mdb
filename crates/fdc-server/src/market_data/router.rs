@@ -1,5 +1,6 @@
 use axum::{
     extract::{Query, State},
+    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
@@ -9,12 +10,14 @@ use crate::{
     market_data::{
         model::{
             LiveMarketDataStatusResponse, MarketDataStorageHealthResponse,
+            MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
             MarketDataStorageStatusResponse, MarketDataTradesResponse, StartLiveMarketDataRequest,
             StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
         service::{
-            live_status, query_trades, start_live, start_live_disabled, stop_live, storage_health,
-            storage_status,
+            live_status, query_trades, run_storage_maintenance_once, start_live,
+            start_live_disabled, stop_live, storage_health, storage_status,
+            StorageMaintenanceHttpStatus,
         },
     },
     ProductionServerState,
@@ -58,6 +61,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route("/market-data/live/status", get(live_status_handler))
         .route("/market-data/storage/status", get(storage_status_handler))
         .route("/market-data/storage/health", get(storage_health_handler))
+        .route(
+            "/market-data/storage/maintenance/run-once",
+            post(storage_maintenance_run_once_handler),
+        )
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
 }
@@ -117,6 +124,38 @@ async fn storage_health_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<MarketDataStorageHealthResponse>> {
     Json(ServerApiResponse::success(storage_health(&state).await))
+}
+
+async fn storage_maintenance_run_once_handler(
+    State(state): State<ProductionServerState>,
+    Json(request): Json<MarketDataStorageMaintenanceRunRequest>,
+) -> (
+    StatusCode,
+    Json<ServerApiResponse<MarketDataStorageMaintenanceRunResponse>>,
+) {
+    let result = run_storage_maintenance_once(&state, request).await;
+    let status = storage_maintenance_status_code(result.http_status);
+    let envelope = if result.http_status == StorageMaintenanceHttpStatus::Ok {
+        ServerApiResponse::success(result.response)
+    } else {
+        ServerApiResponse::error(
+            result.response,
+            result
+                .message
+                .unwrap_or_else(|| "storage maintenance request failed".to_string()),
+        )
+    };
+    (status, Json(envelope))
+}
+
+fn storage_maintenance_status_code(status: StorageMaintenanceHttpStatus) -> StatusCode {
+    match status {
+        StorageMaintenanceHttpStatus::Ok => StatusCode::OK,
+        StorageMaintenanceHttpStatus::BadRequest => StatusCode::BAD_REQUEST,
+        StorageMaintenanceHttpStatus::Forbidden => StatusCode::FORBIDDEN,
+        StorageMaintenanceHttpStatus::Conflict => StatusCode::CONFLICT,
+        StorageMaintenanceHttpStatus::InternalServerError => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 async fn query_trades_handler(

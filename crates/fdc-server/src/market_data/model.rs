@@ -80,6 +80,32 @@ pub struct MarketDataStorageTierHealth {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceRunRequest {
+    pub confirm: String,
+    pub timeout_ms: Option<u64>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceRunResponse {
+    pub accepted: bool,
+    pub status: String,
+    pub reason: Option<String>,
+    pub duration_ms: Option<i64>,
+    pub scanned_entries: usize,
+    pub ttl_deleted: usize,
+    pub retention_demoted: usize,
+    pub retention_deleted: usize,
+    pub retained: usize,
+    pub decode_errors: usize,
+    pub compacted_tiers: usize,
+    pub compaction_unsupported: usize,
+    pub compaction_failed: usize,
+    pub healthy_tiers: usize,
+    pub degraded_tiers: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopLiveMarketDataResponse {
     pub state: MarketDataLiveState,
     pub task_id: Option<String>,

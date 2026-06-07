@@ -68,6 +68,12 @@ fn durable_tier_env(root: &std::path::Path) -> [(String, String); 5] {
     ]
 }
 
+fn maintenance_request(confirm: &str) -> Body {
+    Body::from(format!(
+        r#"{{"confirm":"{confirm}","reason":"contract-test"}}"#
+    ))
+}
+
 #[tokio::test]
 async fn runtime_builder_creates_memory_market_data_store() {
     let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
@@ -316,6 +322,132 @@ async fn production_storage_health_tiered_backend_reports_initialized_tiers() {
         assert!(tier.get("key_count").is_some());
         assert!(tier.get("total_size").is_some());
     }
+}
+
+#[tokio::test]
+async fn storage_maintenance_run_once_is_disabled_by_default() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("run_maintenance_once"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["data"]["accepted"], false);
+    assert_eq!(json["data"]["status"], "disabled");
+}
+
+#[tokio::test]
+async fn storage_maintenance_run_once_requires_confirmation() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::try_new(config).await.unwrap();
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("wrong"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["status"], "confirmation_required");
+}
+
+#[tokio::test]
+async fn storage_maintenance_run_once_rejects_memory_backend() {
+    let config =
+        ServerRuntimeConfig::from_env_pairs([("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1")])
+            .expect("config should parse");
+    let state = ProductionServerState::try_new(config).await.unwrap();
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("run_maintenance_once"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["status"], "unsupported_backend");
+}
+
+#[tokio::test]
+async fn storage_maintenance_run_once_completes_for_enabled_tiered_backend() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::try_new(config).await.unwrap();
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("run_maintenance_once"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["accepted"], true);
+    assert_eq!(json["data"]["status"], "completed");
+    assert!(json["data"]["duration_ms"].as_i64().unwrap() >= 0);
+    assert_eq!(json["data"]["scanned_entries"], 0);
+    assert_eq!(json["data"]["compaction_failed"], 0);
+    assert_eq!(json["data"]["healthy_tiers"], 4);
 }
 
 #[tokio::test]
