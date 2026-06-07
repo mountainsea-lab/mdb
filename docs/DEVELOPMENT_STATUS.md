@@ -3,9 +3,60 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record storage audit hardening status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record maintenance audit reset hook status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P26 Maintenance Audit Admin Reset Hook
+
+Completed:
+
+- Added separate default-disabled runtime gate:
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_RESET_ENABLED=1`
+  - parsed into `ServerRuntimeConfig::market_data_storage_maintenance_audit_reset_enabled`
+- Added `MarketDataStorageMaintenanceAuditLog::clear().await`, which clears server-owned in-memory audit entries and returns the removed count.
+- Added server-owned reset DTOs:
+  - `MarketDataStorageMaintenanceAuditResetRequest`
+  - `MarketDataStorageMaintenanceAuditResetResponse`
+- Added explicit mutating route:
+  - `POST /market-data/storage/maintenance/audit/reset`
+- Reset requires exact request confirmation:
+  - `confirm == "reset_maintenance_audit"`
+- HTTP/status behavior:
+  - `403 disabled` when runtime reset flag is false
+  - `400 confirmation_required` for wrong confirmation
+  - `200 reset` for enabled and confirmed reset, including empty logs
+- Reset clears only server-owned in-memory audit entries.
+- Reset does not call storage and does not trigger maintenance, compaction, TTL deletion, retention deletion, or demotion.
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-maintenance-audit-reset-hook-design.md`
+- `docs/superpowers/plans/2026-06-07-maintenance-audit-reset-hook.md`
+
+Commits:
+
+- `0dc59d9 docs(server): design maintenance audit reset hook`
+- `c0417ef docs(server): plan maintenance audit reset hook`
+- `19f35d8 feat(server): gate storage audit reset hook`
+- `5af48a3 feat(server): clear storage maintenance audit log`
+- `8c12c3d feat(server): expose gated storage audit reset hook`
+
+Verification:
+
+- `rtk cargo test -p fdc-server runtime_config_storage_maintenance_audit_reset` - 2 passed
+- `rtk cargo test -p fdc-server audit_log_clear` - 2 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_reset_route` - 4 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_route` - 4 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 2 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P27 storage runtime observability hardening**: add read-only counters/metadata for storage runtime/audit operations, or move to the next retention/tiering behavior priority. Avoid new mutating routes unless they have a separate explicit gate and confirmation.
 
 ## 2026-06-07 P25 Storage Maintenance Audit Hardening
 
