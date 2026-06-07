@@ -626,7 +626,7 @@ git commit -m "feat(server): add scheduler reset route"
 **Files:**
 - Modify: `docs/DEVELOPMENT_STATUS.md`
 
-- [ ] **Step 1: Run final verification**
+- [x] **Step 1: Run final verification**
 
 Run:
 
@@ -643,7 +643,7 @@ cargo fmt -p fdc-server -p fdc-storage -- --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 2: Update development status**
+- [x] **Step 2: Update development status**
 
 Add a new P34 section above P33 in `docs/DEVELOPMENT_STATUS.md` recording:
 
@@ -680,7 +680,7 @@ Recommended next slice:
 
 Replace the concrete-output instruction lines with exact commit hashes and pass counts before committing `docs/DEVELOPMENT_STATUS.md`.
 
-- [ ] **Step 3: Commit docs**
+- [x] **Step 3: Commit docs**
 
 Run:
 
@@ -689,7 +689,7 @@ git add docs/DEVELOPMENT_STATUS.md
 git commit -m "docs: record scheduler recovery controls status"
 ```
 
-- [ ] **Step 4: Check final status**
+- [x] **Step 4: Check final status**
 
 Run:
 
