@@ -3,9 +3,65 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record storage health runtime surface status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record explicit storage maintenance hook status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P23 Explicit Storage Maintenance Admin/Test Hook
+
+Completed:
+
+- Added default-disabled runtime gate:
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED=1`
+  - parsed into `ServerRuntimeConfig::market_data_storage_maintenance_enabled`
+- Added generic storage facade on `QueryableMarketDataStore`:
+  - `run_maintenance_once_with_options(StorageMaintenanceOptions).await`
+  - memory backend returns `Ok(None)`
+  - tiered backend delegates to `TieredStorageStore::run_maintenance_once_with_options(...)`
+- Added `POST /market-data/storage/maintenance/run-once`.
+- Added server-owned request/response models:
+  - `MarketDataStorageMaintenanceRunRequest`
+  - `MarketDataStorageMaintenanceRunResponse`
+- The route requires all explicit opt-ins before maintenance can run:
+  - runtime maintenance flag enabled
+  - request `confirm` exactly equals `run_maintenance_once`
+  - constructed store is tiered
+- HTTP/status behavior:
+  - `403 disabled` when runtime flag is false
+  - `400 confirmation_required` for wrong confirmation or zero timeout
+  - `409 unsupported_backend` for memory backend
+  - `200 completed` for successful tiered maintenance
+  - `500 failed` for storage maintenance errors
+- Response includes report counters for lifecycle scan/deletes/demotions, compaction outcomes, and healthy/degraded tier counts.
+- No maintenance is triggered by P21/P22 GET status or health routes.
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-explicit-storage-maintenance-hook-design.md`
+- `docs/superpowers/plans/2026-06-07-explicit-storage-maintenance-hook.md`
+
+Commits:
+
+- `135c6f7 docs(server): design explicit storage maintenance hook`
+- `51e3e28 docs(server): plan explicit storage maintenance hook`
+- `162b5ce feat(server): gate storage maintenance hook by runtime config`
+- `51a014c feat(storage): expose market data maintenance facade`
+- `f48fabd feat(server): expose gated storage maintenance hook`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance_hook` - 2 passed
+- `rtk cargo test -p fdc-storage maintenance_pass` - 3 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 2 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_status` - 2 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P24 maintenance audit visibility**: add a server-owned in-memory or pluggable audit sink for explicit maintenance runs, expose recent safe audit entries, and keep storage audit sink generic.
 
 ## 2026-06-07 P22 Storage Health Runtime Surface
 
