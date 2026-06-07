@@ -236,8 +236,18 @@ pub async fn storage_maintenance_audit(
         .collect();
 
     MarketDataStorageMaintenanceAuditResponse {
+        capacity: snapshot.capacity,
         total_entries: snapshot.total_entries,
         returned_entries: entries.len(),
+        total_recorded_entries: snapshot.total_recorded_entries,
+        reset_count: snapshot.reset_count,
+        total_cleared_entries: snapshot.total_cleared_entries,
+        last_recorded_at: snapshot
+            .last_recorded_at
+            .map(|timestamp| timestamp.to_rfc3339()),
+        last_reset_at: snapshot
+            .last_reset_at
+            .map(|timestamp| timestamp.to_rfc3339()),
         entries,
     }
 }

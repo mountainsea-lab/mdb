@@ -534,7 +534,14 @@ async fn storage_maintenance_audit_route_returns_empty_log() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["capacity"], 32);
+    assert_eq!(json["data"]["total_entries"], 0);
     assert_eq!(json["data"]["returned_entries"], 0);
+    assert_eq!(json["data"]["total_recorded_entries"], 0);
+    assert_eq!(json["data"]["reset_count"], 0);
+    assert_eq!(json["data"]["total_cleared_entries"], 0);
+    assert!(json["data"]["last_recorded_at"].is_null());
+    assert!(json["data"]["last_reset_at"].is_null());
     assert!(json["data"]["entries"].as_array().unwrap().is_empty());
 }
 
@@ -578,7 +585,17 @@ async fn storage_maintenance_audit_route_returns_successful_run_entry() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["capacity"], 32);
+    assert_eq!(json["data"]["total_entries"], 1);
     assert_eq!(json["data"]["returned_entries"], 1);
+    assert_eq!(json["data"]["total_recorded_entries"], 1);
+    assert_eq!(json["data"]["reset_count"], 0);
+    assert_eq!(json["data"]["total_cleared_entries"], 0);
+    assert!(json["data"]["last_recorded_at"]
+        .as_str()
+        .unwrap()
+        .contains('T'));
+    assert!(json["data"]["last_reset_at"].is_null());
     let entries = json["data"]["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["scanned_entries"], 0);
@@ -826,6 +843,60 @@ async fn storage_maintenance_audit_reset_route_succeeds_on_empty_log() {
     assert_eq!(json["data"]["status"], "reset");
     assert_eq!(json["data"]["cleared_entries"], 0);
     assert_eq!(json["data"]["remaining_entries"], 0);
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_route_returns_metadata_after_reset() {
+    let state = tiered_storage_state_with_audit_capacity_and_reset(3, true).await;
+    let router = build_production_router(state.clone());
+
+    state
+        .ingest_test_trade("BTCUSDT", "audit-metadata-reset")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+
+    let reset = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/audit/reset")
+                .header("content-type", "application/json")
+                .body(audit_reset_request("reset_maintenance_audit"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("reset route should respond");
+    assert_eq!(reset.status(), StatusCode::OK);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit?limit=0")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["data"]["capacity"], 3);
+    assert_eq!(json["data"]["total_entries"], 0);
+    assert_eq!(json["data"]["returned_entries"], 0);
+    assert_eq!(json["data"]["total_recorded_entries"], 1);
+    assert_eq!(json["data"]["reset_count"], 1);
+    assert_eq!(json["data"]["total_cleared_entries"], 1);
+    assert!(json["data"]["last_recorded_at"]
+        .as_str()
+        .unwrap()
+        .contains('T'));
+    assert!(json["data"]["last_reset_at"]
+        .as_str()
+        .unwrap()
+        .contains('T'));
+    assert!(json["data"]["entries"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

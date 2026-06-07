@@ -107,8 +107,14 @@ pub struct MarketDataStorageMaintenanceRunResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataStorageMaintenanceAuditResponse {
+    pub capacity: usize,
     pub total_entries: usize,
     pub returned_entries: usize,
+    pub total_recorded_entries: u64,
+    pub reset_count: u64,
+    pub total_cleared_entries: u64,
+    pub last_recorded_at: Option<String>,
+    pub last_reset_at: Option<String>,
     pub entries: Vec<MarketDataStorageMaintenanceAuditEntryResponse>,
 }
 
