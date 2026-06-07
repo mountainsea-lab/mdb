@@ -16,6 +16,23 @@ fn runtime_config_defaults_are_safe_for_local_production_server() {
     assert_eq!(config.live_default_timeout_secs, 30);
     assert_eq!(config.live_default_max_envelopes, 100);
     assert!(!config.market_data_storage_maintenance_enabled);
+    assert!(!config.market_data_storage_maintenance_scheduler_enabled);
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_interval_seconds,
+        3600
+    );
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_timeout_ms,
+        30000
+    );
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_jitter_seconds,
+        0
+    );
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_max_consecutive_failures,
+        3
+    );
     assert_eq!(
         config.market_data_storage,
         MarketDataStorageRuntimeConfig {
@@ -40,6 +57,78 @@ fn storage_maintenance_hook_can_be_enabled_by_env() {
             .unwrap();
 
     assert!(config.market_data_storage_maintenance_enabled);
+}
+
+#[test]
+fn storage_maintenance_scheduler_config_accepts_valid_overrides() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS",
+            "120",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS",
+            "45000",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS",
+            "30",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+            "5",
+        ),
+    ])
+    .expect("scheduler config should parse");
+
+    assert!(config.market_data_storage_maintenance_scheduler_enabled);
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_interval_seconds,
+        120
+    );
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_timeout_ms,
+        45000
+    );
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_jitter_seconds,
+        30
+    );
+    assert_eq!(
+        config.market_data_storage_maintenance_scheduler_max_consecutive_failures,
+        5
+    );
+}
+
+#[test]
+fn storage_maintenance_scheduler_config_rejects_invalid_values() {
+    let interval_error = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS",
+        "59",
+    )])
+    .expect_err("short interval should be rejected");
+    assert!(interval_error
+        .to_string()
+        .contains("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS"));
+
+    let timeout_error = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS",
+        "999",
+    )])
+    .expect_err("short timeout should be rejected");
+    assert!(timeout_error
+        .to_string()
+        .contains("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS"));
+
+    let failures_error = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+        "0",
+    )])
+    .expect_err("zero max failures should be rejected");
+    assert!(failures_error
+        .to_string()
+        .contains("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES"));
 }
 
 #[test]

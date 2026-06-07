@@ -56,6 +56,11 @@ pub struct ServerRuntimeConfig {
     pub market_data_storage_maintenance_enabled: bool,
     pub market_data_storage_maintenance_audit_capacity: usize,
     pub market_data_storage_maintenance_audit_reset_enabled: bool,
+    pub market_data_storage_maintenance_scheduler_enabled: bool,
+    pub market_data_storage_maintenance_scheduler_interval_seconds: u64,
+    pub market_data_storage_maintenance_scheduler_timeout_ms: u64,
+    pub market_data_storage_maintenance_scheduler_jitter_seconds: u64,
+    pub market_data_storage_maintenance_scheduler_max_consecutive_failures: u32,
     pub market_data_storage: MarketDataStorageRuntimeConfig,
 }
 
@@ -79,6 +84,11 @@ impl ServerRuntimeConfig {
         let mut market_data_storage_maintenance_enabled = false;
         let mut market_data_storage_maintenance_audit_capacity = 32_usize;
         let mut market_data_storage_maintenance_audit_reset_enabled = false;
+        let mut market_data_storage_maintenance_scheduler_enabled = false;
+        let mut market_data_storage_maintenance_scheduler_interval_seconds = 3600_u64;
+        let mut market_data_storage_maintenance_scheduler_timeout_ms = 30000_u64;
+        let mut market_data_storage_maintenance_scheduler_jitter_seconds = 0_u64;
+        let mut market_data_storage_maintenance_scheduler_max_consecutive_failures = 3_u32;
         let mut market_data_storage = MarketDataStorageRuntimeConfig::default();
 
         for (key, value) in pairs {
@@ -133,6 +143,43 @@ impl ServerRuntimeConfig {
                     market_data_storage_maintenance_audit_reset_enabled =
                         matches!(value.as_ref(), "1" | "true" | "yes" | "on");
                 }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED" => {
+                    market_data_storage_maintenance_scheduler_enabled =
+                        matches!(value.as_ref(), "1" | "true" | "yes" | "on");
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS" => {
+                    market_data_storage_maintenance_scheduler_interval_seconds = parse_u64_range(
+                        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS",
+                        value.as_ref(),
+                        60,
+                        86400,
+                    )?;
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS" => {
+                    market_data_storage_maintenance_scheduler_timeout_ms = parse_u64_range(
+                        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_TIMEOUT_MS",
+                        value.as_ref(),
+                        1000,
+                        600000,
+                    )?;
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS" => {
+                    market_data_storage_maintenance_scheduler_jitter_seconds = parse_u64_range(
+                        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS",
+                        value.as_ref(),
+                        0,
+                        3600,
+                    )?;
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES" => {
+                    market_data_storage_maintenance_scheduler_max_consecutive_failures =
+                        parse_u32_range(
+                            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                            value.as_ref(),
+                            1,
+                            100,
+                        )?;
+                }
                 "FDC_MARKET_DATA_STORAGE_BACKEND" => {
                     market_data_storage.backend = match value.as_ref() {
                         "memory" => MarketDataStorageBackendConfig::Memory,
@@ -181,6 +228,15 @@ impl ServerRuntimeConfig {
             Error::config(format!("FDC_SERVER_ADDR must be a socket address: {error}"))
         })?;
 
+        let max_jitter = (market_data_storage_maintenance_scheduler_interval_seconds / 2).min(3600);
+        if market_data_storage_maintenance_scheduler_jitter_seconds > max_jitter {
+            return Err(Error::config(format!(
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS must be <= min(interval/2, 3600), got {} with interval {}",
+                market_data_storage_maintenance_scheduler_jitter_seconds,
+                market_data_storage_maintenance_scheduler_interval_seconds
+            )));
+        }
+
         Ok(Self {
             bind_addr,
             environment,
@@ -191,6 +247,11 @@ impl ServerRuntimeConfig {
             market_data_storage_maintenance_enabled,
             market_data_storage_maintenance_audit_capacity,
             market_data_storage_maintenance_audit_reset_enabled,
+            market_data_storage_maintenance_scheduler_enabled,
+            market_data_storage_maintenance_scheduler_interval_seconds,
+            market_data_storage_maintenance_scheduler_timeout_ms,
+            market_data_storage_maintenance_scheduler_jitter_seconds,
+            market_data_storage_maintenance_scheduler_max_consecutive_failures,
             market_data_storage,
         })
     }
@@ -212,6 +273,30 @@ fn parse_positive_usize(name: &str, value: &str) -> Result<usize> {
         .map_err(|error| Error::config(format!("{name} must be a positive integer: {error}")))?;
     if parsed == 0 {
         return Err(Error::config(format!("{name} must be greater than zero")));
+    }
+    Ok(parsed)
+}
+
+fn parse_u64_range(name: &str, value: &str, min: u64, max: u64) -> Result<u64> {
+    let parsed = value.parse::<u64>().map_err(|error| {
+        Error::config(format!("{name} must be between {min} and {max}: {error}"))
+    })?;
+    if !(min..=max).contains(&parsed) {
+        return Err(Error::config(format!(
+            "{name} must be between {min} and {max}"
+        )));
+    }
+    Ok(parsed)
+}
+
+fn parse_u32_range(name: &str, value: &str, min: u32, max: u32) -> Result<u32> {
+    let parsed = value.parse::<u32>().map_err(|error| {
+        Error::config(format!("{name} must be between {min} and {max}: {error}"))
+    })?;
+    if !(min..=max).contains(&parsed) {
+        return Err(Error::config(format!(
+            "{name} must be between {min} and {max}"
+        )));
     }
     Ok(parsed)
 }
