@@ -24,26 +24,24 @@ pub struct ProductionServerState {
 
 impl ProductionServerState {
     pub fn new(config: ServerRuntimeConfig) -> Self {
+        let market_data_storage_maintenance_audit = market_data_storage_maintenance_audit(&config);
         Self {
             config,
             market_data_store: Arc::new(QueryableMarketDataStore::new()),
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
-            market_data_storage_maintenance_audit: Arc::new(
-                MarketDataStorageMaintenanceAuditLog::default(),
-            ),
+            market_data_storage_maintenance_audit,
         }
     }
 
     pub async fn try_new(config: ServerRuntimeConfig) -> Result<Self> {
         let market_data_store =
             build_market_data_store_from_runtime_config(config.market_data_storage.clone()).await?;
+        let market_data_storage_maintenance_audit = market_data_storage_maintenance_audit(&config);
         Ok(Self {
             config,
             market_data_store: Arc::new(market_data_store),
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
-            market_data_storage_maintenance_audit: Arc::new(
-                MarketDataStorageMaintenanceAuditLog::default(),
-            ),
+            market_data_storage_maintenance_audit,
         })
     }
 
@@ -51,13 +49,12 @@ impl ProductionServerState {
         config: ServerRuntimeConfig,
         market_data_store: Arc<QueryableMarketDataStore>,
     ) -> Self {
+        let market_data_storage_maintenance_audit = market_data_storage_maintenance_audit(&config);
         Self {
             config,
             market_data_store,
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
-            market_data_storage_maintenance_audit: Arc::new(
-                MarketDataStorageMaintenanceAuditLog::default(),
-            ),
+            market_data_storage_maintenance_audit,
         }
     }
 
@@ -98,6 +95,14 @@ impl ProductionServerState {
         .map(|_| ())
         .map_err(fdc_core::error::Error::internal)
     }
+}
+
+fn market_data_storage_maintenance_audit(
+    config: &ServerRuntimeConfig,
+) -> Arc<MarketDataStorageMaintenanceAuditLog> {
+    Arc::new(MarketDataStorageMaintenanceAuditLog::new(
+        config.market_data_storage_maintenance_audit_capacity,
+    ))
 }
 
 pub fn build_production_router(state: ProductionServerState) -> Router {

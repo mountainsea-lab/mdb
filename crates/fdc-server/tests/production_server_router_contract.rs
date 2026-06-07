@@ -74,6 +74,47 @@ fn maintenance_request(confirm: &str) -> Body {
     ))
 }
 
+async fn tiered_storage_state_with_audit_capacity(capacity: usize) -> ProductionServerState {
+    let capacity = capacity.to_string();
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY",
+            capacity.as_str(),
+        ),
+    ])
+    .expect("tiered config should parse");
+
+    ProductionServerState::try_new(config)
+        .await
+        .expect("tiered production state should build")
+}
+
+async fn run_successful_storage_maintenance(router: axum::Router) {
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("run_maintenance_once"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+async fn response_body_json(response: axum::response::Response) -> serde_json::Value {
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    serde_json::from_slice(&body).expect("response body should be json")
+}
+
 #[tokio::test]
 async fn runtime_builder_creates_memory_market_data_store() {
     let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
@@ -530,6 +571,80 @@ async fn storage_maintenance_audit_route_returns_successful_run_entry() {
         .as_str()
         .unwrap()
         .contains('T'));
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_route_clamps_to_configured_capacity_newest_first() {
+    let state = tiered_storage_state_with_audit_capacity(2).await;
+    let router = build_production_router(state.clone());
+
+    state
+        .ingest_test_trade("BTCUSDT", "audit-capacity-1")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+    state
+        .ingest_test_trade("BTCUSDT", "audit-capacity-2")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+    state
+        .ingest_test_trade("BTCUSDT", "audit-capacity-3")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit?limit=10")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["total_entries"], 2);
+    assert_eq!(json["data"]["returned_entries"], 2);
+    assert_eq!(json["data"]["entries"][0]["scanned_entries"], 3);
+    assert_eq!(json["data"]["entries"][1]["scanned_entries"], 2);
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_route_limit_one_returns_newest_entry() {
+    let state = tiered_storage_state_with_audit_capacity(3).await;
+    let router = build_production_router(state.clone());
+
+    state
+        .ingest_test_trade("BTCUSDT", "audit-limit-1")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+    state
+        .ingest_test_trade("BTCUSDT", "audit-limit-2")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit?limit=1")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["total_entries"], 2);
+    assert_eq!(json["data"]["returned_entries"], 1);
+    assert_eq!(json["data"]["entries"][0]["scanned_entries"], 2);
 }
 
 #[tokio::test]

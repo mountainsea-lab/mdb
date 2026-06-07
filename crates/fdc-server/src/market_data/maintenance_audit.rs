@@ -110,4 +110,15 @@ mod tests {
         assert_eq!(snapshot.entries[0].scanned_entries, 3);
         assert_eq!(snapshot.entries[1].scanned_entries, 2);
     }
+
+    #[tokio::test]
+    async fn audit_log_recent_zero_returns_no_entries() {
+        let log = MarketDataStorageMaintenanceAuditLog::new(2);
+        log.record_maintenance(audit_entry(1)).await.unwrap();
+
+        let snapshot = log.recent(0).await;
+
+        assert_eq!(snapshot.total_entries, 1);
+        assert!(snapshot.entries.is_empty());
+    }
 }

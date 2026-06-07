@@ -225,6 +225,7 @@ pub async fn storage_maintenance_audit(
         .collect();
 
     MarketDataStorageMaintenanceAuditResponse {
+        total_entries: snapshot.total_entries,
         returned_entries: entries.len(),
         entries,
     }

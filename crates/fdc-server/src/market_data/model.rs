@@ -107,6 +107,7 @@ pub struct MarketDataStorageMaintenanceRunResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataStorageMaintenanceAuditResponse {
+    pub total_entries: usize,
     pub returned_entries: usize,
     pub entries: Vec<MarketDataStorageMaintenanceAuditEntryResponse>,
 }
