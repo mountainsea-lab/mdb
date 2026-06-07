@@ -1,4 +1,4 @@
-use std::{env, net::SocketAddr};
+use std::{env, net::SocketAddr, path::PathBuf};
 
 use fdc_core::{error::Error, Result};
 
@@ -21,10 +21,18 @@ pub enum MarketDataStoragePolicyProfileConfig {
     GenericRealtime,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MarketDataStorageTierRuntimeConfig {
+    pub l2_redb_path: Option<PathBuf>,
+    pub l3_duckdb_path: Option<PathBuf>,
+    pub l4_rocksdb_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarketDataStorageRuntimeConfig {
     pub backend: MarketDataStorageBackendConfig,
     pub policy_profile: MarketDataStoragePolicyProfileConfig,
+    pub tiers: MarketDataStorageTierRuntimeConfig,
 }
 
 impl Default for MarketDataStorageRuntimeConfig {
@@ -32,6 +40,7 @@ impl Default for MarketDataStorageRuntimeConfig {
         Self {
             backend: MarketDataStorageBackendConfig::Memory,
             policy_profile: MarketDataStoragePolicyProfileConfig::Compatibility,
+            tiers: MarketDataStorageTierRuntimeConfig::default(),
         }
     }
 }
@@ -117,6 +126,24 @@ impl ServerRuntimeConfig {
                         }
                     };
                 }
+                "FDC_MARKET_DATA_STORAGE_L2_REDB_PATH" => {
+                    market_data_storage.tiers.l2_redb_path = Some(parse_non_empty_path(
+                        "FDC_MARKET_DATA_STORAGE_L2_REDB_PATH",
+                        value.as_ref(),
+                    )?);
+                }
+                "FDC_MARKET_DATA_STORAGE_L3_DUCKDB_PATH" => {
+                    market_data_storage.tiers.l3_duckdb_path = Some(parse_non_empty_path(
+                        "FDC_MARKET_DATA_STORAGE_L3_DUCKDB_PATH",
+                        value.as_ref(),
+                    )?);
+                }
+                "FDC_MARKET_DATA_STORAGE_L4_ROCKSDB_PATH" => {
+                    market_data_storage.tiers.l4_rocksdb_path = Some(parse_non_empty_path(
+                        "FDC_MARKET_DATA_STORAGE_L4_ROCKSDB_PATH",
+                        value.as_ref(),
+                    )?);
+                }
                 _ => {}
             }
         }
@@ -155,4 +182,12 @@ fn parse_positive_usize(name: &str, value: &str) -> Result<usize> {
         return Err(Error::config(format!("{name} must be greater than zero")));
     }
     Ok(parsed)
+}
+
+fn parse_non_empty_path(name: &str, value: &str) -> Result<PathBuf> {
+    if value.trim().is_empty() {
+        return Err(Error::config(format!("{name} must not be empty")));
+    }
+
+    Ok(PathBuf::from(value))
 }

@@ -2,6 +2,7 @@ use fdc_server::{
     MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig,
     MarketDataStorageRuntimeConfig, ServerRuntimeConfig, ServerRuntimeEnvironment,
 };
+use std::path::Path;
 
 #[test]
 fn runtime_config_defaults_are_safe_for_local_production_server() {
@@ -19,6 +20,7 @@ fn runtime_config_defaults_are_safe_for_local_production_server() {
         MarketDataStorageRuntimeConfig {
             backend: MarketDataStorageBackendConfig::Memory,
             policy_profile: MarketDataStoragePolicyProfileConfig::Compatibility,
+            tiers: Default::default(),
         }
     );
 }
@@ -91,5 +93,51 @@ fn runtime_config_accepts_generic_realtime_storage_policy_profile() {
     assert_eq!(
         config.market_data_storage.policy_profile,
         MarketDataStoragePolicyProfileConfig::GenericRealtime
+    );
+}
+
+#[test]
+fn parses_market_data_storage_tier_paths() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_L2_REDB_PATH", "/tmp/fdc/l2.redb"),
+        (
+            "FDC_MARKET_DATA_STORAGE_L3_DUCKDB_PATH",
+            "/tmp/fdc/l3.duckdb",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_L4_ROCKSDB_PATH",
+            "/tmp/fdc/l4-rocksdb",
+        ),
+    ])
+    .unwrap();
+
+    assert_eq!(
+        config.market_data_storage.tiers.l2_redb_path.as_deref(),
+        Some(Path::new("/tmp/fdc/l2.redb"))
+    );
+    assert_eq!(
+        config.market_data_storage.tiers.l3_duckdb_path.as_deref(),
+        Some(Path::new("/tmp/fdc/l3.duckdb"))
+    );
+    assert_eq!(
+        config.market_data_storage.tiers.l4_rocksdb_path.as_deref(),
+        Some(Path::new("/tmp/fdc/l4-rocksdb"))
+    );
+}
+
+#[test]
+fn rejects_empty_market_data_storage_tier_path() {
+    let error = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_L2_REDB_PATH", ""),
+    ])
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("FDC_MARKET_DATA_STORAGE_L2_REDB_PATH must not be empty"),
+        "unexpected error: {error}"
     );
 }

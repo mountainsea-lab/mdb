@@ -29,7 +29,7 @@ impl ProductionServerState {
 
     pub async fn try_new(config: ServerRuntimeConfig) -> Result<Self> {
         let market_data_store =
-            build_market_data_store_from_runtime_config(config.market_data_storage).await?;
+            build_market_data_store_from_runtime_config(config.market_data_storage.clone()).await?;
         Ok(Self {
             config,
             market_data_store: Arc::new(market_data_store),
