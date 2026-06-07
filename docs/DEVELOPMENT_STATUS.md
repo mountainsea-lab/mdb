@@ -3,9 +3,46 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record durable runtime persistence reopen status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record runtime storage observability status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P21 Runtime Storage Observability
+
+Completed:
+
+- Added `GET /market-data/storage/status` to the production market-data router.
+- Added server-owned response models:
+  - `MarketDataStorageStatusResponse`
+  - `MarketDataStorageTierStatus`
+- The endpoint reports a safe runtime summary:
+  - `backend`: `memory` or `tiered`
+  - `policy_profile`: `compatibility` or `generic_realtime`
+  - four tier summaries for L1-L4
+  - per-tier `engine`, `durable_path_configured`, and optional `path_hint`
+- The summary mirrors server runtime assembly semantics:
+  - default memory backend reports all tiers as `memory`
+  - tiered durable config reports L2 `redb`, L3 `duckdb`, L4 `rocksdb` when corresponding paths are configured
+- Full configured paths are not exposed. `path_hint` uses only the basename, such as `l2.redb`, `l3.duckdb`, or `l4-rocksdb`.
+- Preserved the `fdc-storage` boundary: no storage crate changes and no dependency on server/runtime or market-data DTOs.
+
+Commits:
+
+- `3ffecc9 docs(server): design runtime storage observability`
+- `271881f docs(server): plan runtime storage observability`
+- `70be1e7 feat(server): expose safe storage runtime status`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_status` - 2 passed
+- `rtk cargo test -p fdc-server --test runtime_config_contract` - 7 passed
+- `rtk cargo test -p fdc-server tiered_runtime_config_uses_configured_durable_tier_paths` - 1 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P22 storage health / maintenance runtime surface**: connect the existing tiered store health and maintenance primitives to a server-owned runtime surface or explicit admin/test hook, while keeping destructive or costly maintenance opt-in.
 
 ## 2026-06-07 P20 Durable Runtime Persistence Reopen
 
