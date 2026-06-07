@@ -1,9 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
+use fdc_storage::{QueryableMarketDataStore, StorageMaintenanceOptions};
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
-use crate::{MarketDataStorageBackendConfig, ServerRuntimeConfig};
+use crate::{
+    market_data::maintenance_audit::MarketDataStorageMaintenanceAuditLog,
+    MarketDataStorageBackendConfig, ServerRuntimeConfig,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageMaintenanceSchedulerSnapshot {
@@ -146,6 +151,84 @@ pub fn scheduler_interval(config: &ServerRuntimeConfig) -> Duration {
 
 pub fn scheduler_timeout(config: &ServerRuntimeConfig) -> Duration {
     Duration::from_millis(config.market_data_storage_maintenance_scheduler_timeout_ms)
+}
+
+pub fn spawn_storage_maintenance_scheduler(
+    config: ServerRuntimeConfig,
+    store: Arc<QueryableMarketDataStore>,
+    audit: Arc<MarketDataStorageMaintenanceAuditLog>,
+    state: StorageMaintenanceSchedulerState,
+) -> Option<JoinHandle<()>> {
+    if !state.should_spawn(&config) {
+        return None;
+    }
+
+    Some(tokio::spawn(async move {
+        run_scheduler_loop(config, store, audit, state).await;
+    }))
+}
+
+async fn run_scheduler_loop(
+    config: ServerRuntimeConfig,
+    store: Arc<QueryableMarketDataStore>,
+    audit: Arc<MarketDataStorageMaintenanceAuditLog>,
+    state: StorageMaintenanceSchedulerState,
+) {
+    let first_delay = if config.market_data_storage_maintenance_scheduler_jitter_seconds == 0 {
+        Duration::from_millis(10)
+    } else {
+        Duration::from_secs(config.market_data_storage_maintenance_scheduler_jitter_seconds)
+    };
+    let interval = scheduler_interval(&config);
+    let mut next_delay = first_delay;
+    loop {
+        let next_run_at = Utc::now()
+            + chrono::Duration::from_std(next_delay)
+                .unwrap_or_else(|_| chrono::Duration::seconds(0));
+        state.mark_next_run_at(next_run_at).await;
+        tokio::time::sleep(next_delay).await;
+        run_scheduler_attempt(
+            &config,
+            Arc::clone(&store),
+            Arc::clone(&audit),
+            state.clone(),
+        )
+        .await;
+        next_delay = interval;
+    }
+}
+
+pub async fn run_scheduler_attempt(
+    config: &ServerRuntimeConfig,
+    store: Arc<QueryableMarketDataStore>,
+    audit: Arc<MarketDataStorageMaintenanceAuditLog>,
+    state: StorageMaintenanceSchedulerState,
+) {
+    let started_at = Utc::now();
+    if !state.mark_started(started_at).await {
+        return;
+    }
+
+    let next_run_at = Utc::now()
+        + chrono::Duration::from_std(scheduler_interval(config))
+            .unwrap_or_else(|_| chrono::Duration::seconds(0));
+    let options = StorageMaintenanceOptions::default()
+        .with_timeout(scheduler_timeout(config))
+        .with_audit_sink(audit);
+
+    match store.run_maintenance_once_with_options(options).await {
+        Ok(Some(_report)) => {
+            state.mark_completed(Utc::now(), next_run_at).await;
+        }
+        Ok(None) => {
+            state.mark_unsupported(Utc::now(), next_run_at).await;
+        }
+        Err(error) => {
+            state
+                .mark_failed(Utc::now(), next_run_at, format!("{error}"))
+                .await;
+        }
+    }
 }
 
 pub fn scheduler_backend_label(backend: MarketDataStorageBackendConfig) -> &'static str {
