@@ -4,9 +4,9 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 use crate::{
-    apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
-    StorageTierScope, StorageTieringPolicy, StorageWriteBatch, StorageWriteOutcome,
-    StorageWriteRecord, StorageWriteSink, TierConfig, TieredStorageStore,
+    apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
+    StorageHealthSnapshot, StorageQuery, StorageTierScope, StorageTieringPolicy, StorageWriteBatch,
+    StorageWriteOutcome, StorageWriteRecord, StorageWriteSink, TierConfig, TieredStorageStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,6 +202,15 @@ impl QueryableMarketDataStore {
     pub fn record_count(&self) -> usize {
         self.all_records().len()
     }
+
+    pub async fn storage_health_snapshot(&self) -> Result<Option<StorageHealthSnapshot>> {
+        match &self.backend {
+            QueryableMarketDataBackend::InMemory(_) => Ok(None),
+            QueryableMarketDataBackend::Tiered(store) => {
+                Ok(Some(store.storage_health_snapshot().await?))
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -227,7 +236,9 @@ impl QueryableStorage for QueryableMarketDataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StorageTieringPolicy, StorageWriteBatch, StorageWriteMetadata};
+    use crate::{
+        StorageTierHealthStatus, StorageTieringPolicy, StorageWriteBatch, StorageWriteMetadata,
+    };
 
     fn record(
         namespace: &str,
@@ -302,5 +313,31 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.record_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn in_memory_market_data_store_has_no_tier_health_snapshot() {
+        let store = QueryableMarketDataStore::in_memory();
+
+        let snapshot = store.storage_health_snapshot().await.unwrap();
+
+        assert!(snapshot.is_none());
+    }
+
+    #[tokio::test]
+    async fn tiered_market_data_store_exposes_storage_health_snapshot() {
+        let store = QueryableMarketDataStore::memory_tiered().await.unwrap();
+
+        let snapshot = store.storage_health_snapshot().await.unwrap().unwrap();
+
+        assert_eq!(snapshot.tiers.len(), 4);
+        assert_eq!(snapshot.access_patterns, 0);
+        assert_eq!(snapshot.migration_queue_len, 0);
+        assert!(snapshot.tiers.values().all(|tier| tier.enabled));
+        assert!(snapshot.tiers.values().all(|tier| tier.initialized));
+        assert!(snapshot
+            .tiers
+            .values()
+            .all(|tier| tier.status == StorageTierHealthStatus::Healthy));
     }
 }
