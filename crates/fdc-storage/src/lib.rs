@@ -15,6 +15,7 @@ pub mod lifecycle; // tier lifecycle reports and maintenance result types
 pub mod maintenance; // storage health snapshots and maintenance reports
 pub mod maintenance_control; // explicit maintenance options and audit hooks
 pub mod metrics; // 存储指标
+pub mod policy; // storage-owned tiering policy decisions
 pub mod query; // generic storage query boundary
 pub mod queryable; // queryable in-memory market-data storage boundary
 pub mod replication; // 数据复制
@@ -55,6 +56,10 @@ pub use maintenance_control::{
     StorageMaintenanceOptions,
 };
 pub use metrics::StorageMetrics;
+pub use policy::{
+    AccessPatternSnapshot, StorageRetentionClass, StorageTieringContext, StorageTieringDecision,
+    StorageTieringPolicy, StorageTieringPolicyProfile, StorageTieringReason,
+};
 pub(crate) use query::{apply_query_order_and_limit, record_matches_storage_query};
 pub use query::{
     QueryableStorage, StorageQuery, StorageQueryMetrics, StorageQueryOrder, StorageQueryResult,
