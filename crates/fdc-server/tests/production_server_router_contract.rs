@@ -233,6 +233,92 @@ async fn production_storage_status_reports_durable_tiered_config_without_full_pa
 }
 
 #[tokio::test]
+async fn production_storage_health_memory_backend_reports_healthy_non_tiered() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/health")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage health should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+
+    assert_eq!(json["status"], "success");
+    let data = &json["data"];
+    assert_eq!(data["backend"], "memory");
+    assert_eq!(data["tiered"], false);
+    assert_eq!(data["status"], "healthy");
+    assert_eq!(data["access_patterns"], 0);
+    assert_eq!(data["migration_queue_len"], 0);
+    assert!(data["tiers"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn production_storage_health_tiered_backend_reports_initialized_tiers() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime"),
+    ])
+    .expect("tiered runtime config should parse");
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("production state should build");
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/health")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage health should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+
+    assert_eq!(json["status"], "success");
+    let data = &json["data"];
+    assert_eq!(data["backend"], "tiered");
+    assert_eq!(data["tiered"], true);
+    assert_eq!(data["status"], "healthy");
+    assert_eq!(data["access_patterns"], 0);
+    assert_eq!(data["migration_queue_len"], 0);
+
+    let tiers = data["tiers"].as_array().unwrap();
+    assert_eq!(tiers.len(), 4);
+    for expected_tier in ["L1", "L2", "L3", "L4"] {
+        let tier = tiers
+            .iter()
+            .find(|tier| tier["tier"] == expected_tier)
+            .unwrap_or_else(|| panic!("missing tier {expected_tier}"));
+        assert_eq!(tier["enabled"], true);
+        assert_eq!(tier["initialized"], true);
+        assert_eq!(tier["status"], "healthy");
+        assert!(tier.get("key_count").is_some());
+        assert!(tier.get("total_size").is_some());
+    }
+}
+
+#[tokio::test]
 async fn production_live_start_is_explicitly_disabled_by_default() {
     let state = ProductionServerState::new(
         ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),

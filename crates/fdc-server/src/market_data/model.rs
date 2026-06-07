@@ -60,6 +60,26 @@ pub struct MarketDataStorageTierStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageHealthResponse {
+    pub backend: String,
+    pub tiered: bool,
+    pub status: String,
+    pub tiers: Vec<MarketDataStorageTierHealth>,
+    pub access_patterns: usize,
+    pub migration_queue_len: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageTierHealth {
+    pub tier: String,
+    pub enabled: bool,
+    pub initialized: bool,
+    pub status: String,
+    pub key_count: Option<u64>,
+    pub total_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopLiveMarketDataResponse {
     pub state: MarketDataLiveState,
     pub task_id: Option<String>,

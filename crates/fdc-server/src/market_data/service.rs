@@ -10,15 +10,19 @@ use fdc_core::{
     types::{Price, Symbol, TimestampNs},
     Result,
 };
-use fdc_storage::{MarketDataQuery, QueryableMarketDataStore, StorageWriteRecord};
+use fdc_storage::{
+    MarketDataQuery, QueryableMarketDataStore, StorageTier, StorageTierHealthStatus,
+    StorageWriteRecord,
+};
 use futures::stream;
 use rust_decimal::Decimal;
 
 use crate::{
     market_data::model::{
-        MarketDataLiveState, MarketDataStorageStatusResponse, MarketDataStorageTierStatus,
-        MarketDataTradeRecord, MarketDataTradesResponse, StartLiveMarketDataRequest,
-        StartLiveMarketDataResponse, StopLiveMarketDataResponse,
+        MarketDataLiveState, MarketDataStorageHealthResponse, MarketDataStorageStatusResponse,
+        MarketDataStorageTierHealth, MarketDataStorageTierStatus, MarketDataTradeRecord,
+        MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
+        StopLiveMarketDataResponse,
     },
     run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
     MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
@@ -53,6 +57,75 @@ pub fn storage_status(state: &ProductionServerState) -> MarketDataStorageStatusR
                 storage.tiers.l4_rocksdb_path.as_deref(),
             ),
         ],
+    }
+}
+
+pub async fn storage_health(state: &ProductionServerState) -> MarketDataStorageHealthResponse {
+    let backend = backend_label(state.config().market_data_storage.backend).to_string();
+
+    match state.market_data_store().storage_health_snapshot().await {
+        Ok(Some(snapshot)) => {
+            let tiers: Vec<_> = snapshot
+                .tiers
+                .values()
+                .map(|tier| MarketDataStorageTierHealth {
+                    tier: storage_tier_label(&tier.tier).to_string(),
+                    enabled: tier.enabled,
+                    initialized: tier.initialized,
+                    status: storage_tier_health_status_label(&tier.status).to_string(),
+                    key_count: tier.stats.as_ref().map(|stats| stats.key_count),
+                    total_size: tier.stats.as_ref().map(|stats| stats.total_size),
+                })
+                .collect();
+            let status = if tiers.iter().all(|tier| tier.status == "healthy") {
+                "healthy"
+            } else {
+                "degraded"
+            };
+
+            MarketDataStorageHealthResponse {
+                backend,
+                tiered: true,
+                status: status.to_string(),
+                tiers,
+                access_patterns: snapshot.access_patterns,
+                migration_queue_len: snapshot.migration_queue_len,
+            }
+        }
+        Ok(None) => MarketDataStorageHealthResponse {
+            backend,
+            tiered: false,
+            status: "healthy".to_string(),
+            tiers: Vec::new(),
+            access_patterns: 0,
+            migration_queue_len: 0,
+        },
+        Err(_) => MarketDataStorageHealthResponse {
+            backend,
+            tiered: state.config().market_data_storage.backend
+                == MarketDataStorageBackendConfig::Tiered,
+            status: "unavailable".to_string(),
+            tiers: Vec::new(),
+            access_patterns: 0,
+            migration_queue_len: 0,
+        },
+    }
+}
+
+fn storage_tier_label(tier: &StorageTier) -> &'static str {
+    match tier {
+        StorageTier::L1 => "L1",
+        StorageTier::L2 => "L2",
+        StorageTier::L3 => "L3",
+        StorageTier::L4 => "L4",
+    }
+}
+
+fn storage_tier_health_status_label(status: &StorageTierHealthStatus) -> &'static str {
+    match status {
+        StorageTierHealthStatus::Healthy => "healthy",
+        StorageTierHealthStatus::MissingEngine => "missing_engine",
+        StorageTierHealthStatus::StatsUnavailable => "stats_unavailable",
     }
 }
 
