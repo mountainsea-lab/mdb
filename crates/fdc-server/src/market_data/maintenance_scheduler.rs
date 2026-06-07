@@ -10,6 +10,9 @@ use crate::{
     MarketDataStorageBackendConfig, ServerRuntimeConfig,
 };
 
+const SCHEDULER_STATUS_FAILED: &str = "failed";
+const SCHEDULER_STATUS_SUPPRESSED_AFTER_FAILURES: &str = "suppressed_after_failures";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageMaintenanceSchedulerSnapshot {
     pub enabled: bool,
@@ -84,12 +87,38 @@ impl StorageMaintenanceSchedulerState {
         self.inner.lock().await.snapshot.clone()
     }
 
+    pub async fn is_suppressed(&self) -> bool {
+        let guard = self.inner.lock().await;
+        scheduler_snapshot_is_suppressed(&guard.snapshot)
+    }
+
+    pub async fn mark_suppressed(&self) {
+        let mut guard = self.inner.lock().await;
+        guard.snapshot.running = false;
+        guard.snapshot.last_status = Some(SCHEDULER_STATUS_SUPPRESSED_AFTER_FAILURES.to_string());
+        guard.snapshot.next_run_at = None;
+    }
+
     pub async fn mark_next_run_at(&self, next_run_at: DateTime<Utc>) {
-        self.inner.lock().await.snapshot.next_run_at = Some(next_run_at);
+        let mut guard = self.inner.lock().await;
+        if scheduler_snapshot_is_suppressed(&guard.snapshot) {
+            guard.snapshot.next_run_at = None;
+            guard.snapshot.last_status =
+                Some(SCHEDULER_STATUS_SUPPRESSED_AFTER_FAILURES.to_string());
+            return;
+        }
+        guard.snapshot.next_run_at = Some(next_run_at);
     }
 
     pub async fn mark_started(&self, started_at: DateTime<Utc>) -> bool {
         let mut guard = self.inner.lock().await;
+        if scheduler_snapshot_is_suppressed(&guard.snapshot) {
+            guard.snapshot.running = false;
+            guard.snapshot.last_status =
+                Some(SCHEDULER_STATUS_SUPPRESSED_AFTER_FAILURES.to_string());
+            guard.snapshot.next_run_at = None;
+            return false;
+        }
         if guard.snapshot.running {
             guard.snapshot.skipped_runs += 1;
             guard.snapshot.last_status = Some("skipped_overlap".to_string());
@@ -125,9 +154,15 @@ impl StorageMaintenanceSchedulerState {
         guard.snapshot.failed_runs += 1;
         guard.snapshot.consecutive_failures += 1;
         guard.snapshot.last_finished_at = Some(finished_at);
-        guard.snapshot.last_status = Some("failed".to_string());
         guard.snapshot.last_error = Some(sanitize_scheduler_error(error));
-        guard.snapshot.next_run_at = Some(next_run_at);
+        if scheduler_snapshot_is_suppressed(&guard.snapshot) {
+            guard.snapshot.last_status =
+                Some(SCHEDULER_STATUS_SUPPRESSED_AFTER_FAILURES.to_string());
+            guard.snapshot.next_run_at = None;
+        } else {
+            guard.snapshot.last_status = Some(SCHEDULER_STATUS_FAILED.to_string());
+            guard.snapshot.next_run_at = Some(next_run_at);
+        }
     }
 
     pub async fn mark_unsupported(&self, finished_at: DateTime<Utc>, next_run_at: DateTime<Utc>) {
@@ -143,6 +178,12 @@ impl StorageMaintenanceSchedulerState {
         config.market_data_storage_maintenance_scheduler_enabled
             && config.market_data_storage.backend == MarketDataStorageBackendConfig::Tiered
     }
+}
+
+fn scheduler_snapshot_is_suppressed(snapshot: &StorageMaintenanceSchedulerSnapshot) -> bool {
+    snapshot.enabled
+        && snapshot.tiered
+        && snapshot.consecutive_failures >= snapshot.max_consecutive_failures
 }
 
 pub fn scheduler_interval(config: &ServerRuntimeConfig) -> Duration {
@@ -239,12 +280,25 @@ pub fn scheduler_backend_label(backend: MarketDataStorageBackendConfig) -> &'sta
 }
 
 fn sanitize_scheduler_error(error: impl Into<String>) -> String {
-    let error = error.into();
+    let sanitized: String = error
+        .into()
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     const MAX_LEN: usize = 240;
-    if error.len() <= MAX_LEN {
-        return error;
+    if sanitized.len() <= MAX_LEN {
+        return sanitized;
     }
-    format!("{}...", &error[..MAX_LEN])
+    format!("{}...", &sanitized[..MAX_LEN])
 }
 
 #[cfg(test)]
@@ -314,5 +368,92 @@ mod tests {
         assert_eq!(snapshot.skipped_runs, 1);
         assert_eq!(snapshot.last_status.as_deref(), Some("completed"));
         assert!(snapshot.next_run_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_state_suppresses_after_failure_threshold() {
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                "2",
+            ),
+        ])
+        .expect("config parses");
+        let state = StorageMaintenanceSchedulerState::from_config(&config);
+        let first_started_at = Utc::now();
+        let first_finished_at = first_started_at + chrono::Duration::milliseconds(5);
+        let first_next_run_at = first_finished_at + chrono::Duration::seconds(60);
+
+        assert!(state.mark_started(first_started_at).await);
+        state
+            .mark_failed(first_finished_at, first_next_run_at, "first failure")
+            .await;
+        let first = state.snapshot().await;
+        assert!(!first.running);
+        assert_eq!(first.total_runs, 1);
+        assert_eq!(first.failed_runs, 1);
+        assert_eq!(first.consecutive_failures, 1);
+        assert_eq!(first.last_status.as_deref(), Some("failed"));
+        assert_eq!(first.last_error.as_deref(), Some("first failure"));
+        assert_eq!(first.next_run_at, Some(first_next_run_at));
+        assert!(!state.is_suppressed().await);
+
+        let second_started_at = first_next_run_at;
+        let second_finished_at = second_started_at + chrono::Duration::milliseconds(5);
+        let second_next_run_at = second_finished_at + chrono::Duration::seconds(60);
+        assert!(state.mark_started(second_started_at).await);
+        state
+            .mark_failed(
+                second_finished_at,
+                second_next_run_at,
+                "second failure with\ncontrol\tcharacters",
+            )
+            .await;
+        let second = state.snapshot().await;
+        assert!(!second.running);
+        assert_eq!(second.total_runs, 2);
+        assert_eq!(second.failed_runs, 2);
+        assert_eq!(second.consecutive_failures, 2);
+        assert_eq!(
+            second.last_status.as_deref(),
+            Some("suppressed_after_failures")
+        );
+        assert_eq!(
+            second.last_error.as_deref(),
+            Some("second failure with control characters")
+        );
+        assert!(second.next_run_at.is_none());
+        assert!(state.is_suppressed().await);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_error_sanitization_bounds_status_text() {
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        ])
+        .expect("config parses");
+        let state = StorageMaintenanceSchedulerState::from_config(&config);
+        let started_at = Utc::now();
+        let finished_at = started_at + chrono::Duration::milliseconds(1);
+        let next_run_at = finished_at + chrono::Duration::seconds(60);
+        let long_error = format!("{}\n{}", "x".repeat(260), "secret line");
+
+        assert!(state.mark_started(started_at).await);
+        state
+            .mark_failed(finished_at, next_run_at, long_error)
+            .await;
+
+        let snapshot = state.snapshot().await;
+        let error = snapshot.last_error.expect("last error should be recorded");
+        assert!(error.len() <= 243, "error was not bounded: {error}");
+        assert!(
+            error.ends_with("..."),
+            "error should include truncation marker"
+        );
+        assert!(!error.contains('\n'));
+        assert!(!error.contains('\t'));
     }
 }
