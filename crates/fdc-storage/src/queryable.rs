@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
-    StorageHealthSnapshot, StorageQuery, StorageTierScope, StorageTieringPolicy, StorageWriteBatch,
-    StorageWriteOutcome, StorageWriteRecord, StorageWriteSink, TierConfig, TieredStorageStore,
+    StorageHealthSnapshot, StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery,
+    StorageTierScope, StorageTieringPolicy, StorageWriteBatch, StorageWriteOutcome,
+    StorageWriteRecord, StorageWriteSink, TierConfig, TieredStorageStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -211,6 +212,18 @@ impl QueryableMarketDataStore {
             }
         }
     }
+
+    pub async fn run_maintenance_once_with_options(
+        &self,
+        options: StorageMaintenanceOptions,
+    ) -> Result<Option<StorageMaintenanceReport>> {
+        match &self.backend {
+            QueryableMarketDataBackend::InMemory(_) => Ok(None),
+            QueryableMarketDataBackend::Tiered(store) => Ok(Some(
+                store.run_maintenance_once_with_options(options).await?,
+            )),
+        }
+    }
 }
 
 #[async_trait]
@@ -237,7 +250,8 @@ impl QueryableStorage for QueryableMarketDataStore {
 mod tests {
     use super::*;
     use crate::{
-        StorageTierHealthStatus, StorageTieringPolicy, StorageWriteBatch, StorageWriteMetadata,
+        StorageMaintenanceOptions, StorageTierHealthStatus, StorageTieringPolicy,
+        StorageWriteBatch, StorageWriteMetadata,
     };
 
     fn record(
@@ -339,5 +353,32 @@ mod tests {
             .tiers
             .values()
             .all(|tier| tier.status == StorageTierHealthStatus::Healthy));
+    }
+
+    #[tokio::test]
+    async fn in_memory_market_data_store_has_no_maintenance_pass() {
+        let store = QueryableMarketDataStore::in_memory();
+
+        let report = store
+            .run_maintenance_once_with_options(StorageMaintenanceOptions::default())
+            .await
+            .unwrap();
+
+        assert!(report.is_none());
+    }
+
+    #[tokio::test]
+    async fn tiered_market_data_store_runs_maintenance_pass() {
+        let store = QueryableMarketDataStore::memory_tiered().await.unwrap();
+
+        let report = store
+            .run_maintenance_once_with_options(StorageMaintenanceOptions::default())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(report.lifecycle.scanned_entries, 0);
+        assert_eq!(report.compaction_failed, 0);
+        assert_eq!(report.health.tiers.len(), 4);
     }
 }
