@@ -2,8 +2,9 @@
 
 use crate::engine::{StorageEngine, StorageEngineType, StorageStats};
 use crate::{
-    StorageAccessPatternHint, StorageCompactionOutcome, StorageCompactionOutcomeKind,
-    StorageDurabilityHint, StorageEngineFeature, StoragePlacementHint, StorageTierScope,
+    AccessPatternSnapshot, StorageAccessPatternHint, StorageCompactionOutcome,
+    StorageCompactionOutcomeKind, StorageDurabilityHint, StorageEngineFeature,
+    StoragePlacementHint, StorageTierScope, StorageTieringContext, StorageTieringPolicy,
 };
 use chrono::{DateTime, Utc};
 use fdc_core::error::{Error, Result};
@@ -179,6 +180,16 @@ impl AccessPattern {
             StorageTier::L3
         } else {
             StorageTier::L4
+        }
+    }
+
+    pub fn snapshot(&self) -> AccessPatternSnapshot {
+        AccessPatternSnapshot {
+            access_count: self.access_count,
+            access_frequency: self.access_frequency,
+            data_size: self.data_size,
+            heat_score: self.heat_score,
+            recommended_tier: self.recommended_tier(),
         }
     }
 }
@@ -534,29 +545,29 @@ impl TierManager {
         data_size: usize,
         placement: &StoragePlacementHint,
     ) -> StorageTier {
-        if let Some(target_tier) = &placement.target_tier {
-            return self
-                .nearest_available_tier(target_tier.clone())
-                .unwrap_or_else(|| target_tier.clone());
-        }
-
-        let hinted_tier = match (&placement.access_pattern, &placement.durability) {
-            (StorageAccessPatternHint::UltraHot, _) => Some(StorageTier::L1),
-            (StorageAccessPatternHint::Hot, _) => Some(StorageTier::L2),
-            (StorageAccessPatternHint::Warm, _) => Some(StorageTier::L3),
-            (StorageAccessPatternHint::Cold, _) => Some(StorageTier::L4),
-            (_, StorageDurabilityHint::Ephemeral) => Some(StorageTier::L1),
-            (_, StorageDurabilityHint::Cached) => Some(StorageTier::L2),
-            (_, StorageDurabilityHint::Persistent) => Some(StorageTier::L3),
-            (_, StorageDurabilityHint::Archival) => Some(StorageTier::L4),
-            _ => None,
+        let available_tiers = self.initialized_tiers();
+        let prior_access = self
+            .access_patterns
+            .read()
+            .await
+            .get(key)
+            .map(AccessPattern::snapshot);
+        let metadata_tags = std::collections::BTreeMap::new();
+        let context = StorageTieringContext {
+            namespace: "",
+            collection: "",
+            key_len: key.len(),
+            value_len: data_size,
+            timestamp_age_seconds: 0,
+            metadata_tags: &metadata_tags,
+            placement_hint: placement,
+            available_tiers: &available_tiers,
+            prior_access,
         };
 
-        if let Some(tier) = hinted_tier {
-            return self.nearest_available_tier(tier.clone()).unwrap_or(tier);
-        }
-
-        self.determine_initial_tier(key, data_size).await
+        StorageTieringPolicy::compatibility()
+            .decide_initial_placement(&context)
+            .initial_tier
     }
 
     fn nearest_available_tier(&self, desired: StorageTier) -> Option<StorageTier> {
@@ -873,6 +884,46 @@ mod tests {
             .as_deref()
             .unwrap_or("")
             .contains("compaction"));
+    }
+
+    #[tokio::test]
+    async fn tier_manager_routes_placement_through_compatibility_policy() {
+        let mut manager = TierManager::new();
+        let dir = tempfile::tempdir().unwrap();
+        let l3_config = TierConfig::new(StorageTier::L3).with_engine_config(
+            "db_path".to_string(),
+            dir.path()
+                .join("policy-routing.duckdb")
+                .to_string_lossy()
+                .to_string(),
+        );
+        manager.add_tier(TierConfig::new(StorageTier::L1));
+        manager.add_tier(l3_config);
+        manager.initialize().await.expect("tiers should initialize");
+
+        manager
+            .put_with_placement(
+                b"policy-routed",
+                b"value",
+                &StoragePlacementHint::default().with_durability(StorageDurabilityHint::Persistent),
+            )
+            .await
+            .expect("policy-routed write should succeed");
+
+        assert_eq!(
+            manager
+                .get_from_tier(b"policy-routed", &StorageTier::L3)
+                .await
+                .expect("L3 read should succeed"),
+            Some(b"value".to_vec())
+        );
+        assert_eq!(
+            manager
+                .get_from_tier(b"policy-routed", &StorageTier::L1)
+                .await
+                .expect("L1 read should succeed"),
+            None
+        );
     }
 
     #[tokio::test]
