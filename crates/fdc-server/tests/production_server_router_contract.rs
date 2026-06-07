@@ -37,6 +37,7 @@ async fn runtime_builder_creates_memory_market_data_store() {
     let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
         backend: MarketDataStorageBackendConfig::Memory,
         policy_profile: MarketDataStoragePolicyProfileConfig::Compatibility,
+        tiers: Default::default(),
     })
     .await
     .expect("memory store should build");
@@ -56,6 +57,7 @@ async fn runtime_builder_creates_tiered_market_data_store() {
     let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
         backend: MarketDataStorageBackendConfig::Tiered,
         policy_profile: MarketDataStoragePolicyProfileConfig::Compatibility,
+        tiers: Default::default(),
     })
     .await
     .expect("tiered store should build");
