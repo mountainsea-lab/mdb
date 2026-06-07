@@ -193,12 +193,26 @@ fn maintenance_response_from_report(
 }
 
 pub fn storage_status(state: &ProductionServerState) -> MarketDataStorageStatusResponse {
-    let storage = &state.config().market_data_storage;
+    let config = state.config();
+    let storage = &config.market_data_storage;
     let tiered = storage.backend == MarketDataStorageBackendConfig::Tiered;
+    let durable_tiers_configured = [
+        storage.tiers.l2_redb_path.as_ref(),
+        storage.tiers.l3_duckdb_path.as_ref(),
+        storage.tiers.l4_rocksdb_path.as_ref(),
+    ]
+    .into_iter()
+    .filter(|path| path.is_some())
+    .count();
 
     MarketDataStorageStatusResponse {
         backend: backend_label(storage.backend).to_string(),
         policy_profile: policy_profile_label(storage.policy_profile).to_string(),
+        tiered,
+        durable_tiers_configured,
+        maintenance_enabled: config.market_data_storage_maintenance_enabled,
+        maintenance_audit_reset_enabled: config.market_data_storage_maintenance_audit_reset_enabled,
+        maintenance_audit_capacity: config.market_data_storage_maintenance_audit_capacity,
         tiers: vec![
             memory_tier_status("L1"),
             tier_status("L2", tiered, "redb", storage.tiers.l2_redb_path.as_deref()),

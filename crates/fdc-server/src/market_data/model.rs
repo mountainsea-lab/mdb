@@ -48,6 +48,11 @@ pub struct LiveMarketDataStatusResponse {
 pub struct MarketDataStorageStatusResponse {
     pub backend: String,
     pub policy_profile: String,
+    pub tiered: bool,
+    pub durable_tiers_configured: usize,
+    pub maintenance_enabled: bool,
+    pub maintenance_audit_reset_enabled: bool,
+    pub maintenance_audit_capacity: usize,
     pub tiers: Vec<MarketDataStorageTierStatus>,
 }
 

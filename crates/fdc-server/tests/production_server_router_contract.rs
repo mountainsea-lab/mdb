@@ -241,6 +241,11 @@ async fn production_storage_status_reports_memory_defaults() {
     assert_eq!(json["status"], "success");
     assert_eq!(json["data"]["backend"], "memory");
     assert_eq!(json["data"]["policy_profile"], "compatibility");
+    assert_eq!(json["data"]["tiered"], false);
+    assert_eq!(json["data"]["durable_tiers_configured"], 0);
+    assert_eq!(json["data"]["maintenance_enabled"], false);
+    assert_eq!(json["data"]["maintenance_audit_reset_enabled"], false);
+    assert_eq!(json["data"]["maintenance_audit_capacity"], 32);
     assert_eq!(json["data"]["tiers"].as_array().unwrap().len(), 4);
     assert_eq!(json["data"]["tiers"][0]["tier"], "L1");
     assert_eq!(json["data"]["tiers"][0]["engine"], "memory");
@@ -281,6 +286,11 @@ async fn production_storage_status_reports_durable_tiered_config_without_full_pa
     let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(json["data"]["backend"], "tiered");
     assert_eq!(json["data"]["policy_profile"], "generic_realtime");
+    assert_eq!(json["data"]["tiered"], true);
+    assert_eq!(json["data"]["durable_tiers_configured"], 3);
+    assert_eq!(json["data"]["maintenance_enabled"], false);
+    assert_eq!(json["data"]["maintenance_audit_reset_enabled"], false);
+    assert_eq!(json["data"]["maintenance_audit_capacity"], 32);
     assert_eq!(json["data"]["tiers"][1]["tier"], "L2");
     assert_eq!(json["data"]["tiers"][1]["engine"], "redb");
     assert_eq!(json["data"]["tiers"][1]["durable_path_configured"], true);
@@ -295,6 +305,44 @@ async fn production_storage_status_reports_durable_tiered_config_without_full_pa
         !body_text.contains(root.to_string_lossy().as_ref()),
         "storage status must not leak full configured paths: {body_text}"
     );
+}
+
+#[tokio::test]
+async fn production_storage_status_reports_maintenance_gate_metadata() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_RESET_ENABLED",
+            "1",
+        ),
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY", "7"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage status should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["backend"], "memory");
+    assert_eq!(json["data"]["tiered"], false);
+    assert_eq!(json["data"]["durable_tiers_configured"], 0);
+    assert_eq!(json["data"]["maintenance_enabled"], true);
+    assert_eq!(json["data"]["maintenance_audit_reset_enabled"], true);
+    assert_eq!(json["data"]["maintenance_audit_capacity"], 7);
 }
 
 #[tokio::test]
