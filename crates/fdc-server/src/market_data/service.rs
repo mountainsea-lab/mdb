@@ -22,7 +22,9 @@ use crate::{
     market_data::maintenance_audit::MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY,
     market_data::model::{
         MarketDataLiveState, MarketDataStorageHealthResponse,
-        MarketDataStorageMaintenanceAuditEntryResponse, MarketDataStorageMaintenanceAuditResponse,
+        MarketDataStorageMaintenanceAuditEntryResponse,
+        MarketDataStorageMaintenanceAuditResetRequest,
+        MarketDataStorageMaintenanceAuditResetResponse, MarketDataStorageMaintenanceAuditResponse,
         MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
         MarketDataStorageStatusResponse, MarketDataStorageTierHealth, MarketDataStorageTierStatus,
         MarketDataTradeRecord, MarketDataTradesResponse, StartLiveMarketDataRequest,
@@ -51,6 +53,15 @@ pub enum StorageMaintenanceHttpStatus {
 pub struct StorageMaintenanceServiceResult {
     pub http_status: StorageMaintenanceHttpStatus,
     pub response: MarketDataStorageMaintenanceRunResponse,
+    pub message: Option<String>,
+}
+
+pub const STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION: &str = "reset_maintenance_audit";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageMaintenanceAuditResetResult {
+    pub http_status: StorageMaintenanceHttpStatus,
+    pub response: MarketDataStorageMaintenanceAuditResetResponse,
     pub message: Option<String>,
 }
 
@@ -228,6 +239,80 @@ pub async fn storage_maintenance_audit(
         total_entries: snapshot.total_entries,
         returned_entries: entries.len(),
         entries,
+    }
+}
+
+pub async fn reset_storage_maintenance_audit(
+    state: &ProductionServerState,
+    request: MarketDataStorageMaintenanceAuditResetRequest,
+) -> StorageMaintenanceAuditResetResult {
+    if !state
+        .config()
+        .market_data_storage_maintenance_audit_reset_enabled
+    {
+        let remaining_entries = state
+            .market_data_storage_maintenance_audit()
+            .recent(0)
+            .await
+            .total_entries;
+        return audit_reset_error(
+            StorageMaintenanceHttpStatus::Forbidden,
+            "disabled",
+            request.reason,
+            remaining_entries,
+            "storage maintenance audit reset hook is disabled",
+        );
+    }
+
+    if request.confirm != STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION {
+        let remaining_entries = state
+            .market_data_storage_maintenance_audit()
+            .recent(0)
+            .await
+            .total_entries;
+        return audit_reset_error(
+            StorageMaintenanceHttpStatus::BadRequest,
+            "confirmation_required",
+            request.reason,
+            remaining_entries,
+            format!("confirm must be {STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION}"),
+        );
+    }
+
+    let audit = state.market_data_storage_maintenance_audit();
+    let cleared_entries = audit.clear().await;
+    let remaining_entries = audit.recent(0).await.total_entries;
+
+    StorageMaintenanceAuditResetResult {
+        http_status: StorageMaintenanceHttpStatus::Ok,
+        response: MarketDataStorageMaintenanceAuditResetResponse {
+            accepted: true,
+            status: "reset".to_string(),
+            reason: request.reason,
+            cleared_entries,
+            remaining_entries,
+        },
+        message: None,
+    }
+}
+
+fn audit_reset_error(
+    http_status: StorageMaintenanceHttpStatus,
+    status: &str,
+    reason: Option<String>,
+    remaining_entries: usize,
+    message: impl Into<String>,
+) -> StorageMaintenanceAuditResetResult {
+    StorageMaintenanceAuditResetResult {
+        http_status,
+        response: MarketDataStorageMaintenanceAuditResetResponse {
+            accepted: false,
+            status: status.to_string(),
+            reason,
+            cleared_entries: 0,
+            remaining_entries,
+        },
+        message: Some(message.into()),
     }
 }
 

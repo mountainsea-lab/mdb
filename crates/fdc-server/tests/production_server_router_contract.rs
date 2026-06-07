@@ -74,8 +74,22 @@ fn maintenance_request(confirm: &str) -> Body {
     ))
 }
 
+fn audit_reset_request(confirm: &str) -> Body {
+    Body::from(format!(
+        r#"{{"confirm":"{confirm}","reason":"contract-test"}}"#
+    ))
+}
+
 async fn tiered_storage_state_with_audit_capacity(capacity: usize) -> ProductionServerState {
+    tiered_storage_state_with_audit_capacity_and_reset(capacity, false).await
+}
+
+async fn tiered_storage_state_with_audit_capacity_and_reset(
+    capacity: usize,
+    reset_enabled: bool,
+) -> ProductionServerState {
     let capacity = capacity.to_string();
+    let reset_enabled = if reset_enabled { "1" } else { "0" };
     let config = ServerRuntimeConfig::from_env_pairs([
         ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1"),
         ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
@@ -83,6 +97,10 @@ async fn tiered_storage_state_with_audit_capacity(capacity: usize) -> Production
         (
             "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY",
             capacity.as_str(),
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_RESET_ENABLED",
+            reset_enabled,
         ),
     ])
     .expect("tiered config should parse");
@@ -645,6 +663,169 @@ async fn storage_maintenance_audit_route_limit_one_returns_newest_entry() {
     assert_eq!(json["data"]["total_entries"], 2);
     assert_eq!(json["data"]["returned_entries"], 1);
     assert_eq!(json["data"]["entries"][0]["scanned_entries"], 2);
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_reset_route_is_disabled_by_default() {
+    let state = tiered_storage_state_with_audit_capacity(3).await;
+    let router = build_production_router(state.clone());
+
+    state
+        .ingest_test_trade("BTCUSDT", "audit-reset-disabled")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/audit/reset")
+                .header("content-type", "application/json")
+                .body(audit_reset_request("reset_maintenance_audit"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("reset route should respond");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["data"]["accepted"], false);
+    assert_eq!(json["data"]["status"], "disabled");
+    assert_eq!(json["data"]["cleared_entries"], 0);
+
+    let audit = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+    let audit_json = response_body_json(audit).await;
+    assert_eq!(audit_json["data"]["total_entries"], 1);
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_reset_route_requires_confirmation() {
+    let state = tiered_storage_state_with_audit_capacity_and_reset(3, true).await;
+    let router = build_production_router(state.clone());
+
+    state
+        .ingest_test_trade("BTCUSDT", "audit-reset-confirm")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/audit/reset")
+                .header("content-type", "application/json")
+                .body(audit_reset_request("wrong"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("reset route should respond");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["data"]["accepted"], false);
+    assert_eq!(json["data"]["status"], "confirmation_required");
+
+    let audit = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+    let audit_json = response_body_json(audit).await;
+    assert_eq!(audit_json["data"]["total_entries"], 1);
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_reset_route_clears_entries_when_enabled_and_confirmed() {
+    let state = tiered_storage_state_with_audit_capacity_and_reset(3, true).await;
+    let router = build_production_router(state.clone());
+
+    state
+        .ingest_test_trade("BTCUSDT", "audit-reset-1")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+    state
+        .ingest_test_trade("BTCUSDT", "audit-reset-2")
+        .await
+        .unwrap();
+    run_successful_storage_maintenance(router.clone()).await;
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/audit/reset")
+                .header("content-type", "application/json")
+                .body(audit_reset_request("reset_maintenance_audit"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("reset route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["accepted"], true);
+    assert_eq!(json["data"]["status"], "reset");
+    assert_eq!(json["data"]["cleared_entries"], 2);
+    assert_eq!(json["data"]["remaining_entries"], 0);
+
+    let audit = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+    let audit_json = response_body_json(audit).await;
+    assert_eq!(audit_json["data"]["total_entries"], 0);
+    assert_eq!(audit_json["data"]["returned_entries"], 0);
+}
+
+#[tokio::test]
+async fn storage_maintenance_audit_reset_route_succeeds_on_empty_log() {
+    let state = tiered_storage_state_with_audit_capacity_and_reset(3, true).await;
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/audit/reset")
+                .header("content-type", "application/json")
+                .body(audit_reset_request("reset_maintenance_audit"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("reset route should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["data"]["accepted"], true);
+    assert_eq!(json["data"]["status"], "reset");
+    assert_eq!(json["data"]["cleared_entries"], 0);
+    assert_eq!(json["data"]["remaining_entries"], 0);
 }
 
 #[tokio::test]

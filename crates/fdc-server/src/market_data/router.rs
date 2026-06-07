@@ -10,15 +10,18 @@ use crate::{
     market_data::{
         model::{
             LiveMarketDataStatusResponse, MarketDataStorageHealthResponse,
+            MarketDataStorageMaintenanceAuditResetRequest,
+            MarketDataStorageMaintenanceAuditResetResponse,
             MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
             MarketDataStorageMaintenanceRunResponse, MarketDataStorageStatusResponse,
             MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
             StopLiveMarketDataResponse,
         },
         service::{
-            live_status, query_trades, run_storage_maintenance_once, start_live,
-            start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
-            storage_status, StorageMaintenanceHttpStatus,
+            live_status, query_trades, reset_storage_maintenance_audit,
+            run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
+            storage_health, storage_maintenance_audit, storage_status,
+            StorageMaintenanceHttpStatus,
         },
     },
     ProductionServerState,
@@ -74,6 +77,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route(
             "/market-data/storage/maintenance/audit",
             get(storage_maintenance_audit_handler),
+        )
+        .route(
+            "/market-data/storage/maintenance/audit/reset",
+            post(storage_maintenance_audit_reset_handler),
         )
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
@@ -175,6 +182,28 @@ async fn storage_maintenance_audit_handler(
     Json(ServerApiResponse::success(
         storage_maintenance_audit(&state, params.limit).await,
     ))
+}
+
+async fn storage_maintenance_audit_reset_handler(
+    State(state): State<ProductionServerState>,
+    Json(request): Json<MarketDataStorageMaintenanceAuditResetRequest>,
+) -> (
+    StatusCode,
+    Json<ServerApiResponse<MarketDataStorageMaintenanceAuditResetResponse>>,
+) {
+    let result = reset_storage_maintenance_audit(&state, request).await;
+    let status = storage_maintenance_status_code(result.http_status);
+    let envelope = if result.http_status == StorageMaintenanceHttpStatus::Ok {
+        ServerApiResponse::success(result.response)
+    } else {
+        ServerApiResponse::error(
+            result.response,
+            result
+                .message
+                .unwrap_or_else(|| "storage maintenance audit reset request failed".to_string()),
+        )
+    };
+    (status, Json(envelope))
 }
 
 async fn query_trades_handler(

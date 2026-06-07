@@ -113,6 +113,21 @@ pub struct MarketDataStorageMaintenanceAuditResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceAuditResetRequest {
+    pub confirm: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceAuditResetResponse {
+    pub accepted: bool,
+    pub status: String,
+    pub reason: Option<String>,
+    pub cleared_entries: usize,
+    pub remaining_entries: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataStorageMaintenanceAuditEntryResponse {
     pub recorded_at: String,
     pub started_at: String,
