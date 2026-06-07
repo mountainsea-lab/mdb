@@ -10,8 +10,8 @@ use fdc_server::{
     MarketDataStorageRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
 };
 use fdc_storage::{
-    QueryableMarketDataStore, StorageWriteBatch, StorageWriteMetadata, StorageWriteRecord,
-    StorageWriteSink,
+    QueryableMarketDataStore, QueryableStorage, StorageQuery, StorageTier, StorageTierScope,
+    StorageWriteBatch, StorageWriteMetadata, StorageWriteRecord, StorageWriteSink,
 };
 use tower::ServiceExt;
 
@@ -254,6 +254,70 @@ async fn production_state_try_new_uses_tiered_runtime_storage_config() {
     let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(json["status"], "success");
     assert_eq!(json["data"]["returned_records"], 1);
+}
+
+#[tokio::test]
+async fn runtime_server_path_routes_live_fixture_with_tiered_generic_realtime() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime"),
+    ])
+    .expect("tiered generic realtime runtime config should parse");
+
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("state should assemble tiered generic realtime storage");
+    state
+        .ingest_test_trade("BTCUSDT", "generic-runtime-live-1")
+        .await
+        .expect("fixture ingest should write through configured store");
+
+    let store = state.market_data_store();
+    let hot_records = store
+        .query_storage(
+            &StorageQuery::new("market_data")
+                .with_tier_scope(StorageTierScope::Only(StorageTier::L2)),
+        )
+        .await
+        .expect("hot tier query should succeed");
+
+    assert_eq!(hot_records.len(), 1);
+    assert_eq!(
+        hot_records[0].metadata.tags.get("mode").map(String::as_str),
+        Some("live")
+    );
+    assert_eq!(
+        hot_records[0]
+            .metadata
+            .tags
+            .get("record.kind")
+            .map(String::as_str),
+        Some("trade")
+    );
+
+    let router = build_production_router(state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/trades?symbol=BTCUSDT&limit=10")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("query should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_records"], 1);
+    assert_eq!(json["data"]["records"][0]["symbol"], "BTCUSDT");
+    assert_eq!(
+        json["data"]["records"][0]["payload"]["payload"]["Trade"]["trade_id"],
+        "generic-runtime-live-1"
+    );
 }
 
 #[test]
