@@ -476,8 +476,7 @@ async fn production_storage_health_reports_durable_path_readiness_without_full_p
     assert!(l1["path_parent_exists"].is_null());
     assert!(l1["path_parent_writable"].is_null());
 
-    for (tier_name, hint) in [("L2", "l2.redb"), ("L3", "l3.duckdb"), ("L4", "l4-rocksdb")]
-    {
+    for (tier_name, hint) in [("L2", "l2.redb"), ("L3", "l3.duckdb"), ("L4", "l4-rocksdb")] {
         let tier = tiers
             .iter()
             .find(|tier| tier["tier"] == tier_name)

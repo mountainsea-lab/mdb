@@ -371,10 +371,8 @@ pub async fn storage_health(state: &ProductionServerState) -> MarketDataStorageH
                 .tiers
                 .values()
                 .map(|tier| {
-                    let readiness = durable_path_readiness(configured_durable_path_for_tier(
-                        state,
-                        &tier.tier,
-                    ));
+                    let readiness =
+                        durable_path_readiness(configured_durable_path_for_tier(state, &tier.tier));
                     MarketDataStorageTierHealth {
                         tier: storage_tier_label(&tier.tier).to_string(),
                         enabled: tier.enabled,
@@ -460,7 +458,9 @@ fn durable_path_readiness(path: Option<&std::path::Path>) -> DurablePathReadines
 
     DurablePathReadiness {
         durable_path_configured: true,
-        path_hint: path.file_name().map(|name| name.to_string_lossy().to_string()),
+        path_hint: path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string()),
         path_exists: Some(path.exists()),
         path_parent_exists: Some(path_parent_exists),
         path_parent_writable: Some(path_parent_exists && path_parent_writable),
@@ -940,6 +940,30 @@ mod tests {
                 "binance_spot:ETHUSDT:order_book".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn durable_path_readiness_reports_missing_parent_without_creating_paths() {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "fdc-server-missing-parent-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ))
+            .join("l2.redb");
+
+        let readiness = durable_path_readiness(Some(path.as_path()));
+
+        assert_eq!(readiness.durable_path_configured, true);
+        assert_eq!(readiness.path_hint.as_deref(), Some("l2.redb"));
+        assert_eq!(readiness.path_exists, Some(false));
+        assert_eq!(readiness.path_parent_exists, Some(false));
+        assert_eq!(readiness.path_parent_writable, Some(false));
+        assert!(!path.exists());
+        assert!(!path.parent().unwrap().exists());
     }
 
     #[tokio::test]
