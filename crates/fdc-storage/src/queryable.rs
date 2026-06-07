@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
     StorageTierScope, StorageTieringPolicy, StorageWriteBatch, StorageWriteOutcome,
-    StorageWriteRecord, StorageWriteSink, TieredStorageStore,
+    StorageWriteRecord, StorageWriteSink, TierConfig, TieredStorageStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -163,6 +163,14 @@ impl QueryableMarketDataStore {
 
     pub async fn memory_tiered_with_policy(policy: StorageTieringPolicy) -> Result<Self> {
         let store = TieredStorageStore::memory_only_with_policy(policy).await?;
+        Ok(Self::from_tiered_store(Arc::new(store)))
+    }
+
+    pub async fn tiered_with_policy_and_configs(
+        policy: StorageTieringPolicy,
+        configs: Vec<TierConfig>,
+    ) -> Result<Self> {
+        let store = TieredStorageStore::with_policy_and_tier_configs(policy, configs).await?;
         Ok(Self::from_tiered_store(Arc::new(store)))
     }
 

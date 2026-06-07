@@ -45,14 +45,28 @@ impl TieredStorageStore {
     }
 
     pub async fn memory_only_with_policy(policy: StorageTieringPolicy) -> Result<Self> {
+        Self::with_policy_and_tier_configs(
+            policy,
+            [
+                StorageTier::L1,
+                StorageTier::L2,
+                StorageTier::L3,
+                StorageTier::L4,
+            ]
+            .into_iter()
+            .map(memory_tier_config)
+            .collect(),
+        )
+        .await
+    }
+
+    pub async fn with_policy_and_tier_configs(
+        policy: StorageTieringPolicy,
+        configs: Vec<TierConfig>,
+    ) -> Result<Self> {
         let mut manager = TierManager::with_policy(policy);
-        for tier in [
-            StorageTier::L1,
-            StorageTier::L2,
-            StorageTier::L3,
-            StorageTier::L4,
-        ] {
-            manager.add_tier(memory_tier_config(tier));
+        for config in configs {
+            manager.add_tier(config);
         }
         manager.initialize().await?;
         Ok(Self::new(Arc::new(manager)))
@@ -566,6 +580,40 @@ mod tests {
         assert!(store
             .tier_manager()
             .get_from_tier(&backfill_key, &StorageTier::L3)
+            .await
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn tiered_store_accepts_caller_provided_tier_configs() {
+        let store = TieredStorageStore::with_policy_and_tier_configs(
+            StorageTieringPolicy::generic_realtime(),
+            vec![
+                memory_tier_config(StorageTier::L1),
+                memory_tier_config(StorageTier::L2),
+                memory_tier_config(StorageTier::L3),
+                memory_tier_config(StorageTier::L4),
+            ],
+        )
+        .await
+        .unwrap();
+
+        let mut live = tagged_record(b"live-config", "BTCUSDT");
+        live.metadata
+            .tags
+            .insert("mode".to_string(), "live".to_string());
+        live.placement = StoragePlacementHint::default();
+
+        store
+            .write_batch(StorageWriteBatch::new(vec![live.clone()]))
+            .await
+            .unwrap();
+
+        let live_key = TieredStorageStore::storage_key_for_record(&live);
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&live_key, &StorageTier::L2)
             .await
             .unwrap()
             .is_some());
