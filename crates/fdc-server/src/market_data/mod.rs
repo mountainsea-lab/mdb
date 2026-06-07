@@ -1,4 +1,5 @@
 pub mod maintenance_audit;
+pub mod maintenance_scheduler;
 pub mod model;
 pub mod router;
 pub mod service;
