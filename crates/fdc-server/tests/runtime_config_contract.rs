@@ -17,6 +17,7 @@ fn runtime_config_defaults_are_safe_for_local_production_server() {
     assert_eq!(config.live_default_max_envelopes, 100);
     assert!(!config.market_data_storage_maintenance_enabled);
     assert!(!config.market_data_storage_maintenance_scheduler_enabled);
+    assert!(!config.market_data_storage_maintenance_scheduler_reset_enabled);
     assert_eq!(
         config.market_data_storage_maintenance_scheduler_interval_seconds,
         3600
@@ -99,6 +100,17 @@ fn storage_maintenance_scheduler_config_accepts_valid_overrides() {
         config.market_data_storage_maintenance_scheduler_max_consecutive_failures,
         5
     );
+}
+
+#[test]
+fn storage_maintenance_scheduler_reset_gate_can_be_enabled_by_env() {
+    let config = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESET_ENABLED",
+        "1",
+    )])
+    .expect("scheduler reset config should parse");
+
+    assert!(config.market_data_storage_maintenance_scheduler_reset_enabled);
 }
 
 #[test]

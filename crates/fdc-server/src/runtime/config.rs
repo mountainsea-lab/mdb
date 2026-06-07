@@ -57,6 +57,7 @@ pub struct ServerRuntimeConfig {
     pub market_data_storage_maintenance_audit_capacity: usize,
     pub market_data_storage_maintenance_audit_reset_enabled: bool,
     pub market_data_storage_maintenance_scheduler_enabled: bool,
+    pub market_data_storage_maintenance_scheduler_reset_enabled: bool,
     pub market_data_storage_maintenance_scheduler_interval_seconds: u64,
     pub market_data_storage_maintenance_scheduler_timeout_ms: u64,
     pub market_data_storage_maintenance_scheduler_jitter_seconds: u64,
@@ -85,6 +86,7 @@ impl ServerRuntimeConfig {
         let mut market_data_storage_maintenance_audit_capacity = 32_usize;
         let mut market_data_storage_maintenance_audit_reset_enabled = false;
         let mut market_data_storage_maintenance_scheduler_enabled = false;
+        let mut market_data_storage_maintenance_scheduler_reset_enabled = false;
         let mut market_data_storage_maintenance_scheduler_interval_seconds = 3600_u64;
         let mut market_data_storage_maintenance_scheduler_timeout_ms = 30000_u64;
         let mut market_data_storage_maintenance_scheduler_jitter_seconds = 0_u64;
@@ -145,6 +147,10 @@ impl ServerRuntimeConfig {
                 }
                 "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED" => {
                     market_data_storage_maintenance_scheduler_enabled =
+                        matches!(value.as_ref(), "1" | "true" | "yes" | "on");
+                }
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESET_ENABLED" => {
+                    market_data_storage_maintenance_scheduler_reset_enabled =
                         matches!(value.as_ref(), "1" | "true" | "yes" | "on");
                 }
                 "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS" => {
@@ -248,6 +254,7 @@ impl ServerRuntimeConfig {
             market_data_storage_maintenance_audit_capacity,
             market_data_storage_maintenance_audit_reset_enabled,
             market_data_storage_maintenance_scheduler_enabled,
+            market_data_storage_maintenance_scheduler_reset_enabled,
             market_data_storage_maintenance_scheduler_interval_seconds,
             market_data_storage_maintenance_scheduler_timeout_ms,
             market_data_storage_maintenance_scheduler_jitter_seconds,
