@@ -9,6 +9,32 @@ pub enum ServerRuntimeEnvironment {
     Production,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketDataStorageBackendConfig {
+    Memory,
+    Tiered,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarketDataStoragePolicyProfileConfig {
+    Compatibility,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarketDataStorageRuntimeConfig {
+    pub backend: MarketDataStorageBackendConfig,
+    pub policy_profile: MarketDataStoragePolicyProfileConfig,
+}
+
+impl Default for MarketDataStorageRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            backend: MarketDataStorageBackendConfig::Memory,
+            policy_profile: MarketDataStoragePolicyProfileConfig::Compatibility,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerRuntimeConfig {
     pub bind_addr: SocketAddr,
@@ -17,6 +43,7 @@ pub struct ServerRuntimeConfig {
     pub live_autostart: bool,
     pub live_default_timeout_secs: u64,
     pub live_default_max_envelopes: usize,
+    pub market_data_storage: MarketDataStorageRuntimeConfig,
 }
 
 impl ServerRuntimeConfig {
@@ -36,6 +63,7 @@ impl ServerRuntimeConfig {
         let mut live_autostart = false;
         let mut live_default_timeout_secs = 30_u64;
         let mut live_default_max_envelopes = 100_usize;
+        let mut market_data_storage = MarketDataStorageRuntimeConfig::default();
 
         for (key, value) in pairs {
             match key.as_ref() {
@@ -66,6 +94,27 @@ impl ServerRuntimeConfig {
                     live_default_max_envelopes =
                         parse_positive_usize("FDC_LIVE_DEFAULT_MAX_ENVELOPES", value.as_ref())?;
                 }
+                "FDC_MARKET_DATA_STORAGE_BACKEND" => {
+                    market_data_storage.backend = match value.as_ref() {
+                        "memory" => MarketDataStorageBackendConfig::Memory,
+                        "tiered" => MarketDataStorageBackendConfig::Tiered,
+                        other => {
+                            return Err(Error::config(format!(
+                                "FDC_MARKET_DATA_STORAGE_BACKEND must be memory or tiered, got {other}"
+                            )));
+                        }
+                    };
+                }
+                "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE" => {
+                    market_data_storage.policy_profile = match value.as_ref() {
+                        "compatibility" => MarketDataStoragePolicyProfileConfig::Compatibility,
+                        other => {
+                            return Err(Error::config(format!(
+                                "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE must be compatibility, got {other}"
+                            )));
+                        }
+                    };
+                }
                 _ => {}
             }
         }
@@ -81,6 +130,7 @@ impl ServerRuntimeConfig {
             live_autostart,
             live_default_timeout_secs,
             live_default_max_envelopes,
+            market_data_storage,
         })
     }
 }
