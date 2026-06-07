@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use crate::{
     apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageQuery,
-    StorageTierScope, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord, StorageWriteSink,
-    TieredStorageStore,
+    StorageTierScope, StorageTieringPolicy, StorageWriteBatch, StorageWriteOutcome,
+    StorageWriteRecord, StorageWriteSink, TieredStorageStore,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,7 +158,11 @@ impl QueryableMarketDataStore {
     }
 
     pub async fn memory_tiered() -> Result<Self> {
-        let store = TieredStorageStore::memory_only().await?;
+        Self::memory_tiered_with_policy(StorageTieringPolicy::compatibility()).await
+    }
+
+    pub async fn memory_tiered_with_policy(policy: StorageTieringPolicy) -> Result<Self> {
+        let store = TieredStorageStore::memory_only_with_policy(policy).await?;
         Ok(Self::from_tiered_store(Arc::new(store)))
     }
 
@@ -202,10 +206,20 @@ impl StorageWriteSink for QueryableMarketDataStore {
     }
 }
 
+#[async_trait]
+impl QueryableStorage for QueryableMarketDataStore {
+    async fn query_storage(&self, query: &StorageQuery) -> Result<Vec<StorageWriteRecord>> {
+        match &self.backend {
+            QueryableMarketDataBackend::InMemory(inner) => inner.query_storage(query).await,
+            QueryableMarketDataBackend::Tiered(store) => store.query_storage(query).await,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StorageWriteBatch, StorageWriteMetadata};
+    use crate::{StorageTieringPolicy, StorageWriteBatch, StorageWriteMetadata};
 
     fn record(
         namespace: &str,
@@ -258,5 +272,27 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].collection, "trades");
+    }
+
+    #[tokio::test]
+    async fn queryable_market_data_store_can_use_policy_configured_tiered_backend() {
+        let store = QueryableMarketDataStore::memory_tiered_with_policy(
+            StorageTieringPolicy::generic_realtime(),
+        )
+        .await
+        .unwrap();
+
+        store
+            .write_batch(StorageWriteBatch::new(vec![record(
+                "market_data",
+                "trades",
+                b"policy",
+                "BTCUSDT",
+                "trade",
+            )]))
+            .await
+            .unwrap();
+
+        assert_eq!(store.record_count(), 1);
     }
 }

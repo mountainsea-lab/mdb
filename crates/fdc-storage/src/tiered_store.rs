@@ -16,12 +16,12 @@ use fdc_core::{error::Error, Result};
 use tracing::{debug, info, instrument, warn};
 
 use crate::{
-    apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
+    apply_query_order_and_limit, record_matches_storage_query, QueryableStorage, StorageEngineType,
     StorageHealthSnapshot, StorageMaintenanceAuditEntry, StorageMaintenanceErrorKind,
     StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery, StorageQueryMetrics,
-    StorageQueryResult, StorageTier, StorageTierHealth, StorageTierHealthStatus, StorageWriteBatch,
-    StorageWriteOutcome, StorageWriteRecord, StorageWriteSink, TierConfig, TierLifecycleAction,
-    TierLifecycleReport, TierManager,
+    StorageQueryResult, StorageTier, StorageTierHealth, StorageTierHealthStatus,
+    StorageTieringPolicy, StorageWriteBatch, StorageWriteOutcome, StorageWriteRecord,
+    StorageWriteSink, TierConfig, TierLifecycleAction, TierLifecycleReport, TierManager,
 };
 
 const KEY_SEPARATOR: u8 = 0;
@@ -41,8 +41,19 @@ impl TieredStorageStore {
     }
 
     pub async fn memory_only() -> Result<Self> {
-        let mut manager = TierManager::new();
-        manager.add_tier(TierConfig::new(StorageTier::L1));
+        Self::memory_only_with_policy(StorageTieringPolicy::compatibility()).await
+    }
+
+    pub async fn memory_only_with_policy(policy: StorageTieringPolicy) -> Result<Self> {
+        let mut manager = TierManager::with_policy(policy);
+        for tier in [
+            StorageTier::L1,
+            StorageTier::L2,
+            StorageTier::L3,
+            StorageTier::L4,
+        ] {
+            manager.add_tier(memory_tier_config(tier));
+        }
         manager.initialize().await?;
         Ok(Self::new(Arc::new(manager)))
     }
@@ -335,6 +346,12 @@ impl TieredStorageStore {
     }
 }
 
+fn memory_tier_config(tier: StorageTier) -> TierConfig {
+    let mut config = TierConfig::new(tier);
+    config.engine_type = StorageEngineType::Memory;
+    config
+}
+
 struct MaintenanceRunGuard {
     running: Arc<AtomicBool>,
 }
@@ -356,8 +373,19 @@ impl StorageWriteSink for TieredStorageStore {
         for record in batch.records {
             let key = Self::storage_key_for_record(&record);
             let value = encode_record(&record)?;
+            let timestamp_age_seconds = Utc::now()
+                .signed_duration_since(record.timestamp)
+                .num_seconds();
             self.tier_manager
-                .put_with_placement(&key, &value, &record.placement)
+                .put_with_policy_context(
+                    &key,
+                    &value,
+                    &record.namespace,
+                    &record.collection,
+                    &record.metadata.tags,
+                    timestamp_age_seconds,
+                    &record.placement,
+                )
                 .await?;
         }
 
@@ -437,7 +465,8 @@ mod tests {
     use crate::StorageEngineType;
     use crate::{
         StorageMaintenanceAuditEntry, StorageMaintenanceAuditSink, StorageMaintenanceOptions,
-        StoragePlacementHint, StorageQueryOrder, StorageTierScope, StorageWriteMetadata,
+        StoragePlacementHint, StorageQueryOrder, StorageTierScope, StorageTieringPolicy,
+        StorageWriteMetadata,
     };
     use tempfile::tempdir;
 
@@ -467,6 +496,22 @@ mod tests {
         TieredStorageStore::new(Arc::new(manager))
     }
 
+    async fn memory_store_with_l1_to_l4_and_policy(
+        policy: StorageTieringPolicy,
+    ) -> TieredStorageStore {
+        let mut manager = TierManager::with_policy(policy);
+        for tier in [
+            StorageTier::L1,
+            StorageTier::L2,
+            StorageTier::L3,
+            StorageTier::L4,
+        ] {
+            manager.add_tier(memory_tier_config(tier));
+        }
+        manager.initialize().await.unwrap();
+        TieredStorageStore::new(Arc::new(manager))
+    }
+
     async fn lifecycle_store_with_tiers(configs: Vec<TierConfig>) -> TieredStorageStore {
         let mut manager = TierManager::new();
         for config in configs {
@@ -486,6 +531,44 @@ mod tests {
     fn record_codec_roundtrips_storage_write_record() {
         let record = tagged_record(b"1", "BTCUSDT");
         validate_storage_record_roundtrip(&record).unwrap();
+    }
+
+    #[tokio::test]
+    async fn tiered_store_memory_only_with_policy_routes_generic_realtime_tags() {
+        let store =
+            memory_store_with_l1_to_l4_and_policy(StorageTieringPolicy::generic_realtime()).await;
+
+        let mut live = tagged_record(b"live", "BTCUSDT");
+        live.metadata
+            .tags
+            .insert("mode".to_string(), "live".to_string());
+        live.placement = StoragePlacementHint::default();
+        let mut backfill = tagged_record(b"backfill", "BTCUSDT");
+        backfill
+            .metadata
+            .tags
+            .insert("mode".to_string(), "backfill".to_string());
+        backfill.placement = StoragePlacementHint::default();
+
+        store
+            .write_batch(StorageWriteBatch::new(vec![live.clone(), backfill.clone()]))
+            .await
+            .unwrap();
+
+        let live_key = TieredStorageStore::storage_key_for_record(&live);
+        let backfill_key = TieredStorageStore::storage_key_for_record(&backfill);
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&live_key, &StorageTier::L2)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(store
+            .tier_manager()
+            .get_from_tier(&backfill_key, &StorageTier::L3)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]

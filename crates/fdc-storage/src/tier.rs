@@ -9,7 +9,7 @@ use crate::{
 use chrono::{DateTime, Utc};
 use fdc_core::error::{Error, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -204,6 +204,8 @@ pub struct TierManager {
     access_patterns: Arc<RwLock<HashMap<Vec<u8>, AccessPattern>>>,
     /// 迁移任务队列
     migration_queue: Arc<RwLock<Vec<MigrationTask>>>,
+    /// Tiering policy used for placement decisions
+    policy: StorageTieringPolicy,
 }
 
 /// 迁移任务
@@ -224,12 +226,21 @@ pub struct MigrationTask {
 impl TierManager {
     /// 创建新的层级管理器
     pub fn new() -> Self {
+        Self::with_policy(StorageTieringPolicy::compatibility())
+    }
+
+    pub fn with_policy(policy: StorageTieringPolicy) -> Self {
         Self {
             tiers: HashMap::new(),
             engines: HashMap::new(),
             access_patterns: Arc::new(RwLock::new(HashMap::new())),
             migration_queue: Arc::new(RwLock::new(Vec::new())),
+            policy,
         }
+    }
+
+    pub fn policy(&self) -> &StorageTieringPolicy {
+        &self.policy
     }
 
     /// 添加层级配置
@@ -301,6 +312,31 @@ impl TierManager {
     ) -> Result<()> {
         let target_tier = self
             .determine_tier_for_placement(key, value.len(), placement)
+            .await;
+
+        self.put_to_specific_tier(key, value, &target_tier).await
+    }
+
+    pub async fn put_with_policy_context(
+        &self,
+        key: &[u8],
+        value: &[u8],
+        namespace: &str,
+        collection: &str,
+        metadata_tags: &BTreeMap<String, String>,
+        timestamp_age_seconds: i64,
+        placement: &StoragePlacementHint,
+    ) -> Result<()> {
+        let target_tier = self
+            .determine_tier_for_policy_context(
+                key,
+                value.len(),
+                namespace,
+                collection,
+                metadata_tags,
+                timestamp_age_seconds,
+                placement,
+            )
             .await;
 
         self.put_to_specific_tier(key, value, &target_tier).await
@@ -545,6 +581,21 @@ impl TierManager {
         data_size: usize,
         placement: &StoragePlacementHint,
     ) -> StorageTier {
+        let metadata_tags = BTreeMap::new();
+        self.determine_tier_for_policy_context(key, data_size, "", "", &metadata_tags, 0, placement)
+            .await
+    }
+
+    async fn determine_tier_for_policy_context(
+        &self,
+        key: &[u8],
+        data_size: usize,
+        namespace: &str,
+        collection: &str,
+        metadata_tags: &BTreeMap<String, String>,
+        timestamp_age_seconds: i64,
+        placement: &StoragePlacementHint,
+    ) -> StorageTier {
         let available_tiers = self.initialized_tiers();
         let prior_access = self
             .access_patterns
@@ -552,22 +603,19 @@ impl TierManager {
             .await
             .get(key)
             .map(AccessPattern::snapshot);
-        let metadata_tags = std::collections::BTreeMap::new();
         let context = StorageTieringContext {
-            namespace: "",
-            collection: "",
+            namespace,
+            collection,
             key_len: key.len(),
             value_len: data_size,
-            timestamp_age_seconds: 0,
-            metadata_tags: &metadata_tags,
+            timestamp_age_seconds,
+            metadata_tags,
             placement_hint: placement,
             available_tiers: &available_tiers,
             prior_access,
         };
 
-        StorageTieringPolicy::compatibility()
-            .decide_initial_placement(&context)
-            .initial_tier
+        self.policy.decide_initial_placement(&context).initial_tier
     }
 
     fn nearest_available_tier(&self, desired: StorageTier) -> Option<StorageTier> {
@@ -714,6 +762,21 @@ mod tests {
         let manager = TierManager::new();
         assert_eq!(manager.tiers.len(), 0);
         assert_eq!(manager.engines.len(), 0);
+    }
+
+    #[test]
+    fn tier_manager_can_be_created_with_injected_policy() {
+        let manager = TierManager::with_policy(StorageTieringPolicy::generic_realtime());
+        assert_eq!(
+            manager.policy().profile(),
+            crate::StorageTieringPolicyProfile::GenericRealtime
+        );
+
+        let default_manager = TierManager::new();
+        assert_eq!(
+            default_manager.policy().profile(),
+            crate::StorageTieringPolicyProfile::Compatibility
+        );
     }
 
     #[tokio::test]
