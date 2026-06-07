@@ -14,14 +14,7 @@ pub fn market_data_dto_to_storage_record(dto: &MarketDataDto) -> Result<StorageW
     let key = storage_key(dto);
     let shard_key = format!("{}:{}", dto.source_id, dto.symbol.as_str()).into_bytes();
 
-    let mut tags = BTreeMap::new();
-    tags.insert("adapter".to_string(), dto.adapter.clone());
-    tags.insert("exchange".to_string(), dto.exchange.clone());
-    tags.insert("symbol".to_string(), dto.symbol.as_str().to_string());
-    tags.insert(
-        "kind".to_string(),
-        schema_kind_for_kind(dto.kind).to_string(),
-    );
+    let tags = storage_tags_for_dto(dto);
 
     Ok(
         StorageWriteRecord::new("market_data", collection, key.into_bytes(), value)
@@ -50,6 +43,55 @@ fn storage_key(dto: &MarketDataDto) -> String {
         schema_kind_for_kind(dto.kind),
         dto.event_time.as_nanos()
     )
+}
+
+fn storage_tags_for_dto(dto: &MarketDataDto) -> BTreeMap<String, String> {
+    let schema_kind = schema_kind_for_kind(dto.kind);
+    let (data_kind, record_kind) = data_kind_tags_for_kind(dto.kind);
+
+    let mut tags = BTreeMap::new();
+    tags.insert("adapter".to_string(), dto.adapter.clone());
+    tags.insert("exchange".to_string(), dto.exchange.clone());
+    tags.insert("symbol".to_string(), dto.symbol.as_str().to_string());
+    tags.insert("kind".to_string(), schema_kind.to_string());
+    tags.insert("data.kind".to_string(), data_kind.to_string());
+    tags.insert("record.kind".to_string(), record_kind.to_string());
+
+    let mode = if dto.quality.is_backfill {
+        "backfill"
+    } else {
+        "live"
+    };
+    tags.insert("mode".to_string(), mode.to_string());
+
+    if dto.quality.is_replay {
+        tags.insert("quality.is_replay".to_string(), "true".to_string());
+    }
+    if dto.quality.is_duplicate_candidate {
+        tags.insert(
+            "quality.is_duplicate_candidate".to_string(),
+            "true".to_string(),
+        );
+    }
+    if dto.quality.has_gap_before {
+        tags.insert("quality.has_gap_before".to_string(), "true".to_string());
+    }
+    if dto.quality.is_out_of_order {
+        tags.insert("quality.is_out_of_order".to_string(), "true".to_string());
+    }
+
+    tags
+}
+
+fn data_kind_tags_for_kind(kind: MarketDataKind) -> (&'static str, &'static str) {
+    match kind {
+        MarketDataKind::Trade => ("event", "trade"),
+        MarketDataKind::OrderBookL1 => ("state", "order_book_l1"),
+        MarketDataKind::OrderBook => ("state", "order_book"),
+        MarketDataKind::Candle => ("aggregate", "candle"),
+        MarketDataKind::Liquidation => ("event", "liquidation"),
+        MarketDataKind::Raw => ("raw", "raw"),
+    }
 }
 
 fn collection_for_kind(kind: MarketDataKind) -> &'static str {

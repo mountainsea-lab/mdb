@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use fdc_barter::{
     BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
-    BarterMarketPayload, BarterMarketType, DataQualityFlags, DecimalQuantity, TradePayload,
-    TradeSide,
+    BarterMarketPayload, BarterMarketType, CandlePayload, DataQualityFlags, DecimalQuantity,
+    TradePayload, TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_ingestion::{SourceEnvelope, SourceType};
@@ -45,6 +45,54 @@ fn sample_envelope() -> BarterIngestionEnvelope {
         is_replay: false,
         is_backfill: false,
         is_duplicate_candidate: true,
+        has_gap_before: false,
+        is_out_of_order: false,
+    };
+    envelope
+}
+
+fn sample_envelope_with_quality(quality: DataQualityFlags) -> BarterIngestionEnvelope {
+    let mut envelope = sample_envelope();
+    envelope.quality = quality;
+    envelope
+}
+
+fn sample_candle_event() -> BarterMarketEvent {
+    BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_spot".to_string(),
+        symbol: Symbol::new("BTCUSDT"),
+        market_type: BarterMarketType::Spot,
+        kind: BarterMarketDataKind::Candle,
+        timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_001),
+        received_at: TimestampNs::from_nanos(1_700_000_000_000_000_010),
+        payload: BarterMarketPayload::Candle(CandlePayload {
+            interval: Some("1m".to_string()),
+            open_time: TimestampNs::from_nanos(1_700_000_000_000_000_000),
+            close_time: TimestampNs::from_nanos(1_700_000_060_000_000_000),
+            open: Price::new(Decimal::new(42_000_00, 2)),
+            high: Price::new(Decimal::new(42_100_00, 2)),
+            low: Price::new(Decimal::new(41_900_00, 2)),
+            close: Price::new(Decimal::new(42_050_00, 2)),
+            volume: Decimal::new(25, 1),
+            trade_count: Some(100),
+            quote_volume: Some(Decimal::new(1_000_000, 2)),
+        }),
+        sequence: Some("candle-seq-1".to_string()),
+        checkpoint: None,
+    }
+}
+
+fn sample_candle_envelope() -> BarterIngestionEnvelope {
+    let mut envelope =
+        BarterIngestionEnvelope::from_event("barter:binance_spot", sample_candle_event());
+    envelope.envelope_id = "candle-env-1".to_string();
+    envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
+    envelope.quality = DataQualityFlags {
+        is_replay: false,
+        is_backfill: true,
+        is_duplicate_candidate: false,
         has_gap_before: false,
         is_out_of_order: false,
     };
@@ -133,11 +181,121 @@ fn market_data_dto_maps_to_storage_write_record() {
         record.placement.shard_key.as_deref(),
         Some(&b"barter:binance_spot:BTCUSDT"[..])
     );
+    assert_eq!(
+        record.metadata.tags.get("mode").map(String::as_str),
+        Some("live")
+    );
+    assert_eq!(
+        record.metadata.tags.get("data.kind").map(String::as_str),
+        Some("event")
+    );
+    assert_eq!(
+        record.metadata.tags.get("record.kind").map(String::as_str),
+        Some("trade")
+    );
+    assert_eq!(record.metadata.tags.get("quality.is_replay"), None);
 
     let json: serde_json::Value =
         serde_json::from_slice(&record.value).expect("record value should be JSON");
     assert_eq!(json["kind"], "Trade");
     assert_eq!(json["symbol"], "BTCUSDT");
+}
+
+#[test]
+fn market_data_dto_quality_maps_to_generic_storage_tags() {
+    let backfill_source =
+        barter_envelope_to_source_envelope(sample_envelope_with_quality(DataQualityFlags {
+            is_replay: false,
+            is_backfill: true,
+            is_duplicate_candidate: false,
+            has_gap_before: false,
+            is_out_of_order: false,
+        }));
+    let backfill_dto = barter_event_to_market_data_dto(&backfill_source)
+        .expect("backfill trade should map to DTO");
+    let backfill_record = market_data_dto_to_storage_record(&backfill_dto)
+        .expect("backfill DTO should map to storage record");
+
+    assert_eq!(
+        backfill_record
+            .metadata
+            .tags
+            .get("mode")
+            .map(String::as_str),
+        Some("backfill")
+    );
+
+    let replay_source =
+        barter_envelope_to_source_envelope(sample_envelope_with_quality(DataQualityFlags {
+            is_replay: true,
+            is_backfill: false,
+            is_duplicate_candidate: true,
+            has_gap_before: true,
+            is_out_of_order: true,
+        }));
+    let replay_dto =
+        barter_event_to_market_data_dto(&replay_source).expect("replay trade should map to DTO");
+    let replay_record = market_data_dto_to_storage_record(&replay_dto)
+        .expect("replay DTO should map to storage record");
+
+    assert_eq!(
+        replay_record.metadata.tags.get("mode").map(String::as_str),
+        Some("live")
+    );
+    assert_eq!(
+        replay_record
+            .metadata
+            .tags
+            .get("quality.is_replay")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        replay_record
+            .metadata
+            .tags
+            .get("quality.is_duplicate_candidate")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        replay_record
+            .metadata
+            .tags
+            .get("quality.has_gap_before")
+            .map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        replay_record
+            .metadata
+            .tags
+            .get("quality.is_out_of_order")
+            .map(String::as_str),
+        Some("true")
+    );
+}
+
+#[test]
+fn market_data_candle_maps_to_generic_aggregate_storage_tags() {
+    let source = barter_envelope_to_source_envelope(sample_candle_envelope());
+    let dto = barter_event_to_market_data_dto(&source).expect("candle should map to DTO");
+    let record = market_data_dto_to_storage_record(&dto).expect("candle DTO should map");
+
+    assert_eq!(dto.kind, MarketDataKind::Candle);
+    assert_eq!(record.collection, "candles");
+    assert_eq!(
+        record.metadata.tags.get("mode").map(String::as_str),
+        Some("backfill")
+    );
+    assert_eq!(
+        record.metadata.tags.get("data.kind").map(String::as_str),
+        Some("aggregate")
+    );
+    assert_eq!(
+        record.metadata.tags.get("record.kind").map(String::as_str),
+        Some("candle")
+    );
 }
 
 #[tokio::test]
