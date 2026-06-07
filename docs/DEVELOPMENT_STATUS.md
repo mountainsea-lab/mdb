@@ -3,9 +3,53 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler config status surface`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler task skeleton status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P32 Scheduler Task Skeleton
+
+Completed:
+
+- Added server-owned storage maintenance scheduler state and counters.
+- Wired scheduler state into `ProductionServerState` and the existing read-only scheduler status route.
+- Added gated background scheduler execution for tiered backend only:
+  - scheduler gate must be enabled
+  - default runtime spawns no scheduler
+  - memory backend reports unsupported without running maintenance
+- Scheduler uses existing generic storage maintenance options with configured timeout and audit sink.
+- Scheduled tiered runs record audit entries through the existing audit route.
+- Added non-overlap accounting through scheduler state.
+- Preserved manual run-once gate separation.
+- Preserved the `fdc-storage` boundary: no server/runtime/admin semantics were added to storage.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-scheduler-task-skeleton-design.md`
+- `docs/superpowers/plans/2026-06-07-scheduler-task-skeleton.md`
+
+Commits:
+
+- `db0339f docs(server): design scheduler task skeleton`
+- `6cc2a27 docs(server): plan scheduler task skeleton`
+- `75be8e2 feat(server): add storage maintenance scheduler state`
+- `251ee95 feat(server): expose storage maintenance scheduler state`
+- `3052ac0 feat(server): run gated storage maintenance scheduler`
+- `704faa0 test(server): cover scheduler non-overlap accounting`
+
+Verification:
+
+- RED route tests failed before implementation because scheduler status remained static and no background task existed.
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler` - 5 passed, 35 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 36 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_route` - 5 passed, 35 filtered out
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler` - 10 passed, 81 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P33 scheduler failure handling and suppression**: add failure suppression after max consecutive failures, more explicit sanitized error reporting, and regression tests that prove the server does not panic on scheduler failure.
 
 ## 2026-06-07 P31 Scheduler Config and Read-Only Status Surface
 
