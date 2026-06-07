@@ -7,6 +7,42 @@ Latest checkpoint commit when this file was written: this document update commit
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
+## 2026-06-07 P17 Generic Storage Tag Mapping in Orchestrator
+
+Completed:
+
+- Added orchestrator-owned mapping from `MarketDataDto` facts into generic storage metadata tags.
+- Preserved existing compatibility tags: `adapter`, `exchange`, `symbol`, and `kind`.
+- Added generic policy tags for live/backfill/replay quality and record/data kind:
+  - `mode=live|backfill`
+  - `quality.is_replay=true`
+  - `quality.is_duplicate_candidate=true`
+  - `quality.has_gap_before=true`
+  - `quality.is_out_of_order=true`
+  - `data.kind=event|state|aggregate|raw`
+  - `record.kind=<generic-record-kind>`
+- Verified `tiered + generic_realtime` routes real orchestrator writes differently through storage tier-scope queries.
+- Preserved the `fdc-storage` boundary: storage still consumes only generic tags/facts and has no dependency on market-data DTOs or orchestrator code.
+
+Commits:
+
+- `25a02a3 docs(orchestrator): design generic storage tag mapping`
+- `79032b9 docs(orchestrator): plan generic storage tag mapping`
+- `6251f53 feat(orchestrator): map market data facts to storage tags`
+- `5abe2a6 test(orchestrator): verify tag-driven tier routing`
+
+Verification:
+
+- `rtk cargo fmt --package fdc-orchestrator --package fdc-storage --check`
+- `rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract` - 7 passed
+- `rtk cargo test -p fdc-orchestrator --test orchestrator_queryable_storage_contract` - 2 passed
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `rtk cargo test -p fdc-storage --test tiering_policy_contract` - 4 passed
+
+Recommended next slice:
+
+- **P18 runtime server path smoke with `tiered + generic_realtime`**: verify server/runtime assembly can ingest/write realistic fixtures through the production-facing path and still expose tier-aware placement through storage query contracts.
+
 ## 2026-06-07 P16 Runtime Tiering Policy Injection
 
 Completed:
