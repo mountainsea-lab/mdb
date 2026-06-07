@@ -648,6 +648,75 @@ async fn storage_maintenance_scheduler_status_reports_configured_values_without_
 }
 
 #[tokio::test]
+async fn storage_maintenance_scheduler_status_reports_suppressed_failures() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+            "2",
+        ),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let scheduler = state.market_data_storage_maintenance_scheduler();
+    let first_started_at = chrono::Utc::now();
+    let first_finished_at = first_started_at + chrono::Duration::milliseconds(1);
+    let first_next_run_at = first_finished_at + chrono::Duration::seconds(60);
+    assert!(scheduler.mark_started(first_started_at).await);
+    scheduler
+        .mark_failed(
+            first_finished_at,
+            first_next_run_at,
+            "first scheduler failure",
+        )
+        .await;
+    let second_started_at = first_next_run_at;
+    let second_finished_at = second_started_at + chrono::Duration::milliseconds(1);
+    let second_next_run_at = second_finished_at + chrono::Duration::seconds(60);
+    assert!(scheduler.mark_started(second_started_at).await);
+    scheduler
+        .mark_failed(
+            second_finished_at,
+            second_next_run_at,
+            "second scheduler failure\nwith control characters",
+        )
+        .await;
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/scheduler/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler status should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    let data = &json["data"];
+    assert_eq!(data["enabled"], true);
+    assert_eq!(data["running"], false);
+    assert_eq!(data["backend"], "tiered");
+    assert_eq!(data["tiered"], true);
+    assert_eq!(data["max_consecutive_failures"], 2);
+    assert_eq!(data["consecutive_failures"], 2);
+    assert_eq!(data["total_runs"], 2);
+    assert_eq!(data["successful_runs"], 0);
+    assert_eq!(data["failed_runs"], 2);
+    assert_eq!(data["last_status"], "suppressed_after_failures");
+    assert_eq!(
+        data["last_error"],
+        "second scheduler failure with control characters"
+    );
+    assert!(data["last_started_at"].is_string());
+    assert!(data["last_finished_at"].is_string());
+    assert!(data["next_run_at"].is_null());
+}
+
+#[tokio::test]
 async fn storage_maintenance_scheduler_disabled_default_does_not_spawn_or_audit() {
     let state = ProductionServerState::try_new(
         ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
