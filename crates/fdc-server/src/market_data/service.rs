@@ -26,6 +26,8 @@ use crate::{
         MarketDataStorageMaintenanceAuditResetRequest,
         MarketDataStorageMaintenanceAuditResetResponse, MarketDataStorageMaintenanceAuditResponse,
         MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
+        MarketDataStorageMaintenanceSchedulerResetRequest,
+        MarketDataStorageMaintenanceSchedulerResetResponse,
         MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
         MarketDataStorageTierHealth, MarketDataStorageTierStatus, MarketDataTradeRecord,
         MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
@@ -58,11 +60,19 @@ pub struct StorageMaintenanceServiceResult {
 }
 
 pub const STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION: &str = "reset_maintenance_audit";
+pub const STORAGE_MAINTENANCE_SCHEDULER_RESET_CONFIRMATION: &str = "reset_scheduler_suppression";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageMaintenanceAuditResetResult {
     pub http_status: StorageMaintenanceHttpStatus,
     pub response: MarketDataStorageMaintenanceAuditResetResponse,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageMaintenanceSchedulerResetResult {
+    pub http_status: StorageMaintenanceHttpStatus,
+    pub response: MarketDataStorageMaintenanceSchedulerResetResponse,
     pub message: Option<String>,
 }
 
@@ -298,6 +308,84 @@ pub async fn storage_maintenance_scheduler_status(
         last_status: snapshot.last_status,
         last_error: snapshot.last_error,
         next_run_at: snapshot.next_run_at.map(|timestamp| timestamp.to_rfc3339()),
+    }
+}
+
+pub async fn reset_storage_maintenance_scheduler(
+    state: &ProductionServerState,
+    request: MarketDataStorageMaintenanceSchedulerResetRequest,
+) -> StorageMaintenanceSchedulerResetResult {
+    if !state
+        .config()
+        .market_data_storage_maintenance_scheduler_reset_enabled
+    {
+        return scheduler_reset_error(
+            StorageMaintenanceHttpStatus::Forbidden,
+            "disabled",
+            request.reason,
+            0,
+            0,
+            "storage maintenance scheduler reset hook is disabled",
+        );
+    }
+
+    if request.confirm != STORAGE_MAINTENANCE_SCHEDULER_RESET_CONFIRMATION {
+        return scheduler_reset_error(
+            StorageMaintenanceHttpStatus::BadRequest,
+            "confirmation_required",
+            request.reason,
+            0,
+            0,
+            format!("confirm must be {STORAGE_MAINTENANCE_SCHEDULER_RESET_CONFIRMATION}"),
+        );
+    }
+
+    let outcome = state
+        .market_data_storage_maintenance_scheduler()
+        .reset_suppression()
+        .await;
+    if outcome.running {
+        return scheduler_reset_error(
+            StorageMaintenanceHttpStatus::Conflict,
+            "running",
+            request.reason,
+            outcome.previous_consecutive_failures,
+            outcome.consecutive_failures,
+            "storage maintenance scheduler reset cannot run while scheduler attempt is running",
+        );
+    }
+
+    StorageMaintenanceSchedulerResetResult {
+        http_status: StorageMaintenanceHttpStatus::Ok,
+        response: MarketDataStorageMaintenanceSchedulerResetResponse {
+            accepted: true,
+            status: "reset".to_string(),
+            reason: request.reason,
+            previous_consecutive_failures: outcome.previous_consecutive_failures,
+            consecutive_failures: outcome.consecutive_failures,
+        },
+        message: None,
+    }
+}
+
+fn scheduler_reset_error(
+    http_status: StorageMaintenanceHttpStatus,
+    status: &str,
+    reason: Option<String>,
+    previous_consecutive_failures: u32,
+    consecutive_failures: u32,
+    message: impl Into<String>,
+) -> StorageMaintenanceSchedulerResetResult {
+    StorageMaintenanceSchedulerResetResult {
+        http_status,
+        response: MarketDataStorageMaintenanceSchedulerResetResponse {
+            accepted: false,
+            status: status.to_string(),
+            reason,
+            previous_consecutive_failures,
+            consecutive_failures,
+        },
+        message: Some(message.into()),
     }
 }
 

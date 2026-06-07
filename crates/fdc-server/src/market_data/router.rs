@@ -14,15 +14,17 @@ use crate::{
             MarketDataStorageMaintenanceAuditResetResponse,
             MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
             MarketDataStorageMaintenanceRunResponse,
+            MarketDataStorageMaintenanceSchedulerResetRequest,
+            MarketDataStorageMaintenanceSchedulerResetResponse,
             MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
             MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
             StopLiveMarketDataResponse,
         },
         service::{
             live_status, query_trades, reset_storage_maintenance_audit,
-            run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
-            storage_health, storage_maintenance_audit, storage_maintenance_scheduler_status,
-            storage_status, StorageMaintenanceHttpStatus,
+            reset_storage_maintenance_scheduler, run_storage_maintenance_once, start_live,
+            start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
+            storage_maintenance_scheduler_status, storage_status, StorageMaintenanceHttpStatus,
         },
     },
     ProductionServerState,
@@ -86,6 +88,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route(
             "/market-data/storage/maintenance/scheduler/status",
             get(storage_maintenance_scheduler_status_handler),
+        )
+        .route(
+            "/market-data/storage/maintenance/scheduler/reset",
+            post(storage_maintenance_scheduler_reset_handler),
         )
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
@@ -217,6 +223,28 @@ async fn storage_maintenance_scheduler_status_handler(
     Json(ServerApiResponse::success(
         storage_maintenance_scheduler_status(&state).await,
     ))
+}
+
+async fn storage_maintenance_scheduler_reset_handler(
+    State(state): State<ProductionServerState>,
+    Json(request): Json<MarketDataStorageMaintenanceSchedulerResetRequest>,
+) -> (
+    StatusCode,
+    Json<ServerApiResponse<MarketDataStorageMaintenanceSchedulerResetResponse>>,
+) {
+    let result = reset_storage_maintenance_scheduler(&state, request).await;
+    let status = storage_maintenance_status_code(result.http_status);
+    let envelope = if result.http_status == StorageMaintenanceHttpStatus::Ok {
+        ServerApiResponse::success(result.response)
+    } else {
+        ServerApiResponse::error(
+            result.response,
+            result.message.unwrap_or_else(|| {
+                "storage maintenance scheduler reset request failed".to_string()
+            }),
+        )
+    };
+    (status, Json(envelope))
 }
 
 async fn query_trades_handler(
