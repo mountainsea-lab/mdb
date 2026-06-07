@@ -32,6 +32,42 @@ fn runtime_storage_record(key: &str) -> StorageWriteRecord {
     .with_metadata(metadata)
 }
 
+fn unique_test_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "fdc-server-{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ))
+}
+
+fn durable_tier_env(root: &std::path::Path) -> [(String, String); 5] {
+    [
+        (
+            "FDC_MARKET_DATA_STORAGE_BACKEND".to_string(),
+            "tiered".to_string(),
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_POLICY_PROFILE".to_string(),
+            "generic_realtime".to_string(),
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_L2_REDB_PATH".to_string(),
+            root.join("l2.redb").display().to_string(),
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_L3_DUCKDB_PATH".to_string(),
+            root.join("l3.duckdb").display().to_string(),
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_L4_ROCKSDB_PATH".to_string(),
+            root.join("l4-rocksdb").display().to_string(),
+        ),
+    ]
+}
+
 #[tokio::test]
 async fn runtime_builder_creates_memory_market_data_store() {
     let store = build_market_data_store_from_runtime_config(MarketDataStorageRuntimeConfig {
@@ -320,6 +356,91 @@ async fn runtime_server_path_routes_live_fixture_with_tiered_generic_realtime() 
         json["data"]["records"][0]["payload"]["payload"]["Trade"]["trade_id"],
         "generic-runtime-live-1"
     );
+}
+
+#[tokio::test]
+async fn runtime_server_reopens_configured_durable_tiers_and_serves_persisted_trade() {
+    let root = unique_test_path("durable-reopen");
+    let env = durable_tier_env(&root);
+    let config = ServerRuntimeConfig::from_env_pairs(
+        env.iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    )
+    .expect("durable runtime config should parse");
+
+    let first_state = ProductionServerState::try_new(config.clone())
+        .await
+        .expect("first durable state should build");
+    first_state
+        .ingest_test_trade("BTCUSDT", "durable-reopen-live-1")
+        .await
+        .expect("fixture write should succeed");
+
+    let before_reopen = first_state
+        .market_data_store()
+        .query_storage(
+            &StorageQuery::new("market_data")
+                .with_tier_scope(StorageTierScope::Only(StorageTier::L2)),
+        )
+        .await
+        .expect("L2 query before reopen should succeed");
+    assert_eq!(before_reopen.len(), 1);
+    assert_eq!(
+        before_reopen[0]
+            .metadata
+            .tags
+            .get("mode")
+            .map(String::as_str),
+        Some("live")
+    );
+
+    drop(first_state);
+
+    let reopened_state = ProductionServerState::try_new(config)
+        .await
+        .expect("reopened durable state should build");
+    let persisted_l2 = reopened_state
+        .market_data_store()
+        .query_storage(
+            &StorageQuery::new("market_data")
+                .with_tier_scope(StorageTierScope::Only(StorageTier::L2)),
+        )
+        .await
+        .expect("L2 query after reopen should succeed");
+    assert_eq!(persisted_l2.len(), 1);
+    assert_eq!(
+        persisted_l2[0]
+            .metadata
+            .tags
+            .get("record.kind")
+            .map(String::as_str),
+        Some("trade")
+    );
+
+    let router = build_production_router(reopened_state);
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/trades?symbol=BTCUSDT&limit=10")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("query should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_records"], 1);
+    assert_eq!(
+        json["data"]["records"][0]["payload"]["payload"]["Trade"]["trade_id"],
+        "durable-reopen-live-1"
+    );
+
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
