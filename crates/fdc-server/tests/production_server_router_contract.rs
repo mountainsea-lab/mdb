@@ -152,6 +152,87 @@ async fn production_router_exposes_health_and_readiness() {
 }
 
 #[tokio::test]
+async fn production_storage_status_reports_memory_defaults() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    );
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage status should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["backend"], "memory");
+    assert_eq!(json["data"]["policy_profile"], "compatibility");
+    assert_eq!(json["data"]["tiers"].as_array().unwrap().len(), 4);
+    assert_eq!(json["data"]["tiers"][0]["tier"], "L1");
+    assert_eq!(json["data"]["tiers"][0]["engine"], "memory");
+    assert_eq!(json["data"]["tiers"][0]["durable_path_configured"], false);
+    assert!(json["data"]["tiers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|tier| tier["engine"] == "memory"));
+}
+
+#[tokio::test]
+async fn production_storage_status_reports_durable_tiered_config_without_full_paths() {
+    let root = unique_test_path("storage-status");
+    let env = durable_tier_env(&root);
+    let config = ServerRuntimeConfig::from_env_pairs(
+        env.iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    )
+    .expect("durable runtime config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage status should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should read");
+    let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
+    assert_eq!(json["data"]["backend"], "tiered");
+    assert_eq!(json["data"]["policy_profile"], "generic_realtime");
+    assert_eq!(json["data"]["tiers"][1]["tier"], "L2");
+    assert_eq!(json["data"]["tiers"][1]["engine"], "redb");
+    assert_eq!(json["data"]["tiers"][1]["durable_path_configured"], true);
+    assert_eq!(json["data"]["tiers"][1]["path_hint"], "l2.redb");
+    assert_eq!(json["data"]["tiers"][2]["engine"], "duckdb");
+    assert_eq!(json["data"]["tiers"][2]["path_hint"], "l3.duckdb");
+    assert_eq!(json["data"]["tiers"][3]["engine"], "rocksdb");
+    assert_eq!(json["data"]["tiers"][3]["path_hint"], "l4-rocksdb");
+
+    let body_text = String::from_utf8(body.to_vec()).expect("body should be utf8");
+    assert!(
+        !body_text.contains(root.to_string_lossy().as_ref()),
+        "storage status must not leak full configured paths: {body_text}"
+    );
+}
+
+#[tokio::test]
 async fn production_live_start_is_explicitly_disabled_by_default() {
     let state = ProductionServerState::new(
         ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),

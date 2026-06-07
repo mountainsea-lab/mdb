@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use fdc_barter::{
     collect_live_market_data_envelopes, default_binance_spot_market_data_subscriptions,
@@ -16,16 +16,92 @@ use rust_decimal::Decimal;
 
 use crate::{
     market_data::model::{
-        MarketDataLiveState, MarketDataTradeRecord, MarketDataTradesResponse,
-        StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
+        MarketDataLiveState, MarketDataStorageStatusResponse, MarketDataStorageTierStatus,
+        MarketDataTradeRecord, MarketDataTradesResponse, StartLiveMarketDataRequest,
+        StartLiveMarketDataResponse, StopLiveMarketDataResponse,
     },
-    run_realtime_barter_envelope_stream, ProductionServerState, RealtimeMarketDataMvpConfig,
+    run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
+    MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
 };
 
 pub fn live_status(
     state: &ProductionServerState,
 ) -> crate::market_data::model::LiveMarketDataStatusResponse {
     state.market_data_supervisor().status()
+}
+
+pub fn storage_status(state: &ProductionServerState) -> MarketDataStorageStatusResponse {
+    let storage = &state.config().market_data_storage;
+    let tiered = storage.backend == MarketDataStorageBackendConfig::Tiered;
+
+    MarketDataStorageStatusResponse {
+        backend: backend_label(storage.backend).to_string(),
+        policy_profile: policy_profile_label(storage.policy_profile).to_string(),
+        tiers: vec![
+            memory_tier_status("L1"),
+            tier_status("L2", tiered, "redb", storage.tiers.l2_redb_path.as_deref()),
+            tier_status(
+                "L3",
+                tiered,
+                "duckdb",
+                storage.tiers.l3_duckdb_path.as_deref(),
+            ),
+            tier_status(
+                "L4",
+                tiered,
+                "rocksdb",
+                storage.tiers.l4_rocksdb_path.as_deref(),
+            ),
+        ],
+    }
+}
+
+fn backend_label(backend: MarketDataStorageBackendConfig) -> &'static str {
+    match backend {
+        MarketDataStorageBackendConfig::Memory => "memory",
+        MarketDataStorageBackendConfig::Tiered => "tiered",
+    }
+}
+
+fn policy_profile_label(profile: MarketDataStoragePolicyProfileConfig) -> &'static str {
+    match profile {
+        MarketDataStoragePolicyProfileConfig::Compatibility => "compatibility",
+        MarketDataStoragePolicyProfileConfig::GenericRealtime => "generic_realtime",
+    }
+}
+
+fn memory_tier_status(tier: &str) -> MarketDataStorageTierStatus {
+    MarketDataStorageTierStatus {
+        tier: tier.to_string(),
+        engine: "memory".to_string(),
+        durable_path_configured: false,
+        path_hint: None,
+    }
+}
+
+fn tier_status(
+    tier: &str,
+    tiered_backend: bool,
+    durable_engine: &str,
+    configured_path: Option<&Path>,
+) -> MarketDataStorageTierStatus {
+    match (tiered_backend, configured_path) {
+        (true, Some(path)) => MarketDataStorageTierStatus {
+            tier: tier.to_string(),
+            engine: durable_engine.to_string(),
+            durable_path_configured: true,
+            path_hint: Some(safe_path_hint(path)),
+        },
+        _ => memory_tier_status(tier),
+    }
+}
+
+fn safe_path_hint(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "configured".to_string())
 }
 
 pub fn start_live_disabled(state: &ProductionServerState) -> (StartLiveMarketDataResponse, String) {

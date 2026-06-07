@@ -8,10 +8,13 @@ use serde::Deserialize;
 use crate::{
     market_data::{
         model::{
-            LiveMarketDataStatusResponse, MarketDataTradesResponse, StartLiveMarketDataRequest,
-            StartLiveMarketDataResponse, StopLiveMarketDataResponse,
+            LiveMarketDataStatusResponse, MarketDataStorageStatusResponse,
+            MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
+            StopLiveMarketDataResponse,
         },
-        service::{live_status, query_trades, start_live, start_live_disabled, stop_live},
+        service::{
+            live_status, query_trades, start_live, start_live_disabled, stop_live, storage_status,
+        },
     },
     ProductionServerState,
 };
@@ -52,6 +55,7 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route("/market-data/live/start", post(start_live_handler))
         .route("/market-data/live/stop", post(stop_live_handler))
         .route("/market-data/live/status", get(live_status_handler))
+        .route("/market-data/storage/status", get(storage_status_handler))
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
 }
@@ -99,6 +103,12 @@ async fn live_status_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<LiveMarketDataStatusResponse>> {
     Json(ServerApiResponse::success(live_status(&state)))
+}
+
+async fn storage_status_handler(
+    State(state): State<ProductionServerState>,
+) -> Json<ServerApiResponse<MarketDataStorageStatusResponse>> {
+    Json(ServerApiResponse::success(storage_status(&state)))
 }
 
 async fn query_trades_handler(

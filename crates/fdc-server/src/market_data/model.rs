@@ -45,6 +45,21 @@ pub struct LiveMarketDataStatusResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageStatusResponse {
+    pub backend: String,
+    pub policy_profile: String,
+    pub tiers: Vec<MarketDataStorageTierStatus>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageTierStatus {
+    pub tier: String,
+    pub engine: String,
+    pub durable_path_configured: bool,
+    pub path_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopLiveMarketDataResponse {
     pub state: MarketDataLiveState,
     pub task_id: Option<String>,
