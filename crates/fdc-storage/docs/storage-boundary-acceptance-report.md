@@ -15,6 +15,7 @@ Status: S12 market-data integration baseline validated
 | Generic query boundary | Done | namespace, collection, tags, key filters, time filters, order, limit |
 | Typed facade | Done | `StorageCodec`, JSON/bincode codecs, typed read helpers |
 | Tier-aware store | Done | `TieredStorageStore` routes writes by placement and queries by tier scope |
+| Tiering policy engine | Done | Compatibility policy explains initial tier decisions and preserves existing placement behavior |
 | L1 engine | Done | Memory engine |
 | L2 engine | Done | redb persistent KV |
 | L3 engine | Done | DuckDB KV + SQL query support |
@@ -52,6 +53,14 @@ Expected result as of S11: all `fdc-storage` tests pass.
 - `QueryableMarketDataStore` remains the market-data facade used by `fdc-server` and `fdc-api`.
 - The facade can now be backed by S11 `TieredStorageStore` while preserving the original in-memory constructor behavior.
 - Server and API contract tests validate that market-data writes and `/market-data/trades` queries work through a storage-backed facade.
+
+
+## P13 Tiering Policy Notes
+
+- `fdc-storage` now has a storage-owned tiering policy API for deterministic, explainable initial tier decisions.
+- The first profile is `Compatibility`, which preserves existing placement hint routing semantics.
+- Business modules can continue to provide `StoragePlacementHint`, but the storage module owns the final tier decision.
+- Market-data-specific adaptive routing remains future work and must use generic metadata/tags rather than depending on business DTO crates.
 
 ## Known Limitations
 

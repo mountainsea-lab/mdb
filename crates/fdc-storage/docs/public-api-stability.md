@@ -37,3 +37,17 @@ Deprecated public APIs should remain available for at least one planned migratio
 ## Tests
 
 `crates/fdc-storage/tests/public_api_stability.rs` is the smoke test for the re-exported public API. Update it whenever the public API intentionally expands.
+
+## P13 Tiering Policy API Additions
+
+The P13 intelligent tiering policy API is additive. It introduces public policy decision types without removing or changing existing write/query APIs:
+
+- `StorageTieringPolicy`
+- `StorageTieringPolicyProfile`
+- `StorageTieringContext`
+- `StorageTieringDecision`
+- `StorageRetentionClass`
+- `StorageTieringReason`
+- `AccessPatternSnapshot`
+
+Compatibility policy behavior intentionally mirrors the pre-P13 placement routing rules. Business modules should treat `StoragePlacementHint` as advisory and should not depend on hand-selecting physical tiers for ordinary writes. Explicit `target_tier` remains supported for tests, migrations, and operator override scenarios.
