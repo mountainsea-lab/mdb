@@ -3,9 +3,56 @@
 Last updated: 2026-06-07
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record maintenance audit reset hook status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record storage runtime observability hardening status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-07 P27 Storage Runtime Observability Hardening
+
+Completed:
+
+- Extended the server-owned maintenance audit log with process-lifetime observability metadata:
+  - configured `capacity`
+  - current stored `total_entries`
+  - process-lifetime `total_recorded_entries`
+  - `reset_count`
+  - `total_cleared_entries`
+  - `last_recorded_at`
+  - `last_reset_at`
+- Refactored `MarketDataStorageMaintenanceAuditLog` state behind one mutex so entries and metadata are updated atomically.
+- Preserved bounded newest-first audit entry retention and `recent(0)` behavior.
+- Extended read-only audit response DTO and mapper:
+  - `GET /market-data/storage/maintenance/audit?limit=...`
+  - metadata is returned even when `limit=0` and no entries are returned.
+- Reset metadata is visible through the existing read-only audit route after the separately gated reset hook runs.
+- Preserved the `fdc-storage` boundary: no server/runtime dependency and no market-data DTO dependency were introduced.
+- Preserved safety posture: read-only audit/status routes do not trigger storage maintenance, compaction, TTL deletion, retention deletion, or demotion.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-07-storage-runtime-observability-hardening-design.md`
+- `docs/superpowers/plans/2026-06-07-storage-runtime-observability-hardening.md`
+
+Commits:
+
+- `5969426 docs(server): design storage runtime observability hardening`
+- `371ac04 docs(server): plan storage runtime observability hardening`
+- `00e1010 feat(server): track storage audit observability metadata`
+- `b0d48ac feat(server): expose storage audit observability metadata`
+
+Verification:
+
+- `rtk cargo test -p fdc-server audit_log_` - 10 passed, 67 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_route` - 5 passed, 27 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_reset_route` - 4 passed, 28 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 28 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_storage_health` - 2 passed, 30 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- **P28 storage runtime status surface hardening**, if operationally useful: add similarly safe read-only runtime selection/profile metadata to an existing status/health route. Keep storage generic and keep mutating/admin behavior behind separate explicit gates and confirmation strings.
 
 ## 2026-06-07 P26 Maintenance Audit Admin Reset Hook
 
