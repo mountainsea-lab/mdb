@@ -2244,12 +2244,7 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     assert_eq!(before_reopen.len(), 3);
     assert!(before_reopen.iter().all(|record| {
         record.metadata.tags.get("mode").map(String::as_str) == Some("live")
-            && record
-                .metadata
-                .tags
-                .get("record.kind")
-                .map(String::as_str)
-                == Some("trade")
+            && record.metadata.tags.get("record.kind").map(String::as_str) == Some("trade")
     }));
 
     let before_router = build_production_router(first_state.clone());
@@ -2270,12 +2265,7 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     assert_eq!(persisted_l2.len(), 3);
     assert!(persisted_l2.iter().all(|record| {
         record.metadata.tags.get("mode").map(String::as_str) == Some("live")
-            && record
-                .metadata
-                .tags
-                .get("record.kind")
-                .map(String::as_str)
-                == Some("trade")
+            && record.metadata.tags.get("record.kind").map(String::as_str) == Some("trade")
     }));
 
     let reopened_router = build_production_router(reopened_state);
