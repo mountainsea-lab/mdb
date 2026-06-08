@@ -10,6 +10,15 @@ pub struct MarketDataSupervisor {
     inner: Mutex<MarketDataSupervisorInner>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveResumeOutcome {
+    pub resumed: bool,
+    pub running: bool,
+    pub previous_consecutive_failures: u32,
+    pub consecutive_failures: u32,
+    pub retry_count: u64,
+}
+
 #[derive(Debug, Clone)]
 struct MarketDataSupervisorInner {
     state: MarketDataLiveState,
@@ -71,7 +80,6 @@ impl MarketDataSupervisor {
             MarketDataLiveState::Idle
             | MarketDataLiveState::Completed
             | MarketDataLiveState::Failed
-            | MarketDataLiveState::Suppressed
             | MarketDataLiveState::Stopped => {
                 inner.state = MarketDataLiveState::Starting;
                 inner.failure_message = None;
@@ -103,7 +111,6 @@ impl MarketDataSupervisor {
             MarketDataLiveState::Idle
             | MarketDataLiveState::Completed
             | MarketDataLiveState::Failed
-            | MarketDataLiveState::Suppressed
             | MarketDataLiveState::Stopped => {
                 inner.next_task_sequence += 1;
                 let task_id = format!("market-data-live-{}", inner.next_task_sequence);
@@ -191,6 +198,74 @@ impl MarketDataSupervisor {
         if last_record_at_ns.is_some() {
             inner.last_record_at_ns = last_record_at_ns;
         }
+        inner.consecutive_failures = 0;
+        inner.last_error = None;
+        inner.last_error_at_ns = None;
+        inner.next_retry_at_ns = None;
+        inner.suppressed_reason = None;
+    }
+
+    pub fn record_failure_for_retry(
+        &self,
+        message: impl Into<String>,
+        max_consecutive_failures: u32,
+        next_retry_at_ns: Option<u64>,
+    ) {
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("market-data supervisor mutex should not be poisoned");
+        inner.consecutive_failures = inner.consecutive_failures.saturating_add(1);
+        inner.retry_count = inner.retry_count.saturating_add(1);
+        inner.last_error = Some(sanitize_live_error(message.into()));
+        inner.failure_message = inner.last_error.clone();
+        inner.last_error_at_ns = Some(now_ns());
+        if inner.consecutive_failures >= max_consecutive_failures {
+            inner.state = MarketDataLiveState::Suppressed;
+            inner.suppressed_reason = Some("suppressed_after_failures".to_string());
+            inner.next_retry_at_ns = None;
+            inner.stop_requested = false;
+        } else {
+            inner.next_retry_at_ns = next_retry_at_ns;
+        }
+    }
+
+    pub fn prepare_resume(&self, reason: String) -> LiveResumeOutcome {
+        let mut inner = self
+            .inner
+            .lock()
+            .expect("market-data supervisor mutex should not be poisoned");
+        let previous_consecutive_failures = inner.consecutive_failures;
+        match inner.state {
+            MarketDataLiveState::Starting
+            | MarketDataLiveState::Running
+            | MarketDataLiveState::Stopping => LiveResumeOutcome {
+                resumed: false,
+                running: true,
+                previous_consecutive_failures,
+                consecutive_failures: inner.consecutive_failures,
+                retry_count: inner.retry_count,
+            },
+            _ => {
+                inner.state = MarketDataLiveState::Idle;
+                inner.consecutive_failures = 0;
+                inner.retry_count = 0;
+                inner.last_error = None;
+                inner.failure_message = None;
+                inner.last_error_at_ns = None;
+                inner.next_retry_at_ns = None;
+                inner.suppressed_reason = None;
+                inner.stop_requested = false;
+                inner.stop_reason = Some(reason);
+                LiveResumeOutcome {
+                    resumed: true,
+                    running: false,
+                    previous_consecutive_failures,
+                    consecutive_failures: 0,
+                    retry_count: 0,
+                }
+            }
+        }
     }
 
     pub fn request_stop(&self, reason: impl Into<String>) -> bool {
@@ -263,6 +338,96 @@ impl Default for MarketDataSupervisor {
     }
 }
 
+fn sanitize_live_error(message: String) -> String {
+    let single_line = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_LEN: usize = 256;
+    if single_line.len() > MAX_LEN {
+        format!("{}...", &single_line[..MAX_LEN])
+    } else {
+        single_line
+    }
+}
+
 fn now_ns() -> u64 {
     TimestampNs::now().as_nanos().max(0) as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_supervisor_records_failure_and_suppresses_at_threshold() {
+        let supervisor = MarketDataSupervisor::new();
+        supervisor
+            .start_background(vec!["test:BTCUSDT:trade".to_string()])
+            .unwrap();
+
+        supervisor.record_failure_for_retry("first\nerror", 2, Some(123));
+        let status = supervisor.status();
+        assert_eq!(status.state, MarketDataLiveState::Running);
+        assert_eq!(status.consecutive_failures, 1);
+        assert_eq!(status.retry_count, 1);
+        assert_eq!(status.last_error.as_deref(), Some("first error"));
+        assert_eq!(status.next_retry_at_ns, Some(123));
+
+        supervisor.record_failure_for_retry("second error", 2, None);
+        let status = supervisor.status();
+        assert_eq!(status.state, MarketDataLiveState::Suppressed);
+        assert_eq!(status.consecutive_failures, 2);
+        assert_eq!(
+            status.suppressed_reason.as_deref(),
+            Some("suppressed_after_failures")
+        );
+        assert!(status.next_retry_at_ns.is_none());
+    }
+
+    #[test]
+    fn live_supervisor_success_resets_failure_state() {
+        let supervisor = MarketDataSupervisor::new();
+        supervisor
+            .start_background(vec!["test:BTCUSDT:trade".to_string()])
+            .unwrap();
+        supervisor.record_failure_for_retry("temporary", 3, Some(456));
+        supervisor.record_progress(1, 1, 1, Some(789));
+
+        let status = supervisor.status();
+        assert_eq!(status.consecutive_failures, 0);
+        assert!(status.last_error.is_none());
+        assert!(status.last_error_at_ns.is_none());
+        assert!(status.next_retry_at_ns.is_none());
+        assert!(status.suppressed_reason.is_none());
+    }
+
+    #[test]
+    fn live_supervisor_prepare_resume_clears_suppression_when_safe() {
+        let supervisor = MarketDataSupervisor::new();
+        supervisor
+            .start_background(vec!["test:BTCUSDT:trade".to_string()])
+            .unwrap();
+        supervisor.record_failure_for_retry("boom", 1, None);
+
+        let outcome = supervisor.prepare_resume("operator".to_string());
+        assert!(outcome.resumed);
+        assert!(!outcome.running);
+        assert_eq!(outcome.consecutive_failures, 0);
+
+        let status = supervisor.status();
+        assert_eq!(status.state, MarketDataLiveState::Idle);
+        assert_eq!(status.stop_reason.as_deref(), Some("operator"));
+        assert!(status.last_error.is_none());
+    }
+
+    #[test]
+    fn live_supervisor_prepare_resume_rejects_running_state() {
+        let supervisor = MarketDataSupervisor::new();
+        supervisor
+            .start_background(vec!["test:BTCUSDT:trade".to_string()])
+            .unwrap();
+
+        let outcome = supervisor.prepare_resume("operator".to_string());
+        assert!(!outcome.resumed);
+        assert!(outcome.running);
+        assert_eq!(supervisor.status().state, MarketDataLiveState::Running);
+    }
 }
