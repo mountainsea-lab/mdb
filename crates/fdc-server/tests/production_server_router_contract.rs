@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc};
 
 use axum::{
     body::Body,
@@ -149,6 +149,82 @@ async fn response_body_json(response: axum::response::Response) -> serde_json::V
         .await
         .expect("body should read");
     serde_json::from_slice(&body).expect("response body should be json")
+}
+
+fn p37_durable_config(root: &std::path::Path, extra_env: &[(&str, &str)]) -> ServerRuntimeConfig {
+    let mut env = durable_tier_env(root).to_vec();
+    env.extend(
+        extra_env
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string())),
+    );
+
+    ServerRuntimeConfig::from_env_pairs(
+        env.iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    )
+    .expect("p37 durable runtime config should parse")
+}
+
+async fn p37_query_trades(router: axum::Router, symbol: &str, limit: usize) -> serde_json::Value {
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri(format!("/market-data/trades?symbol={symbol}&limit={limit}"))
+                .body(Body::empty())
+                .expect("trade query request should build"),
+        )
+        .await
+        .expect("trade query should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    response_body_json(response).await
+}
+
+fn p37_trade_ids(json: &serde_json::Value) -> BTreeSet<String> {
+    json["data"]["records"]
+        .as_array()
+        .expect("records should be an array")
+        .iter()
+        .map(|record| {
+            record["payload"]["payload"]["Trade"]["trade_id"]
+                .as_str()
+                .expect("trade id should be a string")
+                .to_string()
+        })
+        .collect()
+}
+
+fn p37_assert_trade_ids(json: &serde_json::Value, expected: &[&str]) {
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["returned_records"], expected.len());
+
+    let actual = p37_trade_ids(json);
+    let expected: BTreeSet<String> = expected
+        .iter()
+        .map(|trade_id| (*trade_id).to_string())
+        .collect();
+    assert_eq!(actual, expected);
+}
+
+async fn p37_l2_records(state: &ProductionServerState) -> Vec<StorageWriteRecord> {
+    state
+        .market_data_store()
+        .query_storage(
+            &StorageQuery::new("market_data")
+                .with_tier_scope(StorageTierScope::Only(StorageTier::L2)),
+        )
+        .await
+        .expect("p37 L2 query should succeed")
+}
+
+async fn p37_ingest_fixture_trades(
+    state: &ProductionServerState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    state.ingest_test_trade("BTCUSDT", "p37-btc-1").await?;
+    state.ingest_test_trade("ETHUSDT", "p37-eth-1").await?;
+    state.ingest_test_trade("BTCUSDT", "p37-btc-2").await?;
+    Ok(())
 }
 
 async fn wait_for_scheduler_status_field_at_least(
