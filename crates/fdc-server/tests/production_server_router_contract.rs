@@ -1774,6 +1774,36 @@ async fn production_live_start_is_explicitly_disabled_by_default() {
 }
 
 #[tokio::test]
+async fn production_live_status_exposes_retry_and_resume_fields() {
+    let config =
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/live/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("status should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["state"], "idle");
+    assert_eq!(json["data"]["consecutive_failures"], 0);
+    assert_eq!(json["data"]["retry_count"], 0);
+    assert!(json["data"]["last_error"].is_null());
+    assert!(json["data"]["last_error_at_ns"].is_null());
+    assert!(json["data"]["next_retry_at_ns"].is_null());
+    assert!(json["data"]["suppressed_reason"].is_null());
+    assert_eq!(json["data"]["resume_enabled"], false);
+}
+
+#[tokio::test]
 async fn production_trade_query_reads_shared_store_after_fixture_ingest_helper() {
     let state = ProductionServerState::new(
         ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),

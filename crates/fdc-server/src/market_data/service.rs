@@ -45,7 +45,9 @@ use crate::{
 pub fn live_status(
     state: &ProductionServerState,
 ) -> crate::market_data::model::LiveMarketDataStatusResponse {
-    state.market_data_supervisor().status()
+    let mut status = state.market_data_supervisor().status();
+    status.resume_enabled = state.config().market_data_live_resume_enabled;
+    status
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

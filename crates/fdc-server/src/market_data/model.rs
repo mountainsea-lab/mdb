@@ -11,6 +11,7 @@ pub enum MarketDataLiveState {
     Stopping,
     Stopped,
     Failed,
+    Suppressed,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +43,30 @@ pub struct LiveMarketDataStatusResponse {
     pub market_data_store_records: usize,
     pub last_result: Option<StartLiveMarketDataResponse>,
     pub failure_message: Option<String>,
+    pub consecutive_failures: u32,
+    pub retry_count: u64,
+    pub last_error: Option<String>,
+    pub last_error_at_ns: Option<u64>,
+    pub next_retry_at_ns: Option<u64>,
+    pub suppressed_reason: Option<String>,
+    pub resume_enabled: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResumeLiveMarketDataRequest {
+    pub confirm: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResumeLiveMarketDataResponse {
+    pub state: MarketDataLiveState,
+    pub task_id: Option<String>,
+    pub resumed: bool,
+    pub reason: Option<String>,
+    pub consecutive_failures: u32,
+    pub retry_count: u64,
+    pub next_retry_at_ns: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

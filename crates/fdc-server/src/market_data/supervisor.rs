@@ -26,6 +26,12 @@ struct MarketDataSupervisorInner {
     stop_requested: bool,
     last_result: Option<StartLiveMarketDataResponse>,
     failure_message: Option<String>,
+    consecutive_failures: u32,
+    retry_count: u64,
+    last_error: Option<String>,
+    last_error_at_ns: Option<u64>,
+    next_retry_at_ns: Option<u64>,
+    suppressed_reason: Option<String>,
 }
 
 impl MarketDataSupervisor {
@@ -46,6 +52,12 @@ impl MarketDataSupervisor {
                 stop_requested: false,
                 last_result: None,
                 failure_message: None,
+                consecutive_failures: 0,
+                retry_count: 0,
+                last_error: None,
+                last_error_at_ns: None,
+                next_retry_at_ns: None,
+                suppressed_reason: None,
             }),
         }
     }
@@ -59,6 +71,7 @@ impl MarketDataSupervisor {
             MarketDataLiveState::Idle
             | MarketDataLiveState::Completed
             | MarketDataLiveState::Failed
+            | MarketDataLiveState::Suppressed
             | MarketDataLiveState::Stopped => {
                 inner.state = MarketDataLiveState::Starting;
                 inner.failure_message = None;
@@ -75,6 +88,9 @@ impl MarketDataSupervisor {
             MarketDataLiveState::Stopping => Err(Error::validation(
                 "market-data live runner is already stopping",
             )),
+            MarketDataLiveState::Suppressed => {
+                Err(Error::validation("market-data live runner is suppressed"))
+            }
         }
     }
 
@@ -87,6 +103,7 @@ impl MarketDataSupervisor {
             MarketDataLiveState::Idle
             | MarketDataLiveState::Completed
             | MarketDataLiveState::Failed
+            | MarketDataLiveState::Suppressed
             | MarketDataLiveState::Stopped => {
                 inner.next_task_sequence += 1;
                 let task_id = format!("market-data-live-{}", inner.next_task_sequence);
@@ -102,6 +119,10 @@ impl MarketDataSupervisor {
                 inner.market_data_store_records = 0;
                 inner.last_result = None;
                 inner.failure_message = None;
+                inner.last_error = None;
+                inner.last_error_at_ns = None;
+                inner.next_retry_at_ns = None;
+                inner.suppressed_reason = None;
                 inner.stop_requested = false;
                 Ok(task_id)
             }
@@ -114,6 +135,9 @@ impl MarketDataSupervisor {
             MarketDataLiveState::Stopping => Err(Error::validation(
                 "market-data live runner is already stopping",
             )),
+            MarketDataLiveState::Suppressed => {
+                Err(Error::validation("market-data live runner is suppressed"))
+            }
         }
     }
 
@@ -129,6 +153,11 @@ impl MarketDataSupervisor {
         inner.market_data_store_records = result.market_data_store_records;
         inner.last_result = Some(result);
         inner.failure_message = None;
+        inner.consecutive_failures = 0;
+        inner.last_error = None;
+        inner.last_error_at_ns = None;
+        inner.next_retry_at_ns = None;
+        inner.suppressed_reason = None;
         inner.stop_requested = false;
     }
 
@@ -138,7 +167,10 @@ impl MarketDataSupervisor {
             .lock()
             .expect("market-data supervisor mutex should not be poisoned");
         inner.state = MarketDataLiveState::Failed;
-        inner.failure_message = Some(message.into());
+        let message = message.into();
+        inner.failure_message = Some(message.clone());
+        inner.last_error = Some(message);
+        inner.last_error_at_ns = Some(now_ns());
         inner.stop_requested = false;
     }
 
@@ -214,6 +246,13 @@ impl MarketDataSupervisor {
             market_data_store_records: inner.market_data_store_records,
             last_result: inner.last_result.clone(),
             failure_message: inner.failure_message.clone(),
+            consecutive_failures: inner.consecutive_failures,
+            retry_count: inner.retry_count,
+            last_error: inner.last_error.clone(),
+            last_error_at_ns: inner.last_error_at_ns,
+            next_retry_at_ns: inner.next_retry_at_ns,
+            suppressed_reason: inner.suppressed_reason.clone(),
+            resume_enabled: false,
         }
     }
 }
