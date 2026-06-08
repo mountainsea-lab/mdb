@@ -310,6 +310,23 @@ pub fn spawn_storage_maintenance_scheduler(
     }))
 }
 
+pub async fn spawn_storage_maintenance_scheduler_into_handle(
+    config: ServerRuntimeConfig,
+    store: Arc<QueryableMarketDataStore>,
+    audit: Arc<MarketDataStorageMaintenanceAuditLog>,
+    state: StorageMaintenanceSchedulerState,
+    task_handle: StorageMaintenanceSchedulerTaskHandle,
+) -> bool {
+    if !state.should_spawn(&config) {
+        return false;
+    }
+
+    let handle = tokio::spawn(async move {
+        run_scheduler_loop(config, store, audit, state).await;
+    });
+    task_handle.try_store(handle).await
+}
+
 async fn run_scheduler_loop(
     config: ServerRuntimeConfig,
     store: Arc<QueryableMarketDataStore>,
@@ -707,19 +724,23 @@ mod tests {
         let rejected_task_ran = Arc::new(AtomicBool::new(false));
         assert!(!handle.is_active().await);
 
-        assert!(handle
-            .try_store(tokio::spawn(async {
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }))
-            .await);
+        assert!(
+            handle
+                .try_store(tokio::spawn(async {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }))
+                .await
+        );
         assert!(handle.is_active().await);
         let rejected_task_ran_clone = Arc::clone(&rejected_task_ran);
-        assert!(!handle
-            .try_store(tokio::spawn(async move {
-                tokio::time::sleep(Duration::from_millis(10)).await;
-                rejected_task_ran_clone.store(true, Ordering::SeqCst);
-            }))
-            .await);
+        assert!(
+            !handle
+                .try_store(tokio::spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    rejected_task_ran_clone.store(true, Ordering::SeqCst);
+                }))
+                .await
+        );
 
         tokio::time::sleep(Duration::from_millis(25)).await;
         assert!(!rejected_task_ran.load(Ordering::SeqCst));

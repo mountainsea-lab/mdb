@@ -3,7 +3,6 @@ use std::sync::Arc;
 use axum::Router;
 use fdc_core::Result;
 use fdc_storage::QueryableMarketDataStore;
-use tokio::task::JoinHandle;
 
 use crate::{
     build_market_data_store_from_runtime_config,
@@ -12,7 +11,8 @@ use crate::{
         build_market_data_router, ingest_test_trade,
         maintenance_audit::MarketDataStorageMaintenanceAuditLog,
         maintenance_scheduler::{
-            spawn_storage_maintenance_scheduler, StorageMaintenanceSchedulerState,
+            spawn_storage_maintenance_scheduler_into_handle, StorageMaintenanceSchedulerState,
+            StorageMaintenanceSchedulerTaskHandle,
         },
         supervisor::MarketDataSupervisor,
     },
@@ -26,7 +26,7 @@ pub struct ProductionServerState {
     market_data_supervisor: Arc<MarketDataSupervisor>,
     market_data_storage_maintenance_audit: Arc<MarketDataStorageMaintenanceAuditLog>,
     market_data_storage_maintenance_scheduler: StorageMaintenanceSchedulerState,
-    _market_data_storage_maintenance_scheduler_task: Option<Arc<JoinHandle<()>>>,
+    market_data_storage_maintenance_scheduler_task: StorageMaintenanceSchedulerTaskHandle,
 }
 
 impl ProductionServerState {
@@ -40,7 +40,8 @@ impl ProductionServerState {
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
             market_data_storage_maintenance_audit,
             market_data_storage_maintenance_scheduler,
-            _market_data_storage_maintenance_scheduler_task: None,
+            market_data_storage_maintenance_scheduler_task:
+                StorageMaintenanceSchedulerTaskHandle::default(),
         }
     }
 
@@ -51,21 +52,23 @@ impl ProductionServerState {
         let market_data_storage_maintenance_audit = market_data_storage_maintenance_audit(&config);
         let market_data_storage_maintenance_scheduler =
             StorageMaintenanceSchedulerState::from_config(&config);
-        let market_data_storage_maintenance_scheduler_task = spawn_storage_maintenance_scheduler(
+        let market_data_storage_maintenance_scheduler_task =
+            StorageMaintenanceSchedulerTaskHandle::default();
+        spawn_storage_maintenance_scheduler_into_handle(
             config.clone(),
             Arc::clone(&market_data_store),
             Arc::clone(&market_data_storage_maintenance_audit),
             market_data_storage_maintenance_scheduler.clone(),
+            market_data_storage_maintenance_scheduler_task.clone(),
         )
-        .map(Arc::new);
+        .await;
         Ok(Self {
             config,
             market_data_store,
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
             market_data_storage_maintenance_audit,
             market_data_storage_maintenance_scheduler,
-            _market_data_storage_maintenance_scheduler_task:
-                market_data_storage_maintenance_scheduler_task,
+            market_data_storage_maintenance_scheduler_task,
         })
     }
 
@@ -82,7 +85,8 @@ impl ProductionServerState {
             market_data_supervisor: Arc::new(MarketDataSupervisor::new()),
             market_data_storage_maintenance_audit,
             market_data_storage_maintenance_scheduler,
-            _market_data_storage_maintenance_scheduler_task: None,
+            market_data_storage_maintenance_scheduler_task:
+                StorageMaintenanceSchedulerTaskHandle::default(),
         }
     }
 
@@ -106,6 +110,12 @@ impl ProductionServerState {
 
     pub fn market_data_storage_maintenance_scheduler(&self) -> StorageMaintenanceSchedulerState {
         self.market_data_storage_maintenance_scheduler.clone()
+    }
+
+    pub fn market_data_storage_maintenance_scheduler_task(
+        &self,
+    ) -> StorageMaintenanceSchedulerTaskHandle {
+        self.market_data_storage_maintenance_scheduler_task.clone()
     }
 
     pub async fn ingest_test_trade(&self, symbol: &str, trade_id: &str) -> Result<()> {
