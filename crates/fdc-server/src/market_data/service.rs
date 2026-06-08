@@ -40,6 +40,7 @@ use crate::{
     },
     run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
     MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
+    ServerRuntimeConfig,
 };
 
 pub fn live_status(
@@ -69,6 +70,34 @@ pub struct StorageMaintenanceServiceResult {
 pub const STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION: &str = "reset_maintenance_audit";
 pub const STORAGE_MAINTENANCE_SCHEDULER_RESET_CONFIRMATION: &str = "reset_scheduler_suppression";
 pub const STORAGE_MAINTENANCE_SCHEDULER_RESUME_CONFIRMATION: &str = "resume_scheduler";
+
+#[derive(Debug, Clone, Copy)]
+struct LiveRetryPolicy {
+    enabled: bool,
+    initial_delay: Duration,
+    max_delay: Duration,
+    max_consecutive_failures: u32,
+}
+
+impl LiveRetryPolicy {
+    fn from_config(config: &ServerRuntimeConfig) -> Self {
+        Self {
+            enabled: config.live_retry_enabled,
+            initial_delay: Duration::from_millis(config.live_retry_initial_delay_ms),
+            max_delay: Duration::from_millis(config.live_retry_max_delay_ms),
+            max_consecutive_failures: config.live_max_consecutive_failures,
+        }
+    }
+
+    fn delay_for_failure(&self, consecutive_failures: u32) -> Duration {
+        let multiplier = 1_u32
+            .checked_shl(consecutive_failures.saturating_sub(1).min(16))
+            .unwrap_or(u32::MAX);
+        self.initial_delay
+            .saturating_mul(multiplier)
+            .min(self.max_delay)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageMaintenanceAuditResetResult {
@@ -871,6 +900,7 @@ pub async fn start_background_live(
         .max(1);
     let store = state.market_data_store();
     let supervisor_for_task = state.market_data_supervisor();
+    let retry_policy = LiveRetryPolicy::from_config(state.config());
 
     tokio::spawn(async move {
         if let Err(message) = run_background_live_collection(
@@ -878,10 +908,13 @@ pub async fn start_background_live(
             store,
             timeout_secs,
             max_envelopes,
+            retry_policy,
         )
         .await
         {
-            supervisor_for_task.fail(message);
+            if supervisor_for_task.status().state != MarketDataLiveState::Suppressed {
+                supervisor_for_task.fail(message);
+            }
         }
     });
 
@@ -999,24 +1032,79 @@ async fn run_background_live_collection(
     store: Arc<QueryableMarketDataStore>,
     timeout_secs: u64,
     max_envelopes: usize,
+    retry_policy: LiveRetryPolicy,
 ) -> std::result::Result<(), String> {
+    run_background_live_collection_with_runner(supervisor, store.clone(), retry_policy, move || {
+        run_live_collection_and_storage(store.clone(), timeout_secs, max_envelopes)
+    })
+    .await
+}
+
+async fn run_background_live_collection_with_runner<F, Fut>(
+    supervisor: Arc<crate::market_data::supervisor::MarketDataSupervisor>,
+    store: Arc<QueryableMarketDataStore>,
+    retry_policy: LiveRetryPolicy,
+    mut runner: F,
+) -> std::result::Result<(), String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<StartLiveMarketDataResponse, String>>,
+{
     while !supervisor.stop_requested() {
         let before = store.record_count();
-        let result =
-            run_live_collection_and_storage(store.clone(), timeout_secs, max_envelopes).await?;
-        let after = store.record_count();
-        supervisor.record_progress(
-            result.envelopes_received,
-            result.storage_records_written,
-            after,
-            Some(TimestampNs::now().as_nanos().max(0) as u64),
-        );
-        if after == before && supervisor.stop_requested() {
-            break;
+        match runner().await {
+            Ok(result) => {
+                let after = store.record_count();
+                supervisor.record_progress(
+                    result.envelopes_received,
+                    result.storage_records_written,
+                    after,
+                    Some(TimestampNs::now().as_nanos().max(0) as u64),
+                );
+                if after == before && supervisor.stop_requested() {
+                    break;
+                }
+            }
+            Err(message) => {
+                if !retry_policy.enabled {
+                    supervisor.fail(message.clone());
+                    return Err(message);
+                }
+
+                let next_failure = supervisor.status().consecutive_failures.saturating_add(1);
+                let delay = retry_policy.delay_for_failure(next_failure);
+                let now_ns = TimestampNs::now().as_nanos().max(0) as u64;
+                let delay_ns = delay.as_nanos().min(u128::from(u64::MAX)) as u64;
+                let next_retry_at_ns = now_ns.saturating_add(delay_ns);
+                supervisor.record_failure_for_retry(
+                    message,
+                    retry_policy.max_consecutive_failures,
+                    Some(next_retry_at_ns),
+                );
+
+                if supervisor.status().state == MarketDataLiveState::Suppressed {
+                    return Err("live collection suppressed after consecutive failures".to_string());
+                }
+
+                tokio::time::sleep(delay).await;
+            }
         }
     }
     supervisor.stopped("requested");
     Ok(())
+}
+
+async fn run_background_live_collection_with_runner_for_test<F, Fut>(
+    supervisor: Arc<crate::market_data::supervisor::MarketDataSupervisor>,
+    store: Arc<QueryableMarketDataStore>,
+    retry_policy: LiveRetryPolicy,
+    runner: F,
+) -> std::result::Result<(), String>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = std::result::Result<StartLiveMarketDataResponse, String>>,
+{
+    run_background_live_collection_with_runner(supervisor, store, retry_policy, runner).await
 }
 
 async fn run_live_collection_and_storage(
@@ -1452,5 +1540,45 @@ mod tests {
                 .is_suppressed()
                 .await
         );
+    }
+}
+
+#[cfg(test)]
+mod live_retry_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    #[tokio::test]
+    async fn live_retry_loop_suppresses_after_configured_failures() {
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_LIVE_ENABLED", "1"),
+            ("FDC_LIVE_RETRY_INITIAL_DELAY_MS", "100"),
+            ("FDC_LIVE_RETRY_MAX_DELAY_MS", "100"),
+            ("FDC_LIVE_MAX_CONSECUTIVE_FAILURES", "2"),
+        ])
+        .expect("config should parse");
+        let state = ProductionServerState::new(config);
+        let attempts = Arc::new(AtomicUsize::new(0));
+        let attempts_for_runner = attempts.clone();
+
+        let result = run_background_live_collection_with_runner_for_test(
+            state.market_data_supervisor(),
+            state.market_data_store(),
+            LiveRetryPolicy::from_config(state.config()),
+            move || {
+                attempts_for_runner.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Err("network down".to_string()) })
+            },
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+        let status = state.market_data_supervisor().status();
+        assert_eq!(status.state, MarketDataLiveState::Suppressed);
+        assert_eq!(status.consecutive_failures, 2);
     }
 }
