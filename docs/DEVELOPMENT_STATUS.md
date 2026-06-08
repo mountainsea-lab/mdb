@@ -3,7 +3,7 @@
 Last updated: 2026-06-08
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: plan post-P36 development roadmap`)
+Latest checkpoint commit when this file was written: P37 completion commit (`docs: record p37 acceptance completion`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -60,41 +60,67 @@ Operational note:
 
 Recommended next slice:
 
-- P37 acquisition to four-tier storage to query end-to-end acceptance.
+- P38 Query API Production Hardening.
 
-Next development roadmap for tomorrow:
+## 2026-06-08 P37 Acquisition → Four-Tier Storage → Query End-to-End Acceptance
 
-1. **P37 Acquisition → Four-Tier Storage → Query End-to-End Acceptance**
-   - Goal: prove the service can start live acquisition, write market data through the configured tiered store, run/observe maintenance, and answer query routes from the persisted storage path.
-   - Scope:
-     - Add deterministic end-to-end acceptance tests that avoid public internet by using fixture/fake live ingestion where possible.
-     - Cover memory and tiered runtime storage config separately, with tiered as the production acceptance path.
-     - Verify L2 hot writes, durable tier reopen behavior, and query route responses after ingestion.
-     - Confirm live resume/retry hardening from P36 does not mutate storage or hide data availability.
-   - Expected deliverables:
-     - Design spec: `docs/superpowers/specs/2026-06-09-four-tier-e2e-acceptance-design.md`
-     - Plan: `docs/superpowers/plans/2026-06-09-four-tier-e2e-acceptance.md`
-     - Tests in `crates/fdc-server/tests/production_server_router_contract.rs` and storage boundary tests as needed.
-   - Acceptance checks:
-     - `rtk cargo test -p fdc-server --test production_server_router_contract <P37 filters>`
-     - `rtk cargo test -p fdc-storage --test dependency_guard`
-     - `rtk cargo fmt -p fdc-server -p fdc-storage -- --check`
+Completed:
 
-2. **P38 Query API Production Hardening**
+- Added deterministic server contract acceptance coverage for fixture/live-like acquisition into durable tiered storage.
+- Verified L2 hot-tier writes with live trade metadata before and after durable reopen.
+- Verified `/market-data/trades` returns the expected symbol-filtered fixture trade IDs from reopened durable storage.
+- Verified manual storage maintenance run-once records an audit entry after ingestion and does not hide query data.
+- Verified P36 live resume safety controls, including wrong-confirmation rejection and running-live conflict, do not mutate persisted market data or query results.
+- Kept default P37 coverage offline and deterministic; real-network live smoke remains ignored/manual.
+- Preserved the `fdc-storage` boundary.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-08-four-tier-e2e-acceptance-design.md`
+- `docs/superpowers/plans/2026-06-08-four-tier-e2e-acceptance.md`
+
+Commits:
+
+- `f515de6 test(server): add p37 acceptance helpers`
+- `4dfc4d4 test(server): accept p37 durable acquisition query reopen`
+- `6ce202f test(server): accept p37 maintenance query safety`
+- `0b7e35c test(server): accept p37 live recovery data safety`
+- `8871bd3 style(server): format p37 acceptance tests`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test production_server_router_contract p37_` - 3 passed, 54 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_live_resume` - 3 passed, 54 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 53 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_resume` - 5 passed, 52 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `rtk cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Operational note:
+
+- During worktree baseline, two timed-out cargo invocations left stale cargo processes holding the artifact directory lock. The stale processes were terminated, raw `cargo test --no-run` confirmed the root cause, and subsequent verification completed normally.
+
+Recommended next slice:
+
+- **P38 Query API Production Hardening**.
+
+Next development roadmap:
+
+1. **P38 Query API Production Hardening**
    - Goal: upgrade query routes from basic trade retrieval to production-ready operator/user access patterns.
    - Scope:
      - Add explicit query contract coverage for symbol, limit, empty result, invalid input, and tier-backed records.
-     - Decide whether P38 should add OHLCV/candle query routes now or keep only trades until E2E acceptance is stable.
+     - Decide whether P38 should add OHLCV/candle query routes now or keep only trades until query contracts are stable.
      - Add response metadata needed by clients, for example returned count, source/tier hints, and bounded pagination if needed.
      - Keep query API read-only and ensure it never triggers acquisition, resume, maintenance, or tier mutation.
    - Expected deliverables:
-     - Design spec and implementation plan after P37 is green.
+     - Design spec and implementation plan after P37 is merged and verified on `mdb-mqdev`.
      - Route contract tests for all supported query shapes.
    - Acceptance checks:
      - Focused `fdc-server` router/query tests.
      - Existing storage maintenance/live regression tests remain green.
 
-3. **P39 Production Runbook, Config Pack, and Soak Validation**
+2. **P39 Production Runbook, Config Pack, and Soak Validation**
    - Goal: make the service operable for an internal MVP run.
    - Scope:
      - Document required env vars for live acquisition, tiered storage, maintenance scheduler, live resume, and scheduler resume/reset gates.
@@ -110,9 +136,10 @@ Next development roadmap for tomorrow:
 
 Suggested sequence:
 
-- Tomorrow start with **P37 design spec**, then plan, then TDD implementation in an isolated worktree.
-- Only begin P38 after P37 proves the four-tier storage-to-query path end-to-end.
-- Only begin P39 after P37/P38 define the stable operator-facing behavior to document.
+- Finish P37 by merging this worktree back to `mdb-mqdev`, rerunning focused verification, then cleaning up the P37 worktree.
+- Start P38 with a design spec, then plan, then TDD implementation in an isolated worktree.
+- Only begin P39 after P38 defines the stable operator-facing query behavior to document.
+
 
 ## 2026-06-08 P35 Scheduler Restart/Resume Controls
 
