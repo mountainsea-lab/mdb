@@ -2290,6 +2290,66 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test]
+async fn p37_maintenance_after_ingestion_records_audit_without_hiding_query_data() {
+    let root = unique_test_path("p37-maintenance-after-ingestion");
+    let config = p37_durable_config(
+        &root,
+        &[("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1")],
+    );
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("p37 maintenance state should build");
+    p37_ingest_fixture_trades(&state)
+        .await
+        .expect("p37 fixture ingestion should write");
+
+    let router = build_production_router(state);
+    let before_json = p37_query_trades(router.clone(), "BTCUSDT", 10).await;
+    p37_assert_trade_ids(&before_json, &["p37-btc-1", "p37-btc-2"]);
+
+    let maintenance_response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("run_maintenance_once"))
+                .expect("maintenance request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+    assert_eq!(maintenance_response.status(), StatusCode::OK);
+    let maintenance_json = response_body_json(maintenance_response).await;
+    assert_eq!(maintenance_json["status"], "success");
+    assert_eq!(maintenance_json["data"]["accepted"], true);
+    assert_eq!(maintenance_json["data"]["status"], "completed");
+    assert_eq!(maintenance_json["data"]["healthy_tiers"], 4);
+
+    let audit_response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/maintenance/audit?limit=10")
+                .body(Body::empty())
+                .expect("audit request should build"),
+        )
+        .await
+        .expect("audit route should respond");
+    assert_eq!(audit_response.status(), StatusCode::OK);
+    let audit_json = response_body_json(audit_response).await;
+    assert_eq!(audit_json["status"], "success");
+    assert_eq!(audit_json["data"]["total_entries"], 1);
+    assert_eq!(audit_json["data"]["total_recorded_entries"], 1);
+    assert_eq!(audit_json["data"]["entries"][0]["healthy_tiers"], 4);
+
+    let after_json = p37_query_trades(router, "BTCUSDT", 10).await;
+    p37_assert_trade_ids(&after_json, &["p37-btc-1", "p37-btc-2"]);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start() {
     use fdc_server::market_data::{
