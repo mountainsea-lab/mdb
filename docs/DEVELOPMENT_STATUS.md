@@ -1,11 +1,55 @@
 # Development Status
 
-Last updated: 2026-06-07
+Last updated: 2026-06-08
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler recovery controls status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler restart resume controls status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-08 P35 Scheduler Restart/Resume Controls
+
+Completed:
+
+- Added default-disabled scheduler resume runtime gate:
+  - `FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED`
+- Added explicit confirmation-protected scheduler resume route:
+  - `POST /market-data/storage/maintenance/scheduler/resume`
+  - confirmation string: `resume_scheduler`
+- Resume starts a new scheduler loop only when scheduler config is enabled, backend is tiered, no scheduler loop is already active, and no scheduler attempt is currently running.
+- Resume clears retry/suppression state, sets `last_status="resumed"`, and allows the normal scheduler loop to publish `next_run_at`.
+- Resume does not directly run storage maintenance, clear audit entries, reset storage data, or alter storage tier paths.
+- Preserved P34 reset semantics: reset remains accounting-only and does not spawn scheduler tasks.
+- Preserved the `fdc-storage` boundary: no server/runtime/admin semantics were added to storage.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-08-scheduler-restart-resume-controls-design.md`
+- `docs/superpowers/plans/2026-06-08-scheduler-restart-resume-controls.md`
+
+Commits:
+
+- `f1edd1c feat(server): add scheduler resume config gate`
+- `e7fd625 feat(server): add scheduler resume state primitives`
+- `6337b1d feat(server): track scheduler task lifecycle`
+- `4ce190a feat(server): resume storage maintenance scheduler`
+- `8854ddb feat(server): add scheduler resume route`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test runtime_config_contract storage_maintenance_scheduler_resume` - 1 passed, 12 filtered out
+- `rtk cargo test -p fdc-server storage_maintenance_scheduler_resume` - 15 passed, 104 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_resume` - 5 passed, 45 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_reset` - 4 passed, 46 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler` - 15 passed, 35 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 46 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_audit_reset` - 4 passed, 46 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Recommended next slice:
+
+- Live collection hardening, unless operators explicitly request additional scheduler lifecycle controls beyond resume.
 
 ## 2026-06-07 P34 Scheduler Recovery Controls
 
