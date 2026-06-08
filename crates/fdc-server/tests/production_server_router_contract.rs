@@ -2228,6 +2228,68 @@ async fn runtime_server_reopens_configured_durable_tiers_and_serves_persisted_tr
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test]
+async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
+    let root = unique_test_path("p37-acquisition-query-reopen");
+    let config = p37_durable_config(&root, &[]);
+
+    let first_state = ProductionServerState::try_new(config.clone())
+        .await
+        .expect("first p37 durable state should build");
+    p37_ingest_fixture_trades(&first_state)
+        .await
+        .expect("p37 fixture ingestion should write");
+
+    let before_reopen = p37_l2_records(&first_state).await;
+    assert_eq!(before_reopen.len(), 3);
+    assert!(before_reopen.iter().all(|record| {
+        record.metadata.tags.get("mode").map(String::as_str) == Some("live")
+            && record
+                .metadata
+                .tags
+                .get("record.kind")
+                .map(String::as_str)
+                == Some("trade")
+    }));
+
+    let before_router = build_production_router(first_state.clone());
+    let before_json = p37_query_trades(before_router, "BTCUSDT", 10).await;
+    p37_assert_trade_ids(&before_json, &["p37-btc-1", "p37-btc-2"]);
+    assert!(before_json["data"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|record| record["symbol"] == "BTCUSDT"));
+
+    drop(first_state);
+
+    let reopened_state = ProductionServerState::try_new(config)
+        .await
+        .expect("reopened p37 durable state should build");
+    let persisted_l2 = p37_l2_records(&reopened_state).await;
+    assert_eq!(persisted_l2.len(), 3);
+    assert!(persisted_l2.iter().all(|record| {
+        record.metadata.tags.get("mode").map(String::as_str) == Some("live")
+            && record
+                .metadata
+                .tags
+                .get("record.kind")
+                .map(String::as_str)
+                == Some("trade")
+    }));
+
+    let reopened_router = build_production_router(reopened_state);
+    let reopened_json = p37_query_trades(reopened_router, "BTCUSDT", 10).await;
+    p37_assert_trade_ids(&reopened_json, &["p37-btc-1", "p37-btc-2"]);
+    assert!(reopened_json["data"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|record| record["symbol"] == "BTCUSDT"));
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start() {
     use fdc_server::market_data::{
