@@ -86,6 +86,12 @@ fn scheduler_reset_request(confirm: &str) -> Body {
     ))
 }
 
+fn scheduler_resume_request(confirm: &str) -> Body {
+    Body::from(format!(
+        r#"{{"confirm":"{confirm}","reason":"contract-test"}}"#
+    ))
+}
+
 async fn tiered_storage_state_with_audit_capacity(capacity: usize) -> ProductionServerState {
     tiered_storage_state_with_audit_capacity_and_reset(capacity, false).await
 }
@@ -842,6 +848,235 @@ async fn storage_maintenance_scheduler_reset_clears_suppressed_status_without_ru
     assert!(status_json["data"]["next_run_at"].is_null());
     assert_eq!(status_json["data"]["total_runs"], 1);
     assert_eq!(status_json["data"]["failed_runs"], 1);
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_resume_is_disabled_by_default() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    );
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/scheduler/resume")
+                .header("content-type", "application/json")
+                .body(scheduler_resume_request("resume_scheduler"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler resume should respond");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["data"]["accepted"], false);
+    assert_eq!(json["data"]["status"], "disabled");
+    assert_eq!(json["data"]["task_started"], false);
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_resume_requires_confirmation() {
+    let config = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+        "1",
+    )])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/scheduler/resume")
+                .header("content-type", "application/json")
+                .body(scheduler_resume_request("wrong"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler resume should respond");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = response_body_json(response).await;
+    assert_eq!(json["data"]["accepted"], false);
+    assert_eq!(json["data"]["status"], "confirmation_required");
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_resume_requires_scheduler_enabled() {
+    let config = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+        "1",
+    )])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/scheduler/resume")
+                .header("content-type", "application/json")
+                .body(scheduler_resume_request("resume_scheduler"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler resume should respond");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let json = response_body_json(response).await;
+    assert_eq!(json["data"]["status"], "scheduler_disabled");
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_resume_rejects_memory_backend() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+            "1",
+        ),
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/scheduler/resume")
+                .header("content-type", "application/json")
+                .body(scheduler_resume_request("resume_scheduler"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler resume should respond");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = response_body_json(response).await;
+    assert_eq!(json["data"]["status"], "unsupported_backend");
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_resume_starts_new_loop_after_suppression() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime"),
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+            "1",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+            "1",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECS",
+            "60",
+        ),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::with_market_data_store(
+        config,
+        Arc::new(QueryableMarketDataStore::new()),
+    );
+    let scheduler = state.market_data_storage_maintenance_scheduler();
+    let task_handle = state.market_data_storage_maintenance_scheduler_task();
+    let started_at = chrono::Utc::now();
+    let finished_at = started_at + chrono::Duration::milliseconds(1);
+    let next_run_at = finished_at + chrono::Duration::seconds(60);
+    assert!(scheduler.mark_started(started_at).await);
+    scheduler
+        .mark_failed(finished_at, next_run_at, "simulated resume route failure")
+        .await;
+    assert!(scheduler.is_suppressed().await);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/scheduler/resume")
+                .header("content-type", "application/json")
+                .body(scheduler_resume_request("resume_scheduler"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler resume should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["accepted"], true);
+    assert_eq!(json["data"]["status"], "resumed");
+    assert_eq!(json["data"]["previous_consecutive_failures"], 1);
+    assert_eq!(json["data"]["consecutive_failures"], 0);
+    assert_eq!(json["data"]["task_started"], true);
+
+    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    let snapshot = scheduler.snapshot().await;
+    assert_eq!(snapshot.consecutive_failures, 0);
+    assert!(snapshot.total_runs >= 1);
+    assert!(snapshot.next_run_at.is_some() || snapshot.running);
+    assert!(task_handle.is_active().await);
+    task_handle.abort_active().await;
+}
+
+#[tokio::test]
+async fn storage_maintenance_scheduler_reset_does_not_start_scheduler_task() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+        ("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime"),
+        ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESET_ENABLED",
+            "1",
+        ),
+        (
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+            "1",
+        ),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::with_market_data_store(
+        config,
+        Arc::new(QueryableMarketDataStore::new()),
+    );
+    let scheduler = state.market_data_storage_maintenance_scheduler();
+    let task_handle = state.market_data_storage_maintenance_scheduler_task();
+    let started_at = chrono::Utc::now();
+    let finished_at = started_at + chrono::Duration::milliseconds(1);
+    let next_run_at = finished_at + chrono::Duration::seconds(60);
+    assert!(scheduler.mark_started(started_at).await);
+    scheduler
+        .mark_failed(finished_at, next_run_at, "simulated reset route failure")
+        .await;
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/scheduler/reset")
+                .header("content-type", "application/json")
+                .body(scheduler_reset_request("reset_scheduler_suppression"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("scheduler reset should respond");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    let snapshot = scheduler.snapshot().await;
+    assert_eq!(snapshot.total_runs, 1);
+    assert!(snapshot.next_run_at.is_none());
+    assert!(!task_handle.is_active().await);
 }
 
 #[tokio::test]

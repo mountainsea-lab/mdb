@@ -16,15 +16,18 @@ use crate::{
             MarketDataStorageMaintenanceRunResponse,
             MarketDataStorageMaintenanceSchedulerResetRequest,
             MarketDataStorageMaintenanceSchedulerResetResponse,
+            MarketDataStorageMaintenanceSchedulerResumeRequest,
+            MarketDataStorageMaintenanceSchedulerResumeResponse,
             MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
             MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
             StopLiveMarketDataResponse,
         },
         service::{
             live_status, query_trades, reset_storage_maintenance_audit,
-            reset_storage_maintenance_scheduler, run_storage_maintenance_once, start_live,
-            start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
-            storage_maintenance_scheduler_status, storage_status, StorageMaintenanceHttpStatus,
+            reset_storage_maintenance_scheduler, resume_storage_maintenance_scheduler,
+            run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
+            storage_health, storage_maintenance_audit, storage_maintenance_scheduler_status,
+            storage_status, StorageMaintenanceHttpStatus,
         },
     },
     ProductionServerState,
@@ -92,6 +95,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route(
             "/market-data/storage/maintenance/scheduler/reset",
             post(storage_maintenance_scheduler_reset_handler),
+        )
+        .route(
+            "/market-data/storage/maintenance/scheduler/resume",
+            post(storage_maintenance_scheduler_resume_handler),
         )
         .route("/market-data/trades", get(query_trades_handler))
         .with_state(state)
@@ -241,6 +248,28 @@ async fn storage_maintenance_scheduler_reset_handler(
             result.response,
             result.message.unwrap_or_else(|| {
                 "storage maintenance scheduler reset request failed".to_string()
+            }),
+        )
+    };
+    (status, Json(envelope))
+}
+
+async fn storage_maintenance_scheduler_resume_handler(
+    State(state): State<ProductionServerState>,
+    Json(request): Json<MarketDataStorageMaintenanceSchedulerResumeRequest>,
+) -> (
+    StatusCode,
+    Json<ServerApiResponse<MarketDataStorageMaintenanceSchedulerResumeResponse>>,
+) {
+    let result = resume_storage_maintenance_scheduler(&state, request).await;
+    let status = storage_maintenance_status_code(result.http_status);
+    let envelope = if result.http_status == StorageMaintenanceHttpStatus::Ok {
+        ServerApiResponse::success(result.response)
+    } else {
+        ServerApiResponse::error(
+            result.response,
+            result.message.unwrap_or_else(|| {
+                "storage maintenance scheduler resume request failed".to_string()
             }),
         )
     };
