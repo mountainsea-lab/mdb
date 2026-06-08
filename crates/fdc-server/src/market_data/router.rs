@@ -19,12 +19,12 @@ use crate::{
             MarketDataStorageMaintenanceSchedulerResumeRequest,
             MarketDataStorageMaintenanceSchedulerResumeResponse,
             MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
-            MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
-            StopLiveMarketDataResponse,
+            MarketDataTradesResponse, ResumeLiveMarketDataRequest, ResumeLiveMarketDataResponse,
+            StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
         service::{
             live_status, query_trades, reset_storage_maintenance_audit,
-            reset_storage_maintenance_scheduler, resume_storage_maintenance_scheduler,
+            reset_storage_maintenance_scheduler, resume_live, resume_storage_maintenance_scheduler,
             run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
             storage_health, storage_maintenance_audit, storage_maintenance_scheduler_status,
             storage_status, StorageMaintenanceHttpStatus,
@@ -73,6 +73,7 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
     Router::new()
         .route("/market-data/live/start", post(start_live_handler))
         .route("/market-data/live/stop", post(stop_live_handler))
+        .route("/market-data/live/resume", post(resume_live_handler))
         .route("/market-data/live/status", get(live_status_handler))
         .route("/market-data/storage/status", get(storage_status_handler))
         .route("/market-data/storage/health", get(storage_health_handler))
@@ -141,6 +142,28 @@ async fn stop_live_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<StopLiveMarketDataResponse>> {
     Json(ServerApiResponse::success(stop_live(&state)))
+}
+
+async fn resume_live_handler(
+    State(state): State<ProductionServerState>,
+    Json(request): Json<ResumeLiveMarketDataRequest>,
+) -> (
+    StatusCode,
+    Json<ServerApiResponse<ResumeLiveMarketDataResponse>>,
+) {
+    let result = resume_live(&state, request).await;
+    let status = storage_maintenance_status_code(result.http_status);
+    let envelope = if result.http_status == StorageMaintenanceHttpStatus::Ok {
+        ServerApiResponse::success(result.response)
+    } else {
+        ServerApiResponse::error(
+            result.response,
+            result
+                .message
+                .unwrap_or_else(|| "live market-data resume request failed".to_string()),
+        )
+    };
+    (status, Json(envelope))
 }
 
 async fn live_status_handler(

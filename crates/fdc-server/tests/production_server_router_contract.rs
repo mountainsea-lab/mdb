@@ -92,6 +92,12 @@ fn scheduler_resume_request(confirm: &str) -> Body {
     ))
 }
 
+fn live_resume_request(confirm: &str) -> Body {
+    Body::from(format!(
+        r#"{{"confirm":"{confirm}","reason":"contract-test"}}"#
+    ))
+}
+
 async fn tiered_storage_state_with_audit_capacity(capacity: usize) -> ProductionServerState {
     tiered_storage_state_with_audit_capacity_and_reset(capacity, false).await
 }
@@ -1801,6 +1807,89 @@ async fn production_live_status_exposes_retry_and_resume_fields() {
     assert!(json["data"]["next_retry_at_ns"].is_null());
     assert!(json["data"]["suppressed_reason"].is_null());
     assert_eq!(json["data"]["resume_enabled"], false);
+}
+
+#[tokio::test]
+async fn production_live_resume_is_disabled_by_default() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    );
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/resume")
+                .header("content-type", "application/json")
+                .body(live_resume_request("resume_live_collection"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("resume should respond");
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["data"]["resumed"], false);
+}
+
+#[tokio::test]
+async fn production_live_resume_requires_confirmation() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_LIVE_ENABLED", "1"),
+        ("FDC_MARKET_DATA_LIVE_RESUME_ENABLED", "1"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/resume")
+                .header("content-type", "application/json")
+                .body(live_resume_request("wrong"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("resume should respond");
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["data"]["resumed"], false);
+}
+
+#[tokio::test]
+async fn production_live_resume_conflicts_when_running() {
+    use fdc_server::market_data::service::start_fake_background_live_for_test;
+
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_LIVE_ENABLED", "1"),
+        ("FDC_MARKET_DATA_LIVE_RESUME_ENABLED", "1"),
+    ])
+    .expect("config should parse");
+    let state = ProductionServerState::new(config);
+    start_fake_background_live_for_test(&state, 10, std::time::Duration::from_millis(25))
+        .await
+        .expect("fake live should start");
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/resume")
+                .header("content-type", "application/json")
+                .body(live_resume_request("resume_live_collection"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("resume should respond");
+
+    assert_eq!(response.status(), StatusCode::CONFLICT);
 }
 
 #[tokio::test]

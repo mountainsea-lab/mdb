@@ -35,8 +35,8 @@ use crate::{
         MarketDataStorageMaintenanceSchedulerResumeResponse,
         MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
         MarketDataStorageTierHealth, MarketDataStorageTierStatus, MarketDataTradeRecord,
-        MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
-        StopLiveMarketDataResponse,
+        MarketDataTradesResponse, ResumeLiveMarketDataRequest, ResumeLiveMarketDataResponse,
+        StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
     },
     run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
     MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
@@ -70,6 +70,14 @@ pub struct StorageMaintenanceServiceResult {
 pub const STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION: &str = "reset_maintenance_audit";
 pub const STORAGE_MAINTENANCE_SCHEDULER_RESET_CONFIRMATION: &str = "reset_scheduler_suppression";
 pub const STORAGE_MAINTENANCE_SCHEDULER_RESUME_CONFIRMATION: &str = "resume_scheduler";
+pub const LIVE_RESUME_CONFIRMATION: &str = "resume_live_collection";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LiveResumeResult {
+    pub http_status: StorageMaintenanceHttpStatus,
+    pub response: ResumeLiveMarketDataResponse,
+    pub message: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct LiveRetryPolicy {
@@ -853,6 +861,102 @@ fn safe_path_hint(path: &Path) -> String {
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| "configured".to_string())
+}
+
+pub async fn resume_live(
+    state: &ProductionServerState,
+    request: ResumeLiveMarketDataRequest,
+) -> LiveResumeResult {
+    if !state.config().live_enabled {
+        return live_resume_error(
+            StorageMaintenanceHttpStatus::Forbidden,
+            state,
+            request.reason,
+            "live market-data acquisition requires FDC_LIVE_ENABLED=1",
+        );
+    }
+
+    if !state.config().market_data_live_resume_enabled {
+        return live_resume_error(
+            StorageMaintenanceHttpStatus::Forbidden,
+            state,
+            request.reason,
+            "live market-data resume hook is disabled",
+        );
+    }
+
+    if request.confirm != LIVE_RESUME_CONFIRMATION {
+        return live_resume_error(
+            StorageMaintenanceHttpStatus::BadRequest,
+            state,
+            request.reason,
+            format!("confirm must be {LIVE_RESUME_CONFIRMATION}"),
+        );
+    }
+
+    let reason = request
+        .reason
+        .clone()
+        .unwrap_or_else(|| "resume".to_string());
+    let outcome = state.market_data_supervisor().prepare_resume(reason);
+    if outcome.running {
+        return LiveResumeResult {
+            http_status: StorageMaintenanceHttpStatus::Conflict,
+            response: live_resume_response(state, false, request.reason),
+            message: Some("live market-data resume cannot run while runner is active".to_string()),
+        };
+    }
+
+    match start_background_live(
+        state,
+        StartLiveMarketDataRequest {
+            timeout_secs: None,
+            max_envelopes: None,
+        },
+    )
+    .await
+    {
+        Ok(_) => LiveResumeResult {
+            http_status: StorageMaintenanceHttpStatus::Ok,
+            response: live_resume_response(state, true, request.reason),
+            message: None,
+        },
+        Err(message) => LiveResumeResult {
+            http_status: StorageMaintenanceHttpStatus::Conflict,
+            response: live_resume_response(state, false, request.reason),
+            message: Some(message),
+        },
+    }
+}
+
+fn live_resume_error(
+    http_status: StorageMaintenanceHttpStatus,
+    state: &ProductionServerState,
+    reason: Option<String>,
+    message: impl Into<String>,
+) -> LiveResumeResult {
+    LiveResumeResult {
+        http_status,
+        response: live_resume_response(state, false, reason),
+        message: Some(message.into()),
+    }
+}
+
+fn live_resume_response(
+    state: &ProductionServerState,
+    resumed: bool,
+    reason: Option<String>,
+) -> ResumeLiveMarketDataResponse {
+    let status = state.market_data_supervisor().status();
+    ResumeLiveMarketDataResponse {
+        state: status.state,
+        task_id: status.task_id,
+        resumed,
+        reason,
+        consecutive_failures: status.consecutive_failures,
+        retry_count: status.retry_count,
+        next_retry_at_ns: status.next_retry_at_ns,
+    }
 }
 
 pub fn start_live_disabled(state: &ProductionServerState) -> (StartLiveMarketDataResponse, String) {
