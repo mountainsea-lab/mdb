@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use chrono::{DateTime, Utc};
 use fdc_storage::{QueryableMarketDataStore, StorageMaintenanceOptions};
-use tokio::sync::Mutex;
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -279,6 +279,32 @@ impl StorageMaintenanceSchedulerTaskHandle {
         }
         guard.is_some()
     }
+
+    pub async fn abort_active(&self) {
+        let mut guard = self.inner.lock().await;
+        if let Some(handle) = guard.take() {
+            handle.abort();
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ClaimedStorageMaintenanceSchedulerTask {
+    task_handle: StorageMaintenanceSchedulerTaskHandle,
+    start_sender: Option<oneshot::Sender<()>>,
+}
+
+impl ClaimedStorageMaintenanceSchedulerTask {
+    pub fn start(mut self) {
+        if let Some(start_sender) = self.start_sender.take() {
+            let _ = start_sender.send(());
+        }
+    }
+
+    pub async fn abort(mut self) {
+        self.start_sender.take();
+        self.task_handle.abort_active().await;
+    }
 }
 
 fn scheduler_snapshot_is_suppressed(snapshot: &StorageMaintenanceSchedulerSnapshot) -> bool {
@@ -325,6 +351,34 @@ pub async fn spawn_storage_maintenance_scheduler_into_handle(
         run_scheduler_loop(config, store, audit, state).await;
     });
     task_handle.try_store(handle).await
+}
+
+pub async fn claim_storage_maintenance_scheduler_task(
+    config: ServerRuntimeConfig,
+    store: Arc<QueryableMarketDataStore>,
+    audit: Arc<MarketDataStorageMaintenanceAuditLog>,
+    state: StorageMaintenanceSchedulerState,
+    task_handle: StorageMaintenanceSchedulerTaskHandle,
+) -> Option<ClaimedStorageMaintenanceSchedulerTask> {
+    if !state.should_spawn(&config) {
+        return None;
+    }
+
+    let (start_sender, start_receiver) = oneshot::channel();
+    let handle = tokio::spawn(async move {
+        if start_receiver.await.is_ok() {
+            run_scheduler_loop(config, store, audit, state).await;
+        }
+    });
+
+    if !task_handle.try_store(handle).await {
+        return None;
+    }
+
+    Some(ClaimedStorageMaintenanceSchedulerTask {
+        task_handle,
+        start_sender: Some(start_sender),
+    })
 }
 
 async fn run_scheduler_loop(
@@ -748,6 +802,39 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
         assert!(!handle.is_active().await);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_duplicate_claim_does_not_start_rejected_task() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let handle = StorageMaintenanceSchedulerTaskHandle::default();
+        let first_task_ran = Arc::new(AtomicBool::new(false));
+        let duplicate_task_ran = Arc::new(AtomicBool::new(false));
+        let first_task_ran_clone = Arc::clone(&first_task_ran);
+        let duplicate_task_ran_clone = Arc::clone(&duplicate_task_ran);
+
+        assert!(
+            handle
+                .try_store(tokio::spawn(async move {
+                    first_task_ran_clone.store(true, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }))
+                .await
+        );
+        assert!(handle.is_active().await);
+
+        assert!(
+            !handle
+                .try_store(tokio::spawn(async move {
+                    duplicate_task_ran_clone.store(true, Ordering::SeqCst);
+                }))
+                .await
+        );
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(first_task_ran.load(Ordering::SeqCst));
+        assert!(!duplicate_task_ran.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

@@ -20,6 +20,9 @@ use rust_decimal::Decimal;
 
 use crate::{
     market_data::maintenance_audit::MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY,
+    market_data::maintenance_scheduler::{
+        claim_storage_maintenance_scheduler_task, spawn_storage_maintenance_scheduler_into_handle,
+    },
     market_data::model::{
         MarketDataLiveState, MarketDataStorageHealthResponse,
         MarketDataStorageMaintenanceAuditEntryResponse,
@@ -28,6 +31,8 @@ use crate::{
         MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
         MarketDataStorageMaintenanceSchedulerResetRequest,
         MarketDataStorageMaintenanceSchedulerResetResponse,
+        MarketDataStorageMaintenanceSchedulerResumeRequest,
+        MarketDataStorageMaintenanceSchedulerResumeResponse,
         MarketDataStorageMaintenanceSchedulerStatusResponse, MarketDataStorageStatusResponse,
         MarketDataStorageTierHealth, MarketDataStorageTierStatus, MarketDataTradeRecord,
         MarketDataTradesResponse, StartLiveMarketDataRequest, StartLiveMarketDataResponse,
@@ -61,6 +66,7 @@ pub struct StorageMaintenanceServiceResult {
 
 pub const STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION: &str = "reset_maintenance_audit";
 pub const STORAGE_MAINTENANCE_SCHEDULER_RESET_CONFIRMATION: &str = "reset_scheduler_suppression";
+pub const STORAGE_MAINTENANCE_SCHEDULER_RESUME_CONFIRMATION: &str = "resume_scheduler";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageMaintenanceAuditResetResult {
@@ -73,6 +79,13 @@ pub struct StorageMaintenanceAuditResetResult {
 pub struct StorageMaintenanceSchedulerResetResult {
     pub http_status: StorageMaintenanceHttpStatus,
     pub response: MarketDataStorageMaintenanceSchedulerResetResponse,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageMaintenanceSchedulerResumeResult {
+    pub http_status: StorageMaintenanceHttpStatus,
+    pub response: MarketDataStorageMaintenanceSchedulerResumeResponse,
     pub message: Option<String>,
 }
 
@@ -368,6 +381,127 @@ pub async fn reset_storage_maintenance_scheduler(
     }
 }
 
+pub async fn resume_storage_maintenance_scheduler(
+    state: &ProductionServerState,
+    request: MarketDataStorageMaintenanceSchedulerResumeRequest,
+) -> StorageMaintenanceSchedulerResumeResult {
+    if !state
+        .config()
+        .market_data_storage_maintenance_scheduler_resume_enabled
+    {
+        return scheduler_resume_error(
+            StorageMaintenanceHttpStatus::Forbidden,
+            "disabled",
+            request.reason,
+            0,
+            0,
+            "storage maintenance scheduler resume hook is disabled",
+        );
+    }
+
+    if request.confirm != STORAGE_MAINTENANCE_SCHEDULER_RESUME_CONFIRMATION {
+        return scheduler_resume_error(
+            StorageMaintenanceHttpStatus::BadRequest,
+            "confirmation_required",
+            request.reason,
+            0,
+            0,
+            format!("confirm must be {STORAGE_MAINTENANCE_SCHEDULER_RESUME_CONFIRMATION}"),
+        );
+    }
+
+    if !state
+        .config()
+        .market_data_storage_maintenance_scheduler_enabled
+    {
+        return scheduler_resume_error(
+            StorageMaintenanceHttpStatus::Forbidden,
+            "scheduler_disabled",
+            request.reason,
+            0,
+            0,
+            "storage maintenance scheduler config is disabled",
+        );
+    }
+
+    if state.config().market_data_storage.backend != MarketDataStorageBackendConfig::Tiered {
+        return scheduler_resume_error(
+            StorageMaintenanceHttpStatus::BadRequest,
+            "unsupported_backend",
+            request.reason,
+            0,
+            0,
+            "storage maintenance scheduler resume requires tiered storage backend",
+        );
+    }
+
+    let task_handle = state.market_data_storage_maintenance_scheduler_task();
+    if task_handle.is_active().await {
+        let snapshot = state
+            .market_data_storage_maintenance_scheduler()
+            .snapshot()
+            .await;
+        return scheduler_resume_error(
+            StorageMaintenanceHttpStatus::Conflict,
+            "already_running",
+            request.reason,
+            snapshot.consecutive_failures,
+            snapshot.consecutive_failures,
+            "storage maintenance scheduler task is already running",
+        );
+    }
+
+    let scheduler = state.market_data_storage_maintenance_scheduler();
+    let Some(claimed_task) = claim_storage_maintenance_scheduler_task(
+        state.config().clone(),
+        state.market_data_store(),
+        state.market_data_storage_maintenance_audit(),
+        scheduler.clone(),
+        task_handle,
+    )
+    .await
+    else {
+        let snapshot = scheduler.snapshot().await;
+        return scheduler_resume_error(
+            StorageMaintenanceHttpStatus::Conflict,
+            "already_running",
+            request.reason,
+            snapshot.consecutive_failures,
+            snapshot.consecutive_failures,
+            "storage maintenance scheduler task could not be started",
+        );
+    };
+
+    let outcome = scheduler.prepare_resume().await;
+    if outcome.running {
+        claimed_task.abort().await;
+        return scheduler_resume_error(
+            StorageMaintenanceHttpStatus::Conflict,
+            "running",
+            request.reason,
+            outcome.previous_consecutive_failures,
+            outcome.consecutive_failures,
+            "storage maintenance scheduler resume cannot run while scheduler attempt is running",
+        );
+    }
+
+    let task_started = true;
+    claimed_task.start();
+
+    StorageMaintenanceSchedulerResumeResult {
+        http_status: StorageMaintenanceHttpStatus::Ok,
+        response: MarketDataStorageMaintenanceSchedulerResumeResponse {
+            accepted: true,
+            status: "resumed".to_string(),
+            reason: request.reason,
+            previous_consecutive_failures: outcome.previous_consecutive_failures,
+            consecutive_failures: outcome.consecutive_failures,
+            task_started,
+        },
+        message: None,
+    }
+}
+
 fn scheduler_reset_error(
     http_status: StorageMaintenanceHttpStatus,
     status: &str,
@@ -384,6 +518,28 @@ fn scheduler_reset_error(
             reason,
             previous_consecutive_failures,
             consecutive_failures,
+        },
+        message: Some(message.into()),
+    }
+}
+
+fn scheduler_resume_error(
+    http_status: StorageMaintenanceHttpStatus,
+    status: &str,
+    reason: Option<String>,
+    previous_consecutive_failures: u32,
+    consecutive_failures: u32,
+    message: impl Into<String>,
+) -> StorageMaintenanceSchedulerResumeResult {
+    StorageMaintenanceSchedulerResumeResult {
+        http_status,
+        response: MarketDataStorageMaintenanceSchedulerResumeResponse {
+            accepted: false,
+            status: status.to_string(),
+            reason,
+            previous_consecutive_failures,
+            consecutive_failures,
+            task_started: false,
         },
         message: Some(message.into()),
     }
@@ -1035,6 +1191,32 @@ mod tests {
     use super::*;
     use crate::{ProductionServerState, ServerRuntimeConfig};
 
+    fn scheduler_resume_request() -> MarketDataStorageMaintenanceSchedulerResumeRequest {
+        MarketDataStorageMaintenanceSchedulerResumeRequest {
+            confirm: STORAGE_MAINTENANCE_SCHEDULER_RESUME_CONFIRMATION.to_string(),
+            reason: Some("unit-test".to_string()),
+        }
+    }
+
+    fn scheduler_resume_config(
+        extra: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> ServerRuntimeConfig {
+        ServerRuntimeConfig::from_env_pairs(extra).expect("config parses")
+    }
+
+    async fn suppress_scheduler(state: &ProductionServerState) {
+        let scheduler = state.market_data_storage_maintenance_scheduler();
+        assert!(scheduler.mark_started(chrono::Utc::now()).await);
+        scheduler
+            .mark_failed(
+                chrono::Utc::now(),
+                chrono::Utc::now() + chrono::Duration::seconds(60),
+                "simulated failure",
+            )
+            .await;
+        assert!(scheduler.is_suppressed().await);
+    }
+
     #[test]
     fn live_subscription_label_formats_binance_futures_usd() {
         let subscription = fdc_barter::default_binance_futures_usd_market_data_subscriptions()
@@ -1115,5 +1297,158 @@ mod tests {
             .await;
         assert_eq!(audit.entries.len(), 1);
         assert_eq!(audit.entries[0].healthy_tiers, 4);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_is_disabled_by_default() {
+        let state = ProductionServerState::new(scheduler_resume_config([]));
+
+        let result = resume_storage_maintenance_scheduler(&state, scheduler_resume_request()).await;
+
+        assert_eq!(result.http_status, StorageMaintenanceHttpStatus::Forbidden);
+        assert!(!result.response.accepted);
+        assert_eq!(result.response.status, "disabled");
+        assert!(!result.response.task_started);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_requires_confirmation() {
+        let state = ProductionServerState::new(scheduler_resume_config([(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+            "1",
+        )]));
+
+        let result = resume_storage_maintenance_scheduler(
+            &state,
+            MarketDataStorageMaintenanceSchedulerResumeRequest {
+                confirm: "wrong".to_string(),
+                reason: Some("unit-test".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(result.http_status, StorageMaintenanceHttpStatus::BadRequest);
+        assert!(!result.response.accepted);
+        assert_eq!(result.response.status, "confirmation_required");
+        assert!(!result.response.task_started);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_requires_scheduler_enabled() {
+        let state = ProductionServerState::new(scheduler_resume_config([(
+            "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+            "1",
+        )]));
+
+        let result = resume_storage_maintenance_scheduler(&state, scheduler_resume_request()).await;
+
+        assert_eq!(result.http_status, StorageMaintenanceHttpStatus::Forbidden);
+        assert!(!result.response.accepted);
+        assert_eq!(result.response.status, "scheduler_disabled");
+        assert!(!result.response.task_started);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_rejects_memory_backend() {
+        let state = ProductionServerState::new(scheduler_resume_config([
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+                "1",
+            ),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        ]));
+
+        let result = resume_storage_maintenance_scheduler(&state, scheduler_resume_request()).await;
+
+        assert_eq!(result.http_status, StorageMaintenanceHttpStatus::BadRequest);
+        assert!(!result.response.accepted);
+        assert_eq!(result.response.status, "unsupported_backend");
+        assert!(!result.response.task_started);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_rejects_already_running_task() {
+        let state = ProductionServerState::new(scheduler_resume_config([
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+                "1",
+            ),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                "1",
+            ),
+        ]));
+        suppress_scheduler(&state).await;
+        assert!(
+            state
+                .market_data_storage_maintenance_scheduler_task()
+                .try_store(tokio::spawn(async {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                }))
+                .await
+        );
+
+        let result = resume_storage_maintenance_scheduler(&state, scheduler_resume_request()).await;
+
+        assert_eq!(result.http_status, StorageMaintenanceHttpStatus::Conflict);
+        assert!(!result.response.accepted);
+        assert_eq!(result.response.status, "already_running");
+        assert_eq!(result.response.previous_consecutive_failures, 1);
+        assert_eq!(result.response.consecutive_failures, 1);
+        assert!(!result.response.task_started);
+        assert!(
+            state
+                .market_data_storage_maintenance_scheduler()
+                .is_suppressed()
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_starts_task_after_suppression() {
+        let state = ProductionServerState::new(scheduler_resume_config([
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED",
+                "1",
+            ),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_INTERVAL_SECONDS",
+                "7200",
+            ),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_JITTER_SECONDS",
+                "3600",
+            ),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                "1",
+            ),
+        ]));
+        suppress_scheduler(&state).await;
+
+        let result = resume_storage_maintenance_scheduler(&state, scheduler_resume_request()).await;
+
+        assert_eq!(result.http_status, StorageMaintenanceHttpStatus::Ok);
+        assert!(result.response.accepted);
+        assert_eq!(result.response.status, "resumed");
+        assert_eq!(result.response.previous_consecutive_failures, 1);
+        assert_eq!(result.response.consecutive_failures, 0);
+        assert!(result.response.task_started);
+        assert!(
+            state
+                .market_data_storage_maintenance_scheduler_task()
+                .is_active()
+                .await
+        );
+        assert!(
+            !state
+                .market_data_storage_maintenance_scheduler()
+                .is_suppressed()
+                .await
+        );
     }
 }

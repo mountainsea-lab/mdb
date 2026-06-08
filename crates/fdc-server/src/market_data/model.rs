@@ -200,6 +200,22 @@ pub struct MarketDataStorageMaintenanceSchedulerResetResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceSchedulerResumeRequest {
+    pub confirm: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataStorageMaintenanceSchedulerResumeResponse {
+    pub accepted: bool,
+    pub status: String,
+    pub reason: Option<String>,
+    pub previous_consecutive_failures: u32,
+    pub consecutive_failures: u32,
+    pub task_started: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StopLiveMarketDataResponse {
     pub state: MarketDataLiveState,
     pub task_id: Option<String>,
