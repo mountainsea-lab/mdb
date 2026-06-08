@@ -3,9 +3,64 @@
 Last updated: 2026-06-08
 Branch: `mdb-mqdev`
 Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: this document update commit (`docs: record scheduler restart resume controls status`)
+Latest checkpoint commit when this file was written: this document update commit (`docs: record live collection hardening status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
+
+## 2026-06-08 P36 Live Collection Hardening
+
+Completed:
+
+- Added bounded live retry configuration:
+  - `FDC_LIVE_RETRY_ENABLED`
+  - `FDC_LIVE_RETRY_INITIAL_DELAY_MS`
+  - `FDC_LIVE_RETRY_MAX_DELAY_MS`
+  - `FDC_LIVE_MAX_CONSECUTIVE_FAILURES`
+- Added default-disabled live resume gate:
+  - `FDC_MARKET_DATA_LIVE_RESUME_ENABLED`
+- Added `suppressed` live state after repeated live collection failures.
+- Extended live status with consecutive failure count, retry count, sanitized last error, retry schedule, suppression reason, and resume gate visibility.
+- Added explicit confirmation-protected live resume route:
+  - `POST /market-data/live/resume`
+  - confirmation string: `resume_live_collection`
+- Resume clears live failure/suppression state and starts a normal live background task when safe.
+- Resume does not clear market-data records, reset storage/audit data, run storage maintenance, or alter storage tier paths.
+- Preserved the `fdc-storage` boundary.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-08-live-collection-hardening-design.md`
+- `docs/superpowers/plans/2026-06-08-live-collection-hardening.md`
+
+Commits:
+
+- `967c182 feat(server): add live retry config`
+- `3748aa3 feat(server): expose live retry status fields`
+- `bf6a224 feat(server): add live suppression state primitives`
+- `ea4e539 feat(server): retry live collection before suppression`
+- `44dbb5f feat(server): add gated live resume route`
+
+Verification:
+
+- `rtk cargo test -p fdc-server --test runtime_config_contract live_retry_config` - 2 passed, 13 filtered out
+- `rtk cargo test -p fdc-server --test runtime_config_contract runtime_config_defaults_are_safe_for_local_production_server` - 1 passed, 14 filtered out
+- `rtk cargo test -p fdc-server live_supervisor_` - 6 passed, 124 filtered out
+- `rtk cargo test -p fdc-server live_retry_loop_suppresses_after_configured_failures` - 1 passed, 129 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_live_status_exposes_retry_and_resume_fields` - 1 passed, 53 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_live_resume` - 3 passed, 51 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_live_fake_background_start_stop_updates_status` - 1 passed, 53 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_live_stop_is_idempotent_when_no_runner_is_active` - 1 passed, 53 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_resume` - 5 passed, 49 filtered out
+- `rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `rtk cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Operational note:
+
+- One verification launch timed out because the command wrapper timeout was accidentally set to 1s. The same suite was immediately rerun with a 20-minute cap and passed.
+
+Recommended next slice:
+
+- P37 acquisition to four-tier storage to query end-to-end acceptance.
 
 ## 2026-06-08 P35 Scheduler Restart/Resume Controls
 
