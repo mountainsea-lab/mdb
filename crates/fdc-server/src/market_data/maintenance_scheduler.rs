@@ -60,6 +60,14 @@ pub struct StorageMaintenanceSchedulerResetOutcome {
     pub consecutive_failures: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageMaintenanceSchedulerResumeOutcome {
+    pub resumed: bool,
+    pub running: bool,
+    pub previous_consecutive_failures: u32,
+    pub consecutive_failures: u32,
+}
+
 impl StorageMaintenanceSchedulerState {
     pub fn from_config(config: &ServerRuntimeConfig) -> Self {
         let backend = config.market_data_storage.backend;
@@ -133,6 +141,31 @@ impl StorageMaintenanceSchedulerState {
 
         StorageMaintenanceSchedulerResetOutcome {
             reset: true,
+            running: false,
+            previous_consecutive_failures,
+            consecutive_failures: guard.snapshot.consecutive_failures,
+        }
+    }
+
+    pub async fn prepare_resume(&self) -> StorageMaintenanceSchedulerResumeOutcome {
+        let mut guard = self.inner.lock().await;
+        let previous_consecutive_failures = guard.snapshot.consecutive_failures;
+        if guard.snapshot.running {
+            return StorageMaintenanceSchedulerResumeOutcome {
+                resumed: false,
+                running: true,
+                previous_consecutive_failures,
+                consecutive_failures: guard.snapshot.consecutive_failures,
+            };
+        }
+
+        guard.snapshot.consecutive_failures = 0;
+        guard.snapshot.last_error = None;
+        guard.snapshot.last_status = Some("resumed".to_string());
+        guard.snapshot.next_run_at = None;
+
+        StorageMaintenanceSchedulerResumeOutcome {
+            resumed: true,
             running: false,
             previous_consecutive_failures,
             consecutive_failures: guard.snapshot.consecutive_failures,
@@ -217,6 +250,34 @@ impl StorageMaintenanceSchedulerState {
     pub fn should_spawn(&self, config: &ServerRuntimeConfig) -> bool {
         config.market_data_storage_maintenance_scheduler_enabled
             && config.market_data_storage.backend == MarketDataStorageBackendConfig::Tiered
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StorageMaintenanceSchedulerTaskHandle {
+    inner: Arc<Mutex<Option<JoinHandle<()>>>>,
+}
+
+impl StorageMaintenanceSchedulerTaskHandle {
+    pub async fn try_store(&self, handle: JoinHandle<()>) -> bool {
+        let mut guard = self.inner.lock().await;
+        if let Some(existing) = guard.as_ref() {
+            if !existing.is_finished() {
+                handle.abort();
+                return false;
+            }
+        }
+        *guard = Some(handle);
+        true
+    }
+
+    pub async fn is_active(&self) -> bool {
+        let mut guard = self.inner.lock().await;
+        if guard.as_ref().is_some_and(|handle| handle.is_finished()) {
+            *guard = None;
+            return false;
+        }
+        guard.is_some()
     }
 }
 
@@ -581,6 +642,91 @@ mod tests {
         let snapshot = state.snapshot().await;
         assert!(snapshot.running);
         assert_eq!(snapshot.last_status.as_deref(), Some("running"));
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_clears_retry_state_and_marks_resumed() {
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+            (
+                "FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                "1",
+            ),
+        ])
+        .expect("config parses");
+        let state = StorageMaintenanceSchedulerState::from_config(&config);
+        let started_at = Utc::now();
+        let finished_at = started_at + chrono::Duration::milliseconds(1);
+        let next_run_at = finished_at + chrono::Duration::seconds(60);
+
+        assert!(state.mark_started(started_at).await);
+        state
+            .mark_failed(finished_at, next_run_at, "simulated failure")
+            .await;
+        assert!(state.is_suppressed().await);
+
+        let outcome = state.prepare_resume().await;
+        assert!(outcome.resumed);
+        assert!(!outcome.running);
+        assert_eq!(outcome.previous_consecutive_failures, 1);
+        assert_eq!(outcome.consecutive_failures, 0);
+
+        let snapshot = state.snapshot().await;
+        assert_eq!(snapshot.consecutive_failures, 0);
+        assert_eq!(snapshot.last_status.as_deref(), Some("resumed"));
+        assert!(snapshot.last_error.is_none());
+        assert!(snapshot.next_run_at.is_none());
+        assert!(!state.is_suppressed().await);
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_resume_rejects_running_attempt() {
+        let config = ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered"),
+            ("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "1"),
+        ])
+        .expect("config parses");
+        let state = StorageMaintenanceSchedulerState::from_config(&config);
+        assert!(state.mark_started(Utc::now()).await);
+
+        let outcome = state.prepare_resume().await;
+        assert!(!outcome.resumed);
+        assert!(outcome.running);
+
+        let snapshot = state.snapshot().await;
+        assert!(snapshot.running);
+        assert_eq!(snapshot.last_status.as_deref(), Some("running"));
+    }
+
+    #[tokio::test]
+    async fn storage_maintenance_scheduler_task_handle_tracks_active_and_completed_task() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let handle = StorageMaintenanceSchedulerTaskHandle::default();
+        let rejected_task_ran = Arc::new(AtomicBool::new(false));
+        assert!(!handle.is_active().await);
+
+        assert!(handle
+            .try_store(tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }))
+            .await);
+        assert!(handle.is_active().await);
+        let rejected_task_ran_clone = Arc::clone(&rejected_task_ran);
+        assert!(!handle
+            .try_store(tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                rejected_task_ran_clone.store(true, Ordering::SeqCst);
+            }))
+            .await);
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!rejected_task_ran.load(Ordering::SeqCst));
+        assert!(handle.is_active().await);
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!handle.is_active().await);
     }
 
     #[tokio::test]
