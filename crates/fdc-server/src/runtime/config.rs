@@ -53,6 +53,11 @@ pub struct ServerRuntimeConfig {
     pub live_autostart: bool,
     pub live_default_timeout_secs: u64,
     pub live_default_max_envelopes: usize,
+    pub live_retry_enabled: bool,
+    pub live_retry_initial_delay_ms: u64,
+    pub live_retry_max_delay_ms: u64,
+    pub live_max_consecutive_failures: u32,
+    pub market_data_live_resume_enabled: bool,
     pub market_data_storage_maintenance_enabled: bool,
     pub market_data_storage_maintenance_audit_capacity: usize,
     pub market_data_storage_maintenance_audit_reset_enabled: bool,
@@ -83,6 +88,11 @@ impl ServerRuntimeConfig {
         let mut live_autostart = false;
         let mut live_default_timeout_secs = 30_u64;
         let mut live_default_max_envelopes = 100_usize;
+        let mut live_retry_enabled = true;
+        let mut live_retry_initial_delay_ms = 1000_u64;
+        let mut live_retry_max_delay_ms = 30000_u64;
+        let mut live_max_consecutive_failures = 3_u32;
+        let mut market_data_live_resume_enabled = false;
         let mut market_data_storage_maintenance_enabled = false;
         let mut market_data_storage_maintenance_audit_capacity = 32_usize;
         let mut market_data_storage_maintenance_audit_reset_enabled = false;
@@ -123,6 +133,37 @@ impl ServerRuntimeConfig {
                 "FDC_LIVE_DEFAULT_MAX_ENVELOPES" => {
                     live_default_max_envelopes =
                         parse_positive_usize("FDC_LIVE_DEFAULT_MAX_ENVELOPES", value.as_ref())?;
+                }
+                "FDC_LIVE_RETRY_ENABLED" => {
+                    live_retry_enabled = matches!(value.as_ref(), "1" | "true" | "yes" | "on");
+                }
+                "FDC_LIVE_RETRY_INITIAL_DELAY_MS" => {
+                    live_retry_initial_delay_ms = parse_u64_range(
+                        "FDC_LIVE_RETRY_INITIAL_DELAY_MS",
+                        value.as_ref(),
+                        100,
+                        600000,
+                    )?;
+                }
+                "FDC_LIVE_RETRY_MAX_DELAY_MS" => {
+                    live_retry_max_delay_ms = parse_u64_range(
+                        "FDC_LIVE_RETRY_MAX_DELAY_MS",
+                        value.as_ref(),
+                        100,
+                        3600000,
+                    )?;
+                }
+                "FDC_LIVE_MAX_CONSECUTIVE_FAILURES" => {
+                    live_max_consecutive_failures = parse_u32_range(
+                        "FDC_LIVE_MAX_CONSECUTIVE_FAILURES",
+                        value.as_ref(),
+                        1,
+                        100,
+                    )?;
+                }
+                "FDC_MARKET_DATA_LIVE_RESUME_ENABLED" => {
+                    market_data_live_resume_enabled =
+                        matches!(value.as_ref(), "1" | "true" | "yes" | "on");
                 }
                 "FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED" => {
                     market_data_storage_maintenance_enabled =
@@ -249,6 +290,12 @@ impl ServerRuntimeConfig {
             )));
         }
 
+        if live_retry_max_delay_ms < live_retry_initial_delay_ms {
+            return Err(Error::config(
+                "FDC_LIVE_RETRY_MAX_DELAY_MS must be >= FDC_LIVE_RETRY_INITIAL_DELAY_MS",
+            ));
+        }
+
         Ok(Self {
             bind_addr,
             environment,
@@ -256,6 +303,11 @@ impl ServerRuntimeConfig {
             live_autostart,
             live_default_timeout_secs,
             live_default_max_envelopes,
+            live_retry_enabled,
+            live_retry_initial_delay_ms,
+            live_retry_max_delay_ms,
+            live_max_consecutive_failures,
+            market_data_live_resume_enabled,
             market_data_storage_maintenance_enabled,
             market_data_storage_maintenance_audit_capacity,
             market_data_storage_maintenance_audit_reset_enabled,

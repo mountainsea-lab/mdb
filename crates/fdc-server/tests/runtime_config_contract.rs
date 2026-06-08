@@ -15,6 +15,11 @@ fn runtime_config_defaults_are_safe_for_local_production_server() {
     assert!(!config.live_autostart);
     assert_eq!(config.live_default_timeout_secs, 30);
     assert_eq!(config.live_default_max_envelopes, 100);
+    assert!(config.live_retry_enabled);
+    assert_eq!(config.live_retry_initial_delay_ms, 1000);
+    assert_eq!(config.live_retry_max_delay_ms, 30000);
+    assert_eq!(config.live_max_consecutive_failures, 3);
+    assert!(!config.market_data_live_resume_enabled);
     assert!(!config.market_data_storage_maintenance_enabled);
     assert!(!config.market_data_storage_maintenance_scheduler_enabled);
     assert!(!config.market_data_storage_maintenance_scheduler_reset_enabled);
@@ -191,6 +196,56 @@ fn runtime_config_rejects_invalid_values() {
         .expect_err("zero timeout should be rejected");
 
     assert!(error.to_string().contains("FDC_LIVE_DEFAULT_TIMEOUT_SECS"));
+}
+
+#[test]
+fn live_retry_config_accepts_valid_overrides() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_LIVE_RETRY_ENABLED", "0"),
+        ("FDC_LIVE_RETRY_INITIAL_DELAY_MS", "250"),
+        ("FDC_LIVE_RETRY_MAX_DELAY_MS", "5000"),
+        ("FDC_LIVE_MAX_CONSECUTIVE_FAILURES", "5"),
+        ("FDC_MARKET_DATA_LIVE_RESUME_ENABLED", "1"),
+    ])
+    .expect("live retry config should parse");
+
+    assert!(!config.live_retry_enabled);
+    assert_eq!(config.live_retry_initial_delay_ms, 250);
+    assert_eq!(config.live_retry_max_delay_ms, 5000);
+    assert_eq!(config.live_max_consecutive_failures, 5);
+    assert!(config.market_data_live_resume_enabled);
+}
+
+#[test]
+fn live_retry_config_rejects_invalid_values() {
+    let initial_error =
+        ServerRuntimeConfig::from_env_pairs([("FDC_LIVE_RETRY_INITIAL_DELAY_MS", "99")])
+            .expect_err("short initial retry delay should be rejected");
+    assert!(initial_error
+        .to_string()
+        .contains("FDC_LIVE_RETRY_INITIAL_DELAY_MS"));
+
+    let max_error = ServerRuntimeConfig::from_env_pairs([("FDC_LIVE_RETRY_MAX_DELAY_MS", "99")])
+        .expect_err("short max retry delay should be rejected");
+    assert!(max_error
+        .to_string()
+        .contains("FDC_LIVE_RETRY_MAX_DELAY_MS"));
+
+    let ordering_error = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_LIVE_RETRY_INITIAL_DELAY_MS", "5000"),
+        ("FDC_LIVE_RETRY_MAX_DELAY_MS", "1000"),
+    ])
+    .expect_err("max retry delay below initial delay should be rejected");
+    assert!(ordering_error
+        .to_string()
+        .contains("FDC_LIVE_RETRY_MAX_DELAY_MS must be >= FDC_LIVE_RETRY_INITIAL_DELAY_MS"));
+
+    let failures_error =
+        ServerRuntimeConfig::from_env_pairs([("FDC_LIVE_MAX_CONSECUTIVE_FAILURES", "0")])
+            .expect_err("zero max failures should be rejected");
+    assert!(failures_error
+        .to_string()
+        .contains("FDC_LIVE_MAX_CONSECUTIVE_FAILURES"));
 }
 
 #[test]
