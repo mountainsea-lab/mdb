@@ -2350,6 +2350,87 @@ async fn p37_maintenance_after_ingestion_records_audit_without_hiding_query_data
     let _ = std::fs::remove_dir_all(root);
 }
 
+#[tokio::test]
+async fn p37_live_recovery_controls_do_not_mutate_persisted_market_data() {
+    use fdc_server::market_data::service::start_fake_background_live_for_test;
+
+    let root = unique_test_path("p37-live-recovery-data-safety");
+    let config = p37_durable_config(
+        &root,
+        &[
+            ("FDC_LIVE_ENABLED", "1"),
+            ("FDC_MARKET_DATA_LIVE_RESUME_ENABLED", "1"),
+        ],
+    );
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("p37 live recovery state should build");
+    p37_ingest_fixture_trades(&state)
+        .await
+        .expect("p37 fixture ingestion should write");
+
+    let initial_count = state.market_data_store().record_count();
+    assert_eq!(initial_count, 3);
+
+    let router = build_production_router(state.clone());
+    let before_json = p37_query_trades(router.clone(), "BTCUSDT", 10).await;
+    let before_ids = p37_trade_ids(&before_json);
+    p37_assert_trade_ids(&before_json, &["p37-btc-1", "p37-btc-2"]);
+
+    let wrong_confirmation = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/resume")
+                .header("content-type", "application/json")
+                .body(live_resume_request("wrong"))
+                .expect("wrong confirmation resume request should build"),
+        )
+        .await
+        .expect("wrong confirmation resume should respond");
+    assert_eq!(wrong_confirmation.status(), StatusCode::BAD_REQUEST);
+    let wrong_json = response_body_json(wrong_confirmation).await;
+    assert_eq!(wrong_json["status"], "error");
+    assert_eq!(wrong_json["data"]["resumed"], false);
+
+    start_fake_background_live_for_test(&state, 10, std::time::Duration::from_millis(25))
+        .await
+        .expect("fake live should start");
+    let running_conflict = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/resume")
+                .header("content-type", "application/json")
+                .body(live_resume_request("resume_live_collection"))
+                .expect("running conflict resume request should build"),
+        )
+        .await
+        .expect("running conflict resume should respond");
+    assert_eq!(running_conflict.status(), StatusCode::CONFLICT);
+
+    let after_json = p37_query_trades(router.clone(), "BTCUSDT", 10).await;
+    p37_assert_trade_ids(&after_json, &["p37-btc-1", "p37-btc-2"]);
+    assert_eq!(p37_trade_ids(&after_json), before_ids);
+    assert_eq!(state.market_data_store().record_count(), initial_count);
+
+    let stop = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/live/stop")
+                .body(Body::empty())
+                .expect("stop request should build"),
+        )
+        .await
+        .expect("stop should respond");
+    assert_eq!(stop.status(), StatusCode::OK);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[test]
 fn production_live_supervisor_tracks_start_complete_and_rejects_concurrent_start() {
     use fdc_server::market_data::{
