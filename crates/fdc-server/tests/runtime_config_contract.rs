@@ -326,3 +326,88 @@ fn rejects_empty_market_data_storage_tier_path() {
         "unexpected error: {error}"
     );
 }
+
+fn production_local_example_env_pairs() -> Vec<(String, String)> {
+    include_str!("../../../config/production.local.example.env")
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return None;
+            }
+
+            let (key, value) = trimmed.split_once('=').unwrap_or_else(|| {
+                panic!(
+                    "config/production.local.example.env line {} must be KEY=VALUE, got {trimmed:?}",
+                    index + 1
+                )
+            });
+            let key = key.trim();
+            let value = value.trim();
+            assert!(
+                !key.is_empty(),
+                "env key must not be empty on line {}",
+                index + 1
+            );
+            assert!(
+                !value.contains('#'),
+                "inline comments are not supported on env line {}; put comments on their own line",
+                index + 1
+            );
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
+#[test]
+fn production_local_example_env_parses_as_safe_tiered_production_config() {
+    let config = ServerRuntimeConfig::from_env_pairs(production_local_example_env_pairs())
+        .expect("production local example env should parse");
+
+    assert_eq!(config.bind_addr.to_string(), "127.0.0.1:18080");
+    assert_eq!(config.environment, ServerRuntimeEnvironment::Production);
+    assert_eq!(
+        config.market_data_storage.backend,
+        MarketDataStorageBackendConfig::Tiered
+    );
+    assert_eq!(
+        config.market_data_storage.policy_profile,
+        MarketDataStoragePolicyProfileConfig::GenericRealtime
+    );
+    assert_eq!(
+        config.market_data_storage.tiers.l2_redb_path.as_deref(),
+        Some(Path::new("./var/fdc-market-data/l2.redb"))
+    );
+    assert_eq!(
+        config.market_data_storage.tiers.l3_duckdb_path.as_deref(),
+        Some(Path::new("./var/fdc-market-data/l3.duckdb"))
+    );
+    assert_eq!(
+        config.market_data_storage.tiers.l4_rocksdb_path.as_deref(),
+        Some(Path::new("./var/fdc-market-data/l4-rocksdb"))
+    );
+}
+
+#[test]
+fn production_local_example_env_keeps_dangerous_controls_disabled() {
+    let config = ServerRuntimeConfig::from_env_pairs(production_local_example_env_pairs())
+        .expect("production local example env should parse");
+
+    assert!(!config.live_enabled);
+    assert!(!config.live_autostart);
+    assert!(!config.market_data_live_resume_enabled);
+    assert!(!config.market_data_storage_maintenance_audit_reset_enabled);
+    assert!(!config.market_data_storage_maintenance_scheduler_enabled);
+    assert!(!config.market_data_storage_maintenance_scheduler_reset_enabled);
+    assert!(!config.market_data_storage_maintenance_scheduler_resume_enabled);
+
+    assert!(config.market_data_storage_maintenance_enabled);
+    assert_eq!(config.market_data_storage_maintenance_audit_capacity, 64);
+    assert_eq!(config.live_default_timeout_secs, 30);
+    assert_eq!(config.live_default_max_envelopes, 100);
+    assert!(config.live_retry_enabled);
+    assert_eq!(config.live_retry_initial_delay_ms, 1000);
+    assert_eq!(config.live_retry_max_delay_ms, 30000);
+    assert_eq!(config.live_max_consecutive_failures, 3);
+}
