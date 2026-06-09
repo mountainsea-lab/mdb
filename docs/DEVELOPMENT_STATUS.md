@@ -1,9 +1,9 @@
 # Development Status
 
 Last updated: 2026-06-09
-Branch: `p39-production-runbook`
-Remote: local worktree branch, based on `p38-query-api-hardening` HEAD `6675c23`
-Latest checkpoint commit when this file was written: P39 runbook/config completion (`docs: record p39 production runbook completion`)
+Branch: `mdb-mqdev`
+Remote: local development branch after fast-forward merge through P39 HEAD `66fb48d`
+Latest checkpoint commit when this file was written: P39 merged into `mdb-mqdev` (`docs: record p39 merge status`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
