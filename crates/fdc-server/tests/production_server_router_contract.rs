@@ -207,6 +207,53 @@ fn p37_assert_trade_ids(json: &serde_json::Value, expected: &[&str]) {
     assert_eq!(actual, expected);
 }
 
+async fn p38_query_trades_status(
+    router: axum::Router,
+    uri: &str,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .body(Body::empty())
+                .expect("trade query request should build"),
+        )
+        .await
+        .expect("trade query should respond");
+
+    assert_eq!(response.status(), expected_status);
+    response_body_json(response).await
+}
+
+async fn p38_query_trades(router: axum::Router, uri: &str) -> serde_json::Value {
+    p38_query_trades_status(router, uri, StatusCode::OK).await
+}
+
+async fn p38_ingest_fixture_trades(
+    state: &ProductionServerState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    state.ingest_test_trade("BTCUSDT", "p38-btc-1").await?;
+    state.ingest_test_trade("ETHUSDT", "p38-eth-1").await?;
+    state.ingest_test_trade("BTCUSDT", "p38-btc-2").await?;
+    Ok(())
+}
+
+fn p38_assert_common_trade_metadata(
+    json: &serde_json::Value,
+    requested_limit: Option<u64>,
+    applied_limit: u64,
+    symbol: Option<&str>,
+) {
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["message"], serde_json::Value::Null);
+    assert_eq!(json["data"]["requested_limit"].as_u64(), requested_limit);
+    assert_eq!(json["data"]["applied_limit"], applied_limit);
+    assert_eq!(json["data"]["symbol"].as_str(), symbol);
+    assert_eq!(json["data"]["data_kind"], "trade");
+    assert_eq!(json["data"]["query_source"], "market_data_store");
+}
+
 async fn p37_l2_records(state: &ProductionServerState) -> Vec<StorageWriteRecord> {
     state
         .market_data_store()
@@ -2226,6 +2273,90 @@ async fn runtime_server_reopens_configured_durable_tiers_and_serves_persisted_tr
     );
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn p38_trades_query_applies_default_limit_and_metadata() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    p38_ingest_fixture_trades(&state)
+        .await
+        .expect("p38 fixture ingestion should write");
+
+    let router = build_production_router(state);
+    let json = p38_query_trades(router, "/market-data/trades").await;
+
+    p38_assert_common_trade_metadata(&json, None, 100, None);
+    p37_assert_trade_ids(&json, &["p38-btc-1", "p38-btc-2", "p38-eth-1"]);
+}
+
+#[tokio::test]
+async fn p38_trades_query_filters_normalized_symbol() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    p38_ingest_fixture_trades(&state)
+        .await
+        .expect("p38 fixture ingestion should write");
+
+    let router = build_production_router(state);
+    let json = p38_query_trades(router, "/market-data/trades?symbol=btcusdt&limit=10").await;
+
+    p38_assert_common_trade_metadata(&json, Some(10), 10, Some("BTCUSDT"));
+    p37_assert_trade_ids(&json, &["p38-btc-1", "p38-btc-2"]);
+}
+
+#[tokio::test]
+async fn p38_trades_query_returns_empty_success_for_missing_symbol() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    p38_ingest_fixture_trades(&state)
+        .await
+        .expect("p38 fixture ingestion should write");
+
+    let router = build_production_router(state);
+    let json = p38_query_trades(router, "/market-data/trades?symbol=SOLUSDT&limit=10").await;
+
+    p38_assert_common_trade_metadata(&json, Some(10), 10, Some("SOLUSDT"));
+    assert_eq!(json["data"]["returned_records"], 0);
+    assert_eq!(json["data"]["records"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn p38_trades_query_rejects_invalid_limits() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    let router = build_production_router(state);
+
+    for (uri, requested_limit) in [
+        ("/market-data/trades?limit=0", 0_u64),
+        ("/market-data/trades?limit=1001", 1001_u64),
+    ] {
+        let json = p38_query_trades_status(router.clone(), uri, StatusCode::BAD_REQUEST).await;
+
+        assert_eq!(json["status"], "error");
+        assert!(json["message"]
+            .as_str()
+            .expect("message should be a string")
+            .contains("limit must be between 1 and 1000"));
+        assert_eq!(json["data"]["returned_records"], 0);
+        assert_eq!(json["data"]["requested_limit"].as_u64(), Some(requested_limit));
+        assert_eq!(json["data"]["applied_limit"], 100);
+        assert_eq!(json["data"]["data_kind"], "trade");
+        assert_eq!(json["data"]["query_source"], "market_data_store");
+        assert_eq!(json["data"]["records"].as_array().unwrap().len(), 0);
+    }
 }
 
 #[tokio::test]
