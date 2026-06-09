@@ -2,8 +2,8 @@
 
 Last updated: 2026-06-09
 Branch: `mdb-mqdev`
-Remote: local development branch after fast-forward merge through P39 HEAD `66fb48d`
-Latest checkpoint commit when this file was written: P39 merged into `mdb-mqdev` (`docs: record p39 merge status`)
+Remote: local development branch after fast-forward merge through P40 HEAD `0b390ab`
+Latest checkpoint commit when this file was written: P40 merged into `mdb-mqdev` (`style(server): format p40 binary contract`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -62,6 +62,58 @@ Recommended next slice:
 
 - P38 Query API Production Hardening.
 
+## 2026-06-09 P40 Production Runtime Assembly and Version Readiness
+
+Completed:
+
+- Fixed the production binary startup mismatch discovered by the P39 internal MVP smoke run.
+- Changed `fdc_server` startup to assemble `ProductionServerState` with `ProductionServerState::try_new(config).await?`, so runtime storage config drives the actual market-data store instead of silently using memory.
+- Added a process-level binary runtime contract proving tiered env config makes `/market-data/storage/status`, `/market-data/storage/health`, and manual maintenance agree on a tiered backend.
+- Added the runbook-required read-only `GET /version` readiness endpoint returning `service=fdc-server` and package version metadata.
+- Updated the production runbook localhost smoke commands to use `curl --noproxy '*'` to avoid proxy-induced false 503 responses.
+- Kept market-data query behavior, live acquisition defaults, scheduler defaults, and operator gate semantics unchanged.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-09-production-runtime-assembly-design.md`
+- `docs/superpowers/plans/2026-06-09-production-runtime-assembly-plan.md`
+
+Commits:
+
+- `d6c9278 docs(server): design p40 production runtime assembly`
+- `076030b docs(server): plan p40 production runtime assembly`
+- `818e193 test(server): cover p40 runtime assembly contracts`
+- `6ea0a23 feat(server): expose version readiness endpoint`
+- `d4d9874 test(server): reproduce binary runtime assembly mismatch`
+- `727dbdd fix(server): assemble production runtime store from config`
+- `5bfa02b docs(server): make production smoke checks proxy safe`
+- `0b390ab style(server): format p40 binary contract`
+
+Verification:
+
+- RED `/version` router contract failed as expected with HTTP 404 before implementation.
+- RED process-level binary contract failed as expected because storage health reported `tiered=false` under tiered env before the binary fix.
+- `rtk cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_router_exposes_version_metadata -- --nocapture` - 1 passed, 65 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_runtime_assembly_uses_tiered_store_for_health_and_maintenance -- --nocapture` - 1 passed, 65 filtered out
+- `rtk cargo test -p fdc-server --test production_binary_runtime_contract production_binary_assembles_tiered_runtime_store -- --nocapture` - 1 passed
+- `rtk cargo test -p fdc-server --test runtime_config_contract production_local_example_env -- --nocapture` - 2 passed, 15 filtered out
+- `rtk cargo test -p fdc-server --test runtime_config_contract -- --nocapture` - 17 passed
+- `rtk cargo test -p fdc-server --test production_server_router_contract p38_ -- --nocapture` - 7 passed, 59 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract production_live_resume -- --nocapture` - 3 passed, 63 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once -- --nocapture` - 4 passed, 62 filtered out
+- `rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_resume -- --nocapture` - 5 passed, 61 filtered out
+- `rtk cargo test -p fdc-storage dependency_guard -- --nocapture` - 2 passed, 141 filtered out
+- Post-merge on `mdb-mqdev`: focused P40 tests passed and full `production_server_router_contract` passed with 65 passed, 1 ignored.
+
+Operational note:
+
+- During the first P40 RED verification, `/Volumes/wdata` filled while compiling `libduckdb-sys`. The root cause was regenerated Cargo `target/` artifacts; only rebuildable target directories were removed to restore space, then the same RED/GREEN checks were rerun successfully.
+
+Recommended next slice:
+
+- Repeat the internal MVP smoke using the P40 binary on `mdb-mqdev`; after that, choose the next production readiness gap from observed operator results.
+
 ## 2026-06-09 P39 Production Runbook, Config Pack, and Soak Validation
 
 Completed:
@@ -102,7 +154,7 @@ Operational note:
 
 Recommended next slice:
 
-- P40 operator readiness follow-up only after an internal MVP run identifies gaps.
+- P40 completed and merged; rerun the internal MVP smoke on `mdb-mqdev` with the proxy-safe runbook commands.
 
 ## 2026-06-08 P38 Query API Production Hardening
 
