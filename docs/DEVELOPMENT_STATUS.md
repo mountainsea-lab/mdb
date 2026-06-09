@@ -62,6 +62,54 @@ Recommended next slice:
 
 - P38 Query API Production Hardening.
 
+## 2026-06-08 P38 Query API Production Hardening
+
+Completed:
+
+- Hardened `GET /market-data/trades` with explicit query validation for bounded limits.
+- Added default and maximum trade query limits: default `100`, maximum `1000`.
+- Normalized valid symbol filters to uppercase before querying storage.
+- Returned stable query metadata: requested limit, applied limit, normalized symbol, data kind, and query source.
+- Returned deterministic HTTP 400 JSON error envelopes for invalid or malformed limits, including `limit=0`, `limit=1001`, `limit=abc`, `limit=-1`, and `limit=`.
+- Verified empty query results remain successful and deterministic.
+- Verified tiered/durable readback still returns metadata after reopen.
+- Verified the query route remains read-only around storage maintenance regression coverage.
+- Preserved the `fdc-storage` boundary.
+- Kept P38 scope limited to `/market-data/trades`; candle/OHLCV query routes are reserved for a later slice.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-08-query-api-production-hardening-design.md`
+- `docs/superpowers/plans/2026-06-08-query-api-production-hardening.md`
+
+Commits:
+
+- `0f1de07 docs(server): design query api production hardening`
+- `95043f8 docs(server): plan query api production hardening`
+- `df0640f test(server): add p38 query hardening contracts`
+- `f933eaa test(server): tighten p38 query hardening contracts`
+- `2c2f901 feat(server): harden trades query api`
+- `d88ba7b fix(server): envelope malformed trades query limits`
+- `117596a test(server): cover p38 durable and read-only query regressions`
+
+Verification:
+
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract p38_` - 7 passed, 57 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract p37_` - 3 passed, 61 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract production_live_resume` - 3 passed, 61 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 60 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_resume` - 5 passed, 59 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `rtk cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Operational note:
+
+- A first `fdc-storage dependency_guard` verification attempt failed during DuckDB/libduckdb compilation because `/Volumes/wdata` was full (`No space left on device`). Only regenerated Cargo incremental build cache (`target/debug/incremental`) was removed; the same dependency guard was rerun and passed.
+
+Recommended next slice:
+
+- P39 Production Runbook, Config Pack, and Soak Validation.
+
 ## 2026-06-08 P37 Acquisition → Four-Tier Storage → Query End-to-End Acceptance
 
 Completed:
