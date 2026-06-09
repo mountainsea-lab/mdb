@@ -2445,6 +2445,31 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
 }
 
 #[tokio::test]
+async fn p38_trades_query_survives_durable_reopen_with_metadata() {
+    let root = unique_test_path("p38-query-reopen");
+    let config = p37_durable_config(&root, &[]);
+
+    let state = ProductionServerState::try_new(config.clone())
+        .await
+        .expect("production state should build");
+    p38_ingest_fixture_trades(&state)
+        .await
+        .expect("p38 fixture ingestion should write");
+    drop(state);
+
+    let reopened = ProductionServerState::try_new(config)
+        .await
+        .expect("reopened production state should build");
+    let router = build_production_router(reopened);
+    let json = p38_query_trades(router, "/market-data/trades?symbol=BTCUSDT&limit=10").await;
+
+    p38_assert_common_trade_metadata(&json, Some(10), 10, Some("BTCUSDT"));
+    p37_assert_trade_ids(&json, &["p38-btc-1", "p38-btc-2"]);
+
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
 async fn p37_maintenance_after_ingestion_records_audit_without_hiding_query_data() {
     let root = unique_test_path("p37-maintenance-after-ingestion");
     let config = p37_durable_config(
@@ -2502,6 +2527,34 @@ async fn p37_maintenance_after_ingestion_records_audit_without_hiding_query_data
     p37_assert_trade_ids(&after_json, &["p37-btc-1", "p37-btc-2"]);
 
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[tokio::test]
+async fn p38_trades_query_is_read_only_for_operational_controls() {
+    let state = tiered_storage_state_with_audit_capacity(8).await;
+    p38_ingest_fixture_trades(&state)
+        .await
+        .expect("p38 fixture ingestion should write");
+
+    let initial_count = state.market_data_store().record_count();
+    let router = build_production_router(state.clone());
+    let before = p38_query_trades(
+        router.clone(),
+        "/market-data/trades?symbol=BTCUSDT&limit=10",
+    )
+    .await;
+
+    run_successful_storage_maintenance(router.clone()).await;
+
+    let after = p38_query_trades(
+        router.clone(),
+        "/market-data/trades?symbol=BTCUSDT&limit=10",
+    )
+    .await;
+
+    assert_eq!(state.market_data_store().record_count(), initial_count);
+    p38_assert_common_trade_metadata(&after, Some(10), 10, Some("BTCUSDT"));
+    assert_eq!(p37_trade_ids(&before), p37_trade_ids(&after));
 }
 
 #[tokio::test]
