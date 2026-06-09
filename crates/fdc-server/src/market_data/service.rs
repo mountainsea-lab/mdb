@@ -1096,15 +1096,29 @@ pub async fn start_fake_background_live_for_test(
 pub fn query_trades(
     state: &ProductionServerState,
     symbol: Option<String>,
-    limit: Option<usize>,
+    limit: Option<String>,
 ) -> QueryTradesResult {
     let normalized_symbol = symbol.map(|symbol| symbol.trim().to_ascii_uppercase());
-    let applied_limit = limit.unwrap_or(DEFAULT_TRADE_QUERY_LIMIT);
+    let requested_limit = match parse_trade_query_limit(limit) {
+        Ok(limit) => limit,
+        Err(()) => {
+            return QueryTradesResult {
+                http_status: StorageMaintenanceHttpStatus::BadRequest,
+                response: empty_trades_response(None, DEFAULT_TRADE_QUERY_LIMIT, normalized_symbol),
+                message: Some(TRADE_QUERY_LIMIT_ERROR.to_string()),
+            };
+        }
+    };
+    let applied_limit = requested_limit.unwrap_or(DEFAULT_TRADE_QUERY_LIMIT);
 
     if !(1..=MAX_TRADE_QUERY_LIMIT).contains(&applied_limit) {
         return QueryTradesResult {
             http_status: StorageMaintenanceHttpStatus::BadRequest,
-            response: empty_trades_response(limit, DEFAULT_TRADE_QUERY_LIMIT, normalized_symbol),
+            response: empty_trades_response(
+                requested_limit,
+                DEFAULT_TRADE_QUERY_LIMIT,
+                normalized_symbol,
+            ),
             message: Some(TRADE_QUERY_LIMIT_ERROR.to_string()),
         };
     }
@@ -1123,7 +1137,7 @@ pub fn query_trades(
     QueryTradesResult {
         http_status: StorageMaintenanceHttpStatus::Ok,
         response: MarketDataTradesResponse {
-            requested_limit: limit,
+            requested_limit,
             applied_limit,
             symbol: normalized_symbol,
             data_kind: "trade".to_string(),
@@ -1132,6 +1146,13 @@ pub fn query_trades(
             records,
         },
         message: None,
+    }
+}
+
+fn parse_trade_query_limit(limit: Option<String>) -> std::result::Result<Option<usize>, ()> {
+    match limit {
+        Some(limit) => limit.parse::<usize>().map(Some).map_err(|_| ()),
+        None => Ok(None),
     }
 }
 

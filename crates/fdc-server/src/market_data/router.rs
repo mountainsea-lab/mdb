@@ -36,7 +36,7 @@ use crate::{
 #[derive(Debug, Clone, Deserialize)]
 pub struct TradeQueryParams {
     pub symbol: Option<String>,
-    pub limit: Option<usize>,
+    pub limit: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

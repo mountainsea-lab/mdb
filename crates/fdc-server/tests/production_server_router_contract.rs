@@ -2366,6 +2366,33 @@ async fn p38_trades_query_rejects_invalid_limits() {
 }
 
 #[tokio::test]
+async fn p38_trades_query_rejects_malformed_limits_with_envelope() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    let router = build_production_router(state);
+
+    for uri in [
+        "/market-data/trades?limit=abc",
+        "/market-data/trades?limit=-1",
+        "/market-data/trades?limit=",
+    ] {
+        let json = p38_query_trades_status(router.clone(), uri, StatusCode::BAD_REQUEST).await;
+
+        assert_eq!(json["status"], "error");
+        assert_eq!(json["message"], "limit must be between 1 and 1000");
+        assert_eq!(json["data"]["returned_records"], 0);
+        assert_eq!(json["data"]["requested_limit"], serde_json::Value::Null);
+        assert_eq!(json["data"]["applied_limit"], 100);
+        assert_eq!(json["data"]["data_kind"], "trade");
+        assert_eq!(json["data"]["query_source"], "market_data_store");
+        assert_eq!(json["data"]["records"].as_array().unwrap().len(), 0);
+    }
+}
+
+#[tokio::test]
 async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     let root = unique_test_path("p37-acquisition-query-reopen");
     let config = p37_durable_config(&root, &[]);
