@@ -1,9 +1,9 @@
 # Development Status
 
-Last updated: 2026-06-08
-Branch: `mdb-mqdev`
-Remote: `origin/mdb-mqdev`
-Latest checkpoint commit when this file was written: P37 completion commit (`docs: record p37 acceptance completion`)
+Last updated: 2026-06-09
+Branch: `p39-production-runbook`
+Remote: local worktree branch, based on `p38-query-api-hardening` HEAD `6675c23`
+Latest checkpoint commit when this file was written: P39 runbook/config completion (`docs: record p39 production runbook completion`)
 
 This file is the entry point for resuming development. Read it first, then open the referenced design and plan documents only as needed.
 
@@ -61,6 +61,48 @@ Operational note:
 Recommended next slice:
 
 - P38 Query API Production Hardening.
+
+## 2026-06-09 P39 Production Runbook, Config Pack, and Soak Validation
+
+Completed:
+
+- Added a safe local production config pack at `config/production.local.example.env`.
+- Added runtime config contract coverage proving the config pack parses and keeps dangerous gates disabled by default.
+- Added an executable market-data production runbook covering startup, readiness, query verification, manual maintenance, live recovery, scheduler recovery, deterministic smoke, optional real-network smoke, and short soak procedures.
+- Kept production code and public API surface unchanged.
+- Preserved default offline verification; real-network smoke remains ignored/manual and explicitly opt-in.
+
+Design and plan:
+
+- `docs/superpowers/specs/2026-06-09-production-runbook-config-soak-design.md`
+- `docs/superpowers/plans/2026-06-09-production-runbook-config-soak.md`
+
+Commits:
+
+- `3e6cc1a docs(server): design p39 production runbook`
+- `9ec60cb docs(server): plan p39 production runbook`
+- `18feb26 test(server): validate p39 production config pack`
+- `2df02f2 docs(server): add market data production runbook`
+
+Verification:
+
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test runtime_config_contract production_local_example_env` - 2 passed, 15 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test runtime_config_contract` - 17 passed
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract p38_` - 7 passed, 57 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract production_live_resume` - 3 passed, 61 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_run_once` - 4 passed, 60 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-server --test production_server_router_contract storage_maintenance_scheduler_resume` - 5 passed, 59 filtered out
+- `CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo test -p fdc-storage --test dependency_guard` - 1 passed
+- `rtk cargo fmt -p fdc-server -p fdc-storage -- --check` - exit 0
+
+Operational note:
+
+- Two headless subagents stalled without modifying the worktree during Task 1 implementation/review. The coordinator stopped them per the anti-stall rule, verified the worktree was clean, completed Task 1 inline, and preserved explicit local spec/quality review checkpoints.
+- One verification script failed before running tests because a nested login shell reset `PATH` and hid `rtk`; the corrected direct-command verification immediately passed 8/8.
+
+Recommended next slice:
+
+- P40 operator readiness follow-up only after an internal MVP run identifies gaps.
 
 ## 2026-06-08 P38 Query API Production Hardening
 
