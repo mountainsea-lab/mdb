@@ -11,3 +11,16 @@ pub struct ReadinessResponse {
     pub live_enabled: bool,
     pub market_data_store_available: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionResponse {
+    pub status: String,
+    pub data: VersionData,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionData {
+    pub service: String,
+    pub version: String,
+}
