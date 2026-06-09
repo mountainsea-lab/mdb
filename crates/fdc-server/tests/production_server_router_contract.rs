@@ -393,6 +393,31 @@ async fn production_router_exposes_health_and_readiness() {
 }
 
 #[tokio::test]
+async fn production_router_exposes_version_metadata() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    );
+    let router = build_production_router(state);
+
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri("/version")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("version should respond");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["message"], serde_json::Value::Null);
+    assert_eq!(json["data"]["service"], "fdc-server");
+    assert_eq!(json["data"]["version"], env!("CARGO_PKG_VERSION"));
+}
+
+#[tokio::test]
 async fn production_storage_status_reports_memory_defaults() {
     let state = ProductionServerState::new(
         ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
@@ -481,6 +506,79 @@ async fn production_storage_status_reports_durable_tiered_config_without_full_pa
         !body_text.contains(root.to_string_lossy().as_ref()),
         "storage status must not leak full configured paths: {body_text}"
     );
+}
+
+#[tokio::test]
+async fn production_runtime_assembly_uses_tiered_store_for_health_and_maintenance() {
+    let root = unique_test_path("runtime-assembly-tiered");
+    std::fs::create_dir_all(&root).expect("durable root should be created");
+    let mut env = durable_tier_env(&root).to_vec();
+    env.push((
+        "FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED".to_string(),
+        "1".to_string(),
+    ));
+    let config = ServerRuntimeConfig::from_env_pairs(
+        env.iter()
+            .map(|(key, value)| (key.as_str(), value.as_str())),
+    )
+    .expect("durable runtime config should parse");
+    let state = ProductionServerState::try_new(config)
+        .await
+        .expect("production state should build from runtime config");
+    let router = build_production_router(state);
+
+    let status_response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/status")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage status should respond");
+    assert_eq!(status_response.status(), StatusCode::OK);
+    let status_json = response_body_json(status_response).await;
+    assert_eq!(status_json["status"], "success");
+    assert_eq!(status_json["data"]["backend"], "tiered");
+    assert_eq!(status_json["data"]["tiered"], true);
+    assert_eq!(status_json["data"]["durable_tiers_configured"], 3);
+    assert_eq!(status_json["data"]["maintenance_enabled"], true);
+
+    let health_response = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/storage/health")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("storage health should respond");
+    assert_eq!(health_response.status(), StatusCode::OK);
+    let health_json = response_body_json(health_response).await;
+    assert_eq!(health_json["status"], "success");
+    assert_eq!(health_json["data"]["backend"], "tiered");
+    assert_eq!(health_json["data"]["tiered"], true);
+    assert_eq!(health_json["data"]["status"], "healthy");
+    assert_eq!(health_json["data"]["tiers"].as_array().unwrap().len(), 4);
+
+    let maintenance_response = router
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/storage/maintenance/run-once")
+                .header("content-type", "application/json")
+                .body(maintenance_request("run_maintenance_once"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("maintenance route should respond");
+    assert_eq!(maintenance_response.status(), StatusCode::OK);
+    let maintenance_json = response_body_json(maintenance_response).await;
+    assert_eq!(maintenance_json["status"], "success");
+    assert_eq!(maintenance_json["data"]["accepted"], true);
+    assert_eq!(maintenance_json["data"]["status"], "completed");
 }
 
 #[tokio::test]
