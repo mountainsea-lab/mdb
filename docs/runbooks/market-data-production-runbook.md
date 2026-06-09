@@ -56,10 +56,12 @@ Expected:
 
 ## Readiness checks
 
+> Local proxy note: for localhost smoke checks, use `curl --noproxy '*' ...` so `HTTP_PROXY`/`HTTPS_PROXY` environment variables cannot route checks through a corporate proxy and produce false 503 responses.
+
 ```bash
-curl -sS http://127.0.0.1:18080/health
-curl -sS http://127.0.0.1:18080/ready
-curl -sS http://127.0.0.1:18080/version
+curl --noproxy '*' -sS http://127.0.0.1:18080/health
+curl --noproxy '*' -sS http://127.0.0.1:18080/ready
+curl --noproxy '*' -sS http://127.0.0.1:18080/version
 ```
 
 Expected:
@@ -71,8 +73,8 @@ Expected:
 ## Storage status checks
 
 ```bash
-curl -sS http://127.0.0.1:18080/market-data/storage/status
-curl -sS http://127.0.0.1:18080/market-data/storage/health
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/storage/status
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/storage/health
 ```
 
 Expected:
@@ -85,8 +87,8 @@ Expected:
 ## Query check
 
 ```bash
-curl -sS 'http://127.0.0.1:18080/market-data/trades?limit=10'
-curl -i 'http://127.0.0.1:18080/market-data/trades?limit=1001'
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/trades?limit=10'
+curl --noproxy '*' -i 'http://127.0.0.1:18080/market-data/trades?limit=1001'
 ```
 
 Expected:
@@ -99,11 +101,11 @@ Expected:
 Manual maintenance is enabled in the local production profile. Run it only when you intend to scan and compact configured storage tiers.
 
 ```bash
-curl -sS -X POST http://127.0.0.1:18080/market-data/storage/maintenance/run-once \
+curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/market-data/storage/maintenance/run-once \
   -H 'content-type: application/json' \
   -d '{"confirm":"run_maintenance_once","reason":"operator_smoke"}'
 
-curl -sS 'http://127.0.0.1:18080/market-data/storage/maintenance/audit?limit=10'
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/storage/maintenance/audit?limit=10'
 ```
 
 Expected:
@@ -128,12 +130,12 @@ CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo 
 Then in another shell:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:18080/market-data/live/start \
+curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/market-data/live/start \
   -H 'content-type: application/json' \
   -d '{"timeout_secs":30,"max_envelopes":100}'
 
-curl -sS http://127.0.0.1:18080/market-data/live/status
-curl -sS 'http://127.0.0.1:18080/market-data/trades?limit=10'
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/live/status
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/trades?limit=10'
 ```
 
 Expected:
@@ -147,7 +149,7 @@ Expected:
 Use this only after inspecting live status and deciding resume is safe.
 
 ```bash
-curl -sS http://127.0.0.1:18080/market-data/live/status
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/live/status
 ```
 
 If live state is suppressed and operator policy allows resume, restart with:
@@ -159,7 +161,7 @@ export FDC_MARKET_DATA_LIVE_RESUME_ENABLED=1
 Then call:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:18080/market-data/live/resume \
+curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/market-data/live/resume \
   -H 'content-type: application/json' \
   -d '{"confirm":"resume_live_collection","reason":"operator_recovery"}'
 ```
@@ -188,7 +190,7 @@ set +a
 Check scheduler status:
 
 ```bash
-curl -sS http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/status
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/status
 ```
 
 Expected:
@@ -202,7 +204,7 @@ Expected:
 For suppressed scheduler accounting, inspect first:
 
 ```bash
-curl -sS http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/status
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/status
 ```
 
 To reset suppression accounting without starting a task, restart with:
@@ -214,7 +216,7 @@ export FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESET_ENABLED=1
 Then call:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/reset \
+curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/reset \
   -H 'content-type: application/json' \
   -d '{"confirm":"reset_scheduler_suppression","reason":"operator_reset"}'
 ```
@@ -228,7 +230,7 @@ export FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_RESUME_ENABLED=1
 Then call:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/resume \
+curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/market-data/storage/maintenance/scheduler/resume \
   -H 'content-type: application/json' \
   -d '{"confirm":"resume_scheduler","reason":"operator_resume"}'
 ```
