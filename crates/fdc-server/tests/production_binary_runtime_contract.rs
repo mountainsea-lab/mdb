@@ -131,8 +131,14 @@ fn production_binary_assembles_tiered_runtime_store() {
         .env("FDC_MARKET_DATA_STORAGE_BACKEND", "tiered")
         .env("FDC_MARKET_DATA_STORAGE_POLICY_PROFILE", "generic_realtime")
         .env("FDC_MARKET_DATA_STORAGE_L2_REDB_PATH", root.join("l2.redb"))
-        .env("FDC_MARKET_DATA_STORAGE_L3_DUCKDB_PATH", root.join("l3.duckdb"))
-        .env("FDC_MARKET_DATA_STORAGE_L4_ROCKSDB_PATH", root.join("l4-rocksdb"))
+        .env(
+            "FDC_MARKET_DATA_STORAGE_L3_DUCKDB_PATH",
+            root.join("l3.duckdb"),
+        )
+        .env(
+            "FDC_MARKET_DATA_STORAGE_L4_ROCKSDB_PATH",
+            root.join("l4-rocksdb"),
+        )
         .env("FDC_MARKET_DATA_STORAGE_MAINTENANCE_ENABLED", "1")
         .env("FDC_MARKET_DATA_STORAGE_MAINTENANCE_SCHEDULER_ENABLED", "0")
         .stdout(Stdio::null())
