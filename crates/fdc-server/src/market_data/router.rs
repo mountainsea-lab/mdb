@@ -302,10 +302,21 @@ async fn storage_maintenance_scheduler_resume_handler(
 async fn query_trades_handler(
     State(state): State<ProductionServerState>,
     Query(params): Query<TradeQueryParams>,
-) -> Json<ServerApiResponse<MarketDataTradesResponse>> {
-    Json(ServerApiResponse::success(query_trades(
-        &state,
-        params.symbol,
-        params.limit,
-    )))
+) -> (
+    StatusCode,
+    Json<ServerApiResponse<MarketDataTradesResponse>>,
+) {
+    let result = query_trades(&state, params.symbol, params.limit);
+    let status = storage_maintenance_status_code(result.http_status);
+    let envelope = if result.http_status == StorageMaintenanceHttpStatus::Ok {
+        ServerApiResponse::success(result.response)
+    } else {
+        ServerApiResponse::error(
+            result.response,
+            result
+                .message
+                .unwrap_or_else(|| "market data trade query failed".to_string()),
+        )
+    };
+    (status, Json(envelope))
 }

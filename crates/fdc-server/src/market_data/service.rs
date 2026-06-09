@@ -71,6 +71,9 @@ pub const STORAGE_MAINTENANCE_AUDIT_RESET_CONFIRMATION: &str = "reset_maintenanc
 pub const STORAGE_MAINTENANCE_SCHEDULER_RESET_CONFIRMATION: &str = "reset_scheduler_suppression";
 pub const STORAGE_MAINTENANCE_SCHEDULER_RESUME_CONFIRMATION: &str = "resume_scheduler";
 pub const LIVE_RESUME_CONFIRMATION: &str = "resume_live_collection";
+pub const DEFAULT_TRADE_QUERY_LIMIT: usize = 100;
+pub const MAX_TRADE_QUERY_LIMIT: usize = 1000;
+pub const TRADE_QUERY_LIMIT_ERROR: &str = "limit must be between 1 and 1000";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveResumeResult {
@@ -125,6 +128,13 @@ pub struct StorageMaintenanceSchedulerResetResult {
 pub struct StorageMaintenanceSchedulerResumeResult {
     pub http_status: StorageMaintenanceHttpStatus,
     pub response: MarketDataStorageMaintenanceSchedulerResumeResponse,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryTradesResult {
+    pub http_status: StorageMaintenanceHttpStatus,
+    pub response: MarketDataTradesResponse,
     pub message: Option<String>,
 }
 
@@ -1087,15 +1097,22 @@ pub fn query_trades(
     state: &ProductionServerState,
     symbol: Option<String>,
     limit: Option<usize>,
-) -> MarketDataTradesResponse {
-    let mut query = MarketDataQuery::for_trades();
-    if let Some(symbol) = symbol {
-        query = query.with_symbol(symbol);
-    }
-    if let Some(limit) = limit {
-        query = query.with_limit(limit);
+) -> QueryTradesResult {
+    let normalized_symbol = symbol.map(|symbol| symbol.trim().to_ascii_uppercase());
+    let applied_limit = limit.unwrap_or(DEFAULT_TRADE_QUERY_LIMIT);
+
+    if !(1..=MAX_TRADE_QUERY_LIMIT).contains(&applied_limit) {
+        return QueryTradesResult {
+            http_status: StorageMaintenanceHttpStatus::BadRequest,
+            response: empty_trades_response(limit, DEFAULT_TRADE_QUERY_LIMIT, normalized_symbol),
+            message: Some(TRADE_QUERY_LIMIT_ERROR.to_string()),
+        };
     }
 
+    let mut query = MarketDataQuery::for_trades().with_limit(applied_limit);
+    if let Some(symbol) = normalized_symbol.clone() {
+        query = query.with_symbol(symbol);
+    }
     let records: Vec<_> = state
         .market_data_store()
         .query(&query)
@@ -1103,9 +1120,34 @@ pub fn query_trades(
         .map(record_to_trade_record)
         .collect();
 
+    QueryTradesResult {
+        http_status: StorageMaintenanceHttpStatus::Ok,
+        response: MarketDataTradesResponse {
+            requested_limit: limit,
+            applied_limit,
+            symbol: normalized_symbol,
+            data_kind: "trade".to_string(),
+            query_source: "market_data_store".to_string(),
+            returned_records: records.len(),
+            records,
+        },
+        message: None,
+    }
+}
+
+fn empty_trades_response(
+    requested_limit: Option<usize>,
+    applied_limit: usize,
+    symbol: Option<String>,
+) -> MarketDataTradesResponse {
     MarketDataTradesResponse {
-        returned_records: records.len(),
-        records,
+        requested_limit,
+        applied_limit,
+        symbol,
+        data_kind: "trade".to_string(),
+        query_source: "market_data_store".to_string(),
+        returned_records: 0,
+        records: Vec::new(),
     }
 }
 

@@ -2352,12 +2352,12 @@ async fn p38_trades_query_rejects_invalid_limits() {
         let json = p38_query_trades_status(router.clone(), uri, StatusCode::BAD_REQUEST).await;
 
         assert_eq!(json["status"], "error");
-        assert_eq!(
-            json["message"],
-            "limit must be between 1 and 1000"
-        );
+        assert_eq!(json["message"], "limit must be between 1 and 1000");
         assert_eq!(json["data"]["returned_records"], 0);
-        assert_eq!(json["data"]["requested_limit"].as_u64(), Some(requested_limit));
+        assert_eq!(
+            json["data"]["requested_limit"].as_u64(),
+            Some(requested_limit)
+        );
         assert_eq!(json["data"]["applied_limit"], 100);
         assert_eq!(json["data"]["data_kind"], "trade");
         assert_eq!(json["data"]["query_source"], "market_data_store");

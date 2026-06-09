@@ -250,6 +250,11 @@ pub struct StopLiveMarketDataResponse {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataTradesResponse {
+    pub requested_limit: Option<usize>,
+    pub applied_limit: usize,
+    pub symbol: Option<String>,
+    pub data_kind: String,
+    pub query_source: String,
     pub returned_records: usize,
     pub records: Vec<MarketDataTradeRecord>,
 }
