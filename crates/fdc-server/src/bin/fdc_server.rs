@@ -4,6 +4,7 @@ use fdc_server::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let _ = dotenvy::dotenv();
     let config = ServerRuntimeConfig::from_env()?;
     let bind_addr = config.bind_addr;
     let state = ProductionServerState::try_new(config).await?;
