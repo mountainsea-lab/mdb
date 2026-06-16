@@ -13,9 +13,9 @@ rust-version.workspace = true
 
 [dependencies]
 fdc-core = { path = "../../fdc-core" }
-barter-data = { path = "/Volumes/wdata/opensource/mountainsea-lab/barter-rs/barter-data" }
-barter-instrument = { path = "/Volumes/wdata/opensource/mountainsea-lab/barter-rs/barter-instrument" }
-barter-integration = { path = "/Volumes/wdata/opensource/mountainsea-lab/barter-rs/barter-integration", features = ["error", "metric", "protocol", "serde"] }
+barter-data = { git = "https://github.com/mountainsea-lab/barter-rs.git", rev = "91a4d7aa45c03cbaee51c4f9451bf78c38e9f8a1" }
+barter-instrument = { git = "https://github.com/mountainsea-lab/barter-rs.git", rev = "91a4d7aa45c03cbaee51c4f9451bf78c38e9f8a1" }
+barter-integration = { git = "https://github.com/mountainsea-lab/barter-rs.git", rev = "91a4d7aa45c03cbaee51c4f9451bf78c38e9f8a1", features = ["error", "metric", "protocol", "serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 chrono = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }

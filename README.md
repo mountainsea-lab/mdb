@@ -71,7 +71,7 @@ financial-data-center/
 
 ### 前置要求
 
-- Rust 1.75+
+- Rust 1.95+
 - Cargo
 - Git
 
@@ -90,6 +90,77 @@ cargo test
 
 # 运行核心功能演示
 cargo run -p fdc-core --example fdc_core_demo
+```
+
+### Docker 镜像构建与 Compose 部署
+
+项目提供生产镜像构建文件和本地 `docker compose` 部署配置，默认运行 `fdc-server` 的 `fdc_server` 二进制服务，监听 `18080` 端口，并将行情分层存储持久化到宿主机 `./data/fdc-market-data`。
+
+#### 1. 构建 Docker 镜像
+
+```bash
+# 在项目根目录构建生产镜像
+docker build -t fdc-server:local .
+```
+
+镜像使用多阶段构建：builder 阶段编译 `cargo build --release --bin fdc_server`，runtime 阶段只保留运行所需依赖和 `/usr/local/bin/fdc_server`。
+
+#### 2. 使用 docker compose 启动
+
+```bash
+# 使用 config/docker.env.example 中的安全默认配置启动
+docker compose up -d --build
+
+# 查看服务状态和日志
+docker compose ps
+docker compose logs -f fdc-server
+```
+
+默认配置说明：
+
+- 服务地址：`http://127.0.0.1:18080`
+- 容器监听：`FDC_SERVER_ADDR=0.0.0.0:18080`
+- 环境配置：`config/docker.env.example`
+- 持久化目录：`./data/fdc-market-data:/app/var/fdc-market-data`
+- 健康检查：`GET /health`
+- 默认开启手动 live acquisition 能力，但不自动启动：`FDC_LIVE_ENABLED=1`、`FDC_LIVE_AUTOSTART=0`
+
+如果需要私有化配置，可复制示例文件后修改 `docker-compose.yml` 的 `env_file`：
+
+```bash
+cp config/docker.env.example config/docker.env
+# 编辑 config/docker.env 后，将 docker-compose.yml 的 env_file 改为 config/docker.env
+```
+
+#### 3. 验证部署
+
+```bash
+# 健康检查
+curl http://127.0.0.1:18080/health
+
+# 就绪检查
+curl http://127.0.0.1:18080/ready
+
+# 查看 live 行情状态
+curl http://127.0.0.1:18080/market-data/live/status
+
+# 手动启动一次有界 live 行情采集
+curl -X POST http://127.0.0.1:18080/market-data/live/start \
+  -H 'content-type: application/json' \
+  -d '{"timeout_secs":10,"max_envelopes":5}'
+
+# 查询最近交易数据
+curl 'http://127.0.0.1:18080/market-data/trades?limit=5'
+```
+
+#### 4. 停止与清理
+
+```bash
+# 停止容器但保留持久化数据
+docker compose down
+
+# 如需清理本地持久化行情数据
+rm -rf ./data/fdc-market-data
 ```
 
 ### 基础使用示例
@@ -206,16 +277,3 @@ cargo tarpaulin --out Html
 ---
 
 **Financial Data Center** - 让金融数据处理更快、更强、更智能 🚀
-
-
-你可以按这个顺序试：
-
-FDC_LIVE_ENABLED=1 FDC_LIVE_AUTOSTART=1 FDC_SERVER_ADDR=127.0.0.1:18080 cargo run -p fdc-server --bin fdc_server
-
-curl -X POST http://127.0.0.1:18080/market-data/live/start \
-  -H 'content-type: application/json' \
- -d '{"timeout_secs":10,"max_envelopes":5}'
-
-curl http://127.0.0.1:18080/market-data/live/status
-
-curl 'http://127.0.0.1:18080/market-data/trades?limit=5'

@@ -1,0 +1,20 @@
+services:
+  fdc-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fdc-server:local
+    container_name: fdc-server
+    env_file:
+      - config/docker.env.example
+    ports:
+      - "18080:18080"
+    volumes:
+      - ./data/fdc-market-data:/app/var/fdc-market-data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:18080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
