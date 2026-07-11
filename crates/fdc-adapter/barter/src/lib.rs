@@ -18,11 +18,15 @@ pub use config::{BarterAdapterConfig, BarterDataMode};
 pub use error::{BarterAdapterError, Result};
 pub use ingestion::{
     binance_futures_usd_funding_rate_capabilities,
+    binance_futures_usd_funding_rate_provider_from_response,
     binance_futures_usd_funding_rate_rest_request_descriptor,
     binance_futures_usd_mark_price_capabilities,
-    binance_futures_usd_mark_price_rest_request_descriptor,
-    binance_futures_usd_ohlcv_capabilities, binance_futures_usd_ohlcv_rest_request_descriptor,
+    binance_futures_usd_mark_price_provider_from_response,
+    binance_futures_usd_mark_price_rest_request_descriptor, binance_futures_usd_ohlcv_capabilities,
+    binance_futures_usd_ohlcv_provider_from_response,
+    binance_futures_usd_ohlcv_rest_request_descriptor,
     binance_futures_usd_open_interest_capabilities,
+    binance_futures_usd_open_interest_provider_from_response,
     binance_futures_usd_open_interest_rest_request_descriptor,
     binance_spot_historical_trades_capabilities,
     binance_spot_historical_trades_provider_from_response,

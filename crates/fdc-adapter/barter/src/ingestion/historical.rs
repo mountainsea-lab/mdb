@@ -18,7 +18,8 @@ use crate::{
     ingestion::BarterIngestionEnvelope,
     model::{
         BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
-        BarterMarketType, CandlePayload, HistoricalCursor, TradePayload, TradeSide,
+        BarterMarketType, CandlePayload, FundingRatePayload, HistoricalCursor, MarkPricePayload,
+        OpenInterestPayload, TradePayload, TradeSide,
     },
 };
 
@@ -789,6 +790,348 @@ pub fn binance_futures_usd_ohlcv_rest_request_descriptor(
     })
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct BinanceFuturesFundingRateRow {
+    symbol: String,
+    #[serde(rename = "fundingTime")]
+    funding_time_ms: i64,
+    #[serde(rename = "fundingRate")]
+    funding_rate: String,
+    #[serde(rename = "markPrice")]
+    mark_price: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinanceFuturesFundingRateProvider {
+    capabilities: HistoricalProviderCapabilities,
+    rows: Vec<BinanceFuturesFundingRateRow>,
+}
+
+impl BinanceFuturesFundingRateProvider {
+    pub fn from_response_body(response_body: &str) -> Result<Self> {
+        let rows: Vec<BinanceFuturesFundingRateRow> = serde_json::from_str(response_body)
+            .map_err(|error| BarterAdapterError::HistoricalRest(error.to_string()))?;
+        for row in &rows {
+            parse_decimal_str(&row.funding_rate, "fundingRate")?;
+            if let Some(mark_price) = &row.mark_price {
+                parse_decimal_str(mark_price, "markPrice")?;
+            }
+        }
+        Ok(Self {
+            capabilities: binance_futures_usd_funding_rate_capabilities(),
+            rows,
+        })
+    }
+}
+
+#[async_trait]
+impl HistoricalExchangeProvider for BinanceFuturesFundingRateProvider {
+    fn capabilities(&self) -> &HistoricalProviderCapabilities {
+        &self.capabilities
+    }
+
+    async fn fetch_page(
+        &self,
+        request: HistoricalBackfillRequest,
+    ) -> Result<HistoricalBackfillPage> {
+        validate_historical_backfill_request(&request)?;
+        self.capabilities.validate_request(&request)?;
+        let mut envelopes = Vec::with_capacity(self.rows.len());
+        for row in &self.rows {
+            let event_time = TimestampNs::from_nanos(millis_to_nanos(row.funding_time_ms));
+            let funding_rate = parse_decimal_str(&row.funding_rate, "fundingRate")?;
+            let mark_price = row
+                .mark_price
+                .as_deref()
+                .map(|raw| parse_decimal_str(raw, "markPrice").map(Price::new))
+                .transpose()?;
+            let event = BarterMarketEvent {
+                source: request.source_id.clone(),
+                mode: BarterMarketDataMode::Historical,
+                exchange: normalize_exchange(&request.exchange),
+                symbol: Symbol::new(&row.symbol),
+                market_type: request.market_type,
+                kind: BarterMarketDataKind::FundingRate,
+                timestamp: event_time,
+                received_at: TimestampNs::now(),
+                payload: BarterMarketPayload::FundingRate(FundingRatePayload {
+                    funding_rate,
+                    funding_time: event_time,
+                    mark_price,
+                }),
+                sequence: Some(row.funding_time_ms.to_string()),
+                checkpoint: None,
+            };
+            envelopes.push(BarterIngestionEnvelope::from_backfill_event(
+                request.source_id.clone(),
+                event,
+            ));
+        }
+        let complete = request
+            .limit
+            .map(|limit| envelopes.len() < limit)
+            .unwrap_or(true);
+        Ok(HistoricalBackfillPage {
+            request,
+            envelopes,
+            next_cursor: None,
+            complete,
+        })
+    }
+}
+
+pub fn binance_futures_usd_funding_rate_provider_from_response(
+    response_body: &str,
+) -> Result<BinanceFuturesFundingRateProvider> {
+    BinanceFuturesFundingRateProvider::from_response_body(response_body)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BinanceFuturesOpenInterestRow {
+    symbol: String,
+    #[serde(rename = "openInterest")]
+    open_interest: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinanceFuturesOpenInterestProvider {
+    capabilities: HistoricalProviderCapabilities,
+    row: BinanceFuturesOpenInterestRow,
+}
+
+impl BinanceFuturesOpenInterestProvider {
+    pub fn from_response_body(response_body: &str) -> Result<Self> {
+        let row: BinanceFuturesOpenInterestRow = serde_json::from_str(response_body)
+            .map_err(|error| BarterAdapterError::HistoricalRest(error.to_string()))?;
+        parse_decimal_str(&row.open_interest, "openInterest")?;
+        Ok(Self {
+            capabilities: binance_futures_usd_open_interest_capabilities(),
+            row,
+        })
+    }
+}
+
+#[async_trait]
+impl HistoricalExchangeProvider for BinanceFuturesOpenInterestProvider {
+    fn capabilities(&self) -> &HistoricalProviderCapabilities {
+        &self.capabilities
+    }
+
+    async fn fetch_page(
+        &self,
+        request: HistoricalBackfillRequest,
+    ) -> Result<HistoricalBackfillPage> {
+        validate_historical_backfill_request(&request)?;
+        self.capabilities.validate_request(&request)?;
+        let received_at = TimestampNs::now();
+        let event = BarterMarketEvent {
+            source: request.source_id.clone(),
+            mode: BarterMarketDataMode::Historical,
+            exchange: normalize_exchange(&request.exchange),
+            symbol: Symbol::new(&self.row.symbol),
+            market_type: request.market_type,
+            kind: BarterMarketDataKind::OpenInterest,
+            timestamp: received_at,
+            received_at,
+            payload: BarterMarketPayload::OpenInterest(OpenInterestPayload {
+                open_interest: parse_decimal_str(&self.row.open_interest, "openInterest")?,
+                timestamp: received_at,
+            }),
+            sequence: None,
+            checkpoint: None,
+        };
+        Ok(HistoricalBackfillPage {
+            request: request.clone(),
+            envelopes: vec![BarterIngestionEnvelope::from_backfill_event(
+                request.source_id.clone(),
+                event,
+            )],
+            next_cursor: None,
+            complete: true,
+        })
+    }
+}
+
+pub fn binance_futures_usd_open_interest_provider_from_response(
+    response_body: &str,
+) -> Result<BinanceFuturesOpenInterestProvider> {
+    BinanceFuturesOpenInterestProvider::from_response_body(response_body)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BinanceFuturesPremiumIndexRow {
+    symbol: String,
+    #[serde(rename = "markPrice")]
+    mark_price: String,
+    #[serde(rename = "indexPrice")]
+    index_price: Option<String>,
+    #[serde(rename = "estimatedSettlePrice")]
+    estimated_settle_price: Option<String>,
+    #[serde(rename = "lastFundingRate")]
+    last_funding_rate: Option<String>,
+    #[serde(rename = "nextFundingTime")]
+    next_funding_time_ms: Option<i64>,
+    time: Option<i64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BinanceFuturesMarkPriceProvider {
+    capabilities: HistoricalProviderCapabilities,
+    row: BinanceFuturesPremiumIndexRow,
+}
+
+impl BinanceFuturesMarkPriceProvider {
+    pub fn from_response_body(response_body: &str) -> Result<Self> {
+        let row: BinanceFuturesPremiumIndexRow = serde_json::from_str(response_body)
+            .map_err(|error| BarterAdapterError::HistoricalRest(error.to_string()))?;
+        parse_decimal_str(&row.mark_price, "markPrice")?;
+        if let Some(index_price) = &row.index_price {
+            parse_decimal_str(index_price, "indexPrice")?;
+        }
+        if let Some(estimated_settle_price) = &row.estimated_settle_price {
+            parse_decimal_str(estimated_settle_price, "estimatedSettlePrice")?;
+        }
+        if let Some(last_funding_rate) = &row.last_funding_rate {
+            parse_decimal_str(last_funding_rate, "lastFundingRate")?;
+        }
+        Ok(Self {
+            capabilities: binance_futures_usd_mark_price_capabilities(),
+            row,
+        })
+    }
+}
+
+#[async_trait]
+impl HistoricalExchangeProvider for BinanceFuturesMarkPriceProvider {
+    fn capabilities(&self) -> &HistoricalProviderCapabilities {
+        &self.capabilities
+    }
+
+    async fn fetch_page(
+        &self,
+        request: HistoricalBackfillRequest,
+    ) -> Result<HistoricalBackfillPage> {
+        validate_historical_backfill_request(&request)?;
+        self.capabilities.validate_request(&request)?;
+        let event_time = self
+            .row
+            .time
+            .map(millis_to_nanos)
+            .map(TimestampNs::from_nanos)
+            .unwrap_or_else(TimestampNs::now);
+        let event = BarterMarketEvent {
+            source: request.source_id.clone(),
+            mode: BarterMarketDataMode::Historical,
+            exchange: normalize_exchange(&request.exchange),
+            symbol: Symbol::new(&self.row.symbol),
+            market_type: request.market_type,
+            kind: BarterMarketDataKind::MarkPrice,
+            timestamp: event_time,
+            received_at: TimestampNs::now(),
+            payload: BarterMarketPayload::MarkPrice(MarkPricePayload {
+                mark_price: Price::new(parse_decimal_str(&self.row.mark_price, "markPrice")?),
+                index_price: self
+                    .row
+                    .index_price
+                    .as_deref()
+                    .map(|raw| parse_decimal_str(raw, "indexPrice").map(Price::new))
+                    .transpose()?,
+                estimated_settle_price: self
+                    .row
+                    .estimated_settle_price
+                    .as_deref()
+                    .map(|raw| parse_decimal_str(raw, "estimatedSettlePrice").map(Price::new))
+                    .transpose()?,
+                funding_rate: self
+                    .row
+                    .last_funding_rate
+                    .as_deref()
+                    .map(|raw| parse_decimal_str(raw, "lastFundingRate"))
+                    .transpose()?,
+                next_funding_time: self
+                    .row
+                    .next_funding_time_ms
+                    .map(millis_to_nanos)
+                    .map(TimestampNs::from_nanos),
+            }),
+            sequence: self.row.time.map(|time| time.to_string()),
+            checkpoint: None,
+        };
+        Ok(HistoricalBackfillPage {
+            request: request.clone(),
+            envelopes: vec![BarterIngestionEnvelope::from_backfill_event(
+                request.source_id.clone(),
+                event,
+            )],
+            next_cursor: None,
+            complete: true,
+        })
+    }
+}
+
+pub fn binance_futures_usd_mark_price_provider_from_response(
+    response_body: &str,
+) -> Result<BinanceFuturesMarkPriceProvider> {
+    BinanceFuturesMarkPriceProvider::from_response_body(response_body)
+}
+
+#[derive(Debug, Clone)]
+pub struct BinanceFuturesOhlcvProvider {
+    capabilities: HistoricalProviderCapabilities,
+    rows: Vec<BinanceSpotKlineRow>,
+}
+
+impl BinanceFuturesOhlcvProvider {
+    pub fn from_response_body(response_body: &str) -> Result<Self> {
+        let rows = parse_binance_spot_klines_response(response_body)?;
+        Ok(Self {
+            capabilities: binance_futures_usd_ohlcv_capabilities(),
+            rows,
+        })
+    }
+}
+
+#[async_trait]
+impl HistoricalExchangeProvider for BinanceFuturesOhlcvProvider {
+    fn capabilities(&self) -> &HistoricalProviderCapabilities {
+        &self.capabilities
+    }
+
+    async fn fetch_page(
+        &self,
+        request: HistoricalBackfillRequest,
+    ) -> Result<HistoricalBackfillPage> {
+        validate_historical_backfill_request(&request)?;
+        self.capabilities.validate_request(&request)?;
+
+        let interval = request.interval.clone();
+        let mut envelopes = Vec::with_capacity(self.rows.len());
+        for row in &self.rows {
+            let event = row.to_market_event(&request, interval.clone())?;
+            envelopes.push(BarterIngestionEnvelope::from_backfill_event(
+                request.source_id.clone(),
+                event,
+            ));
+        }
+        let complete = request
+            .limit
+            .map(|limit| envelopes.len() < limit)
+            .unwrap_or(true);
+        Ok(HistoricalBackfillPage {
+            request,
+            envelopes,
+            next_cursor: None,
+            complete,
+        })
+    }
+}
+
+pub fn binance_futures_usd_ohlcv_provider_from_response(
+    response_body: &str,
+) -> Result<BinanceFuturesOhlcvProvider> {
+    BinanceFuturesOhlcvProvider::from_response_body(response_body)
+}
+
 /// Offline-testable Binance Spot OHLCV provider backed by parsed public klines response rows.
 #[derive(Debug, Clone)]
 pub struct BinanceSpotOhlcvProvider {
@@ -1144,6 +1487,10 @@ fn value_decimal(value: &serde_json::Value, field: &'static str) -> Result<Decim
         BarterAdapterError::HistoricalRest(format!("invalid numeric value for field {field}"))
     })?;
 
+    parse_decimal_str(raw, field)
+}
+
+fn parse_decimal_str(raw: &str, field: &'static str) -> Result<Decimal> {
     raw.parse::<Decimal>().map_err(|_| {
         BarterAdapterError::HistoricalRest(format!(
             "invalid numeric value for field {field}: {raw}"
