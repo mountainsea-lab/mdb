@@ -39,6 +39,48 @@
 - 生产服务暴露存储状态、健康检查、手动 maintenance、maintenance audit 和 scheduler 状态/恢复接口。
 - 默认 Docker 配置启用手动 maintenance，关闭后台 scheduler 自动运行。
 
+## 市场数据采集能力矩阵
+
+能力来源主要在 `crates/fdc-adapter/barter`。下表区分 **当前已接入/已验证主线** 和 **能力矩阵声明**：前者是 README 面向当前阶段推荐优先使用的路径，后者表示 adapter capability map 中声明的 crypto live 覆盖范围，不等同于所有交易所都已完成生产 smoke。
+
+### 当前已接入/已验证主线
+
+| Source | 市场类型 | 模式 | 数据类型 | 默认/已验证标的 | 状态 |
+|---|---|---|---|---|---|
+| `binance_spot` | Spot | Live | Trade | BTC/USDT, ETH/USDT | 已接入；生产 live smoke 已证明真实 Binance Spot trades 可通过生产 API 查询 |
+| `binance_spot` | Spot | Live | OrderBookL1, OrderBook | BTC/USDT, ETH/USDT | 已接入结构化 mapper；适合 bounded live 验证 |
+| `binance_futures_usd` | Perpetual | Live | Trade, OrderBookL1, OrderBook, Liquidation | BTC/USDT, ETH/USDT | 已接入结构化 mapper 与示例 |
+| `binance_spot` | Spot | Historical REST | Candle/OHLCV | 请求指定 symbol/interval/time range | 已接入 adapter-owned REST descriptor/executor |
+| `binance_spot` | Spot | Historical REST | Trade | 请求指定 symbol/time range/cursor | 已接入 adapter-owned REST descriptor/executor |
+
+### 能力矩阵声明/规划支持
+
+| Source | 市场类型 | Live 数据类型 | Historical 数据类型 | 说明 |
+|---|---|---|---|---|
+| `binance_spot` | Spot | Trade, OrderBookL1, OrderBook | Candle, Trade | 当前主线，historical 已实现 Binance Spot focused REST |
+| `binance_futures_usd` | Perpetual | Trade, OrderBookL1, OrderBook, Liquidation | - | 当前 live 主线之一 |
+| `bybit_spot` | Spot | Trade, OrderBookL1, OrderBook | - | capability map 声明，生产验证程度低于 Binance 主线 |
+| `bybit_perpetuals_usd` | Perpetual | Trade, OrderBookL1, OrderBook | - | capability map 声明 |
+| `kraken` | Spot | Trade, OrderBookL1 | - | capability map 声明 |
+| `coinbase` | Spot | Trade | - | capability map 声明 |
+| `bitfinex` | Spot | Trade | - | capability map 声明 |
+| `bitmex` | Perpetual | Trade | - | capability map 声明 |
+| `gateio_spot` | Spot | Trade | - | capability map 声明 |
+| `gateio_futures_usd` | Future | Trade | - | capability map 声明 |
+| `gateio_futures_btc` | Future | Trade | - | capability map 声明 |
+| `gateio_perpetuals_usd` | Perpetual | Trade | - | capability map 声明 |
+| `gateio_perpetuals_btc` | Perpetual | Trade | - | capability map 声明 |
+| `gateio_options` | Option | Trade | - | capability map 声明 |
+| `okx` | Spot | Trade | - | capability map 声明 |
+
+当前限制：
+
+- Historical REST 支持目前主要集中在 Binance Spot；多交易所 historical provider 是后续工作。
+- Historical 已覆盖 Binance Spot OHLCV 和 trades，但 historical order-book reconstruction 尚未实现。
+- L2 order book payload 会保留 snapshot/update、levels、timestamps 和 sequence where available；durable book reconstruction、gap detection、out-of-order repair 仍是后续工作。
+- 外部网络 live/historical smoke 需要显式环境变量和公网访问，常规验证默认依赖 offline contract tests。
+- `fdc-barter` bounded helpers 到通用 `fdc-ingestion` source pipeline 的跨模块 glue 仍是后续工作。
+
 ## 项目结构
 
 ```text
