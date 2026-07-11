@@ -6,6 +6,7 @@
 
 - [`factor-data-collection-roadmap.md`](./factor-data-collection-roadmap.md)
 - [`factor-data-development-plan.md`](./factor-data-development-plan.md)
+- [`factor-data-stage-status.md`](./factor-data-stage-status.md)
 - [`crates/fdc-adapter/barter/docs/market-data-collection-requirements.md`](../../crates/fdc-adapter/barter/docs/market-data-collection-requirements.md)
 
 本文档定义下一步开发的第一个模块级任务：只在 `crates/fdc-adapter/barter` 内完成 Binance Futures USD / Perpetual 公共数据采集验证。该阶段不接 storage、不开放 server query API、不做 analytics 因子计算。
@@ -425,7 +426,8 @@ rtk cargo test -p fdc-barter --test binance_futures_historical_rest_execution_co
    - example 运行方式和日志样例。
    - 不支持项。
    - 下一阶段 storage tags 建议。
-8. 没有修改 `fdc-storage`、`fdc-server`、`fdc-analytics`。
+8. `docs/roadmaps/factor-data-stage-status.md` 中 Stage 1 状态更新为 `validated`，并填写完成提交、验收命令、关键日志摘要、下游 adapter envelope contract、未完成事项。
+9. 没有修改 `fdc-storage`、`fdc-server`、`fdc-analytics`。
 
 ## 12. 下一阶段衔接输出
 
