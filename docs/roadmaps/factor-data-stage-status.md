@@ -37,7 +37,7 @@ docs: mark <stage> validated
 
 | Stage | 模块 | 范围 | 状态 | 完成提交 | 验收证据 | 下游交接 |
 |---|---|---|---|---|---|---|
-| Stage 1 | `fdc-adapter/barter` | Binance Futures funding/OI/mark/index/OHLCV 采集验证 | `planned` | 设计：`483ccef`, 验收更新：`4eeb632` | 待实现后填写 | Adapter envelope contract |
+| Stage 1 | `fdc-adapter/barter` | Binance Futures funding/OI/mark/index/OHLCV 采集验证 | `in_progress` | 设计：`483ccef`, 验收更新：`4eeb632`, 台账：`fd1b97f` | 实施计划编写中 | Adapter envelope contract |
 | Stage 2 | `fdc-orchestrator` | Adapter envelope → storage write input | `planned` | - | 待 Stage 1 validated | StorageWriteRecord tags/metadata |
 | Stage 3 | `fdc-storage` | Derivatives records generic write/query | `planned` | - | 待 Stage 2 validated | Queryable storage contract |
 | Stage 4 | `fdc-server` | 受控查询接口和运行时验证 | `planned` | - | 待 Stage 3 validated | HTTP query API / runbook |
