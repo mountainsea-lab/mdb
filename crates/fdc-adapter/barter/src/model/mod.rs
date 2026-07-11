@@ -7,7 +7,8 @@ pub mod source;
 pub use checkpoint::{BarterCheckpoint, HistoricalCursor};
 pub use event::{
     BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload,
-    BarterMarketType, CandlePayload, DecimalQuantity, LiquidationPayload, OrderBookL1Payload,
+    BarterMarketType, CandlePayload, DecimalQuantity, FundingRatePayload, IndexPricePayload,
+    LiquidationPayload, MarkPricePayload, OpenInterestPayload, OrderBookL1Payload,
     OrderBookLevelPayload, OrderBookPayload, OrderBookUpdateKind, RawPayload, TradePayload,
     TradeSide,
 };

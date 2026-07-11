@@ -44,7 +44,8 @@ pub use model::{
     event_latency_ns, BarterCheckpoint, BarterKindCounters, BarterMarketDataKind,
     BarterMarketDataMode, BarterMarketDataRequest, BarterMarketEvent, BarterMarketPayload,
     BarterMarketType, BarterRuntimeObservation, BarterSourceState, BarterSourceStatus,
-    CandlePayload, DecimalQuantity, HistoricalCursor, HistoricalPageRequest, LiquidationPayload,
+    CandlePayload, DecimalQuantity, FundingRatePayload, HistoricalCursor, HistoricalPageRequest,
+    IndexPricePayload, LiquidationPayload, MarkPricePayload, OpenInterestPayload,
     OrderBookL1Payload, OrderBookLevelPayload, OrderBookPayload, OrderBookUpdateKind, RawPayload,
     TradePayload, TradeSide,
 };

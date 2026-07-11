@@ -12,6 +12,10 @@ pub enum BarterMarketDataKind {
     OrderBook,
     Candle,
     Liquidation,
+    FundingRate,
+    OpenInterest,
+    MarkPrice,
+    IndexPrice,
 }
 
 /// Data retrieval mode requested from Barter-backed sources.
@@ -107,6 +111,38 @@ pub struct CandlePayload {
     pub quote_volume: Option<DecimalQuantity>,
 }
 
+/// Funding-rate payload for perpetual and futures markets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FundingRatePayload {
+    pub funding_rate: Decimal,
+    pub funding_time: TimestampNs,
+    pub mark_price: Option<Price>,
+}
+
+/// Open-interest payload for derivatives markets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenInterestPayload {
+    pub open_interest: Decimal,
+    pub timestamp: TimestampNs,
+}
+
+/// Mark-price payload for derivatives markets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarkPricePayload {
+    pub mark_price: Price,
+    pub index_price: Option<Price>,
+    pub estimated_settle_price: Option<Price>,
+    pub funding_rate: Option<Decimal>,
+    pub next_funding_time: Option<TimestampNs>,
+}
+
+/// Index-price payload for derivatives markets.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IndexPricePayload {
+    pub index_price: Price,
+    pub timestamp: TimestampNs,
+}
+
 /// Raw payload boundary for event kinds not fully modeled in Phase A.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RawPayload {
@@ -121,6 +157,10 @@ pub enum BarterMarketPayload {
     OrderBook(OrderBookPayload),
     Candle(CandlePayload),
     Liquidation(LiquidationPayload),
+    FundingRate(FundingRatePayload),
+    OpenInterest(OpenInterestPayload),
+    MarkPrice(MarkPricePayload),
+    IndexPrice(IndexPricePayload),
     Raw(RawPayload),
 }
 
@@ -132,6 +172,10 @@ impl BarterMarketPayload {
             Self::OrderBook(_) => BarterMarketDataKind::OrderBook,
             Self::Candle(_) => BarterMarketDataKind::Candle,
             Self::Liquidation(_) => BarterMarketDataKind::Liquidation,
+            Self::FundingRate(_) => BarterMarketDataKind::FundingRate,
+            Self::OpenInterest(_) => BarterMarketDataKind::OpenInterest,
+            Self::MarkPrice(_) => BarterMarketDataKind::MarkPrice,
+            Self::IndexPrice(_) => BarterMarketDataKind::IndexPrice,
             Self::Raw(_) => BarterMarketDataKind::Trade,
         }
     }
@@ -161,4 +205,26 @@ pub struct BarterMarketEvent {
     pub sequence: Option<String>,
     /// Optional source checkpoint for historical or replay events.
     pub checkpoint: Option<BarterCheckpoint>,
+}
+
+#[cfg(test)]
+mod derivatives_payload_tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    #[test]
+    fn derivatives_payloads_report_expected_kinds() {
+        let funding = BarterMarketPayload::FundingRate(FundingRatePayload {
+            funding_rate: Decimal::new(125, 6),
+            funding_time: TimestampNs::from_nanos(1_700_000_000_000_000_000),
+            mark_price: None,
+        });
+        assert_eq!(funding.kind(), BarterMarketDataKind::FundingRate);
+
+        let open_interest = BarterMarketPayload::OpenInterest(OpenInterestPayload {
+            open_interest: Decimal::new(12345, 2),
+            timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_000),
+        });
+        assert_eq!(open_interest.kind(), BarterMarketDataKind::OpenInterest);
+    }
 }
