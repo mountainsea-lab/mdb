@@ -35,6 +35,8 @@ pub use ingestion::{
     collect_live_envelopes_with_summary, collect_live_market_data_envelopes,
     collect_live_trade_envelopes, default_binance_futures_usd_market_data_subscriptions,
     default_binance_spot_market_data_subscriptions, default_binance_spot_trade_subscriptions,
+    execute_binance_futures_usd_funding_rate_rest, execute_binance_futures_usd_mark_price_rest,
+    execute_binance_futures_usd_ohlcv_rest, execute_binance_futures_usd_open_interest_rest,
     execute_binance_spot_historical_trades_rest, execute_binance_spot_ohlcv_rest,
     historical_trade_dedupe_key, init_binance_futures_usd_market_data,
     init_binance_spot_market_data, init_binance_spot_public_trades, map_live_market_data_result,

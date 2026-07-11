@@ -306,6 +306,78 @@ impl RestRequest for BinanceSpotAggTradesRestRequest {
     }
 }
 
+#[derive(Debug, Clone)]
+struct BinanceFuturesHistoricalRestRequest {
+    path: String,
+    query: HashMap<String, String>,
+}
+
+impl BinanceFuturesHistoricalRestRequest {
+    fn from_descriptor(
+        descriptor: &HistoricalRestRequestDescriptor,
+        path: &'static str,
+        required_query_params: &[&'static str],
+    ) -> Result<Self> {
+        if descriptor.exchange != "binance_futures_usd" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported historical REST exchange {}",
+                descriptor.exchange
+            )));
+        }
+        if descriptor.method != "GET" {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported historical REST method {}",
+                descriptor.method
+            )));
+        }
+        if descriptor.path != path {
+            return Err(BarterAdapterError::HistoricalRest(format!(
+                "unsupported Binance Futures USD historical path {}",
+                descriptor.path
+            )));
+        }
+
+        for key in required_query_params {
+            if !descriptor
+                .query
+                .iter()
+                .any(|(candidate, _)| candidate == key)
+            {
+                return Err(BarterAdapterError::HistoricalRest(format!(
+                    "missing query param {key}"
+                )));
+            }
+        }
+
+        Ok(Self {
+            path: descriptor.path.clone(),
+            query: descriptor.query.iter().cloned().collect(),
+        })
+    }
+}
+
+impl RestRequest for BinanceFuturesHistoricalRestRequest {
+    type Response = serde_json::Value;
+    type QueryParams = HashMap<String, String>;
+    type Body = ();
+
+    fn path(&self) -> Cow<'static, str> {
+        Cow::Owned(self.path.clone())
+    }
+
+    fn method() -> reqwest::Method {
+        reqwest::Method::GET
+    }
+
+    fn query_params(&self) -> Option<&Self::QueryParams> {
+        Some(&self.query)
+    }
+
+    fn timeout() -> Duration {
+        Duration::from_secs(5)
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct BinanceSpotApiError {
     code: Option<i64>,
@@ -366,6 +438,16 @@ impl BarterIntegrationHistoricalRestExecutor {
             ),
         }
     }
+
+    pub fn binance_futures_usd() -> Self {
+        Self {
+            client: RestClient::new(
+                "https://fapi.binance.com",
+                PublicNoHeaders,
+                BinanceSpotHistoricalHttpParser,
+            ),
+        }
+    }
 }
 
 #[async_trait]
@@ -390,9 +472,61 @@ impl HistoricalRestExecutor for BarterIntegrationHistoricalRestExecutor {
                     .map_err(BarterAdapterError::from)?;
                 payload
             }
+            "/fapi/v1/fundingRate" => {
+                let request = BinanceFuturesHistoricalRestRequest::from_descriptor(
+                    descriptor,
+                    "/fapi/v1/fundingRate",
+                    &["symbol", "startTime", "endTime", "limit"],
+                )?;
+                let (payload, _metric) = self
+                    .client
+                    .execute(request)
+                    .await
+                    .map_err(BarterAdapterError::from)?;
+                payload
+            }
+            "/fapi/v1/openInterest" => {
+                let request = BinanceFuturesHistoricalRestRequest::from_descriptor(
+                    descriptor,
+                    "/fapi/v1/openInterest",
+                    &["symbol"],
+                )?;
+                let (payload, _metric) = self
+                    .client
+                    .execute(request)
+                    .await
+                    .map_err(BarterAdapterError::from)?;
+                payload
+            }
+            "/fapi/v1/premiumIndex" => {
+                let request = BinanceFuturesHistoricalRestRequest::from_descriptor(
+                    descriptor,
+                    "/fapi/v1/premiumIndex",
+                    &["symbol"],
+                )?;
+                let (payload, _metric) = self
+                    .client
+                    .execute(request)
+                    .await
+                    .map_err(BarterAdapterError::from)?;
+                payload
+            }
+            "/fapi/v1/klines" => {
+                let request = BinanceFuturesHistoricalRestRequest::from_descriptor(
+                    descriptor,
+                    "/fapi/v1/klines",
+                    &["symbol", "interval", "startTime", "endTime", "limit"],
+                )?;
+                let (payload, _metric) = self
+                    .client
+                    .execute(request)
+                    .await
+                    .map_err(BarterAdapterError::from)?;
+                payload
+            }
             unsupported => {
                 return Err(BarterAdapterError::HistoricalRest(format!(
-                    "unsupported Binance Spot historical REST path {unsupported}"
+                    "unsupported historical REST path {unsupported}"
                 )));
             }
         };
@@ -1224,6 +1358,46 @@ pub async fn execute_binance_spot_historical_trades_rest(
     let descriptor = binance_spot_historical_trades_rest_request_descriptor(&request)?;
     let response_body = executor.execute(&descriptor).await?;
     let provider = binance_spot_historical_trades_provider_from_response(&response_body)?;
+    provider.fetch_page(request).await
+}
+
+pub async fn execute_binance_futures_usd_funding_rate_rest(
+    executor: &dyn HistoricalRestExecutor,
+    request: HistoricalBackfillRequest,
+) -> Result<HistoricalBackfillPage> {
+    let descriptor = binance_futures_usd_funding_rate_rest_request_descriptor(&request)?;
+    let response_body = executor.execute(&descriptor).await?;
+    let provider = binance_futures_usd_funding_rate_provider_from_response(&response_body)?;
+    provider.fetch_page(request).await
+}
+
+pub async fn execute_binance_futures_usd_open_interest_rest(
+    executor: &dyn HistoricalRestExecutor,
+    request: HistoricalBackfillRequest,
+) -> Result<HistoricalBackfillPage> {
+    let descriptor = binance_futures_usd_open_interest_rest_request_descriptor(&request)?;
+    let response_body = executor.execute(&descriptor).await?;
+    let provider = binance_futures_usd_open_interest_provider_from_response(&response_body)?;
+    provider.fetch_page(request).await
+}
+
+pub async fn execute_binance_futures_usd_mark_price_rest(
+    executor: &dyn HistoricalRestExecutor,
+    request: HistoricalBackfillRequest,
+) -> Result<HistoricalBackfillPage> {
+    let descriptor = binance_futures_usd_mark_price_rest_request_descriptor(&request)?;
+    let response_body = executor.execute(&descriptor).await?;
+    let provider = binance_futures_usd_mark_price_provider_from_response(&response_body)?;
+    provider.fetch_page(request).await
+}
+
+pub async fn execute_binance_futures_usd_ohlcv_rest(
+    executor: &dyn HistoricalRestExecutor,
+    request: HistoricalBackfillRequest,
+) -> Result<HistoricalBackfillPage> {
+    let descriptor = binance_futures_usd_ohlcv_rest_request_descriptor(&request)?;
+    let response_body = executor.execute(&descriptor).await?;
+    let provider = binance_futures_usd_ohlcv_provider_from_response(&response_body)?;
     provider.fetch_page(request).await
 }
 

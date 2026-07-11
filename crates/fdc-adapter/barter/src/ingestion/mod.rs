@@ -26,6 +26,8 @@ pub use historical::{
     binance_spot_historical_trades_provider_from_response,
     binance_spot_historical_trades_rest_request_descriptor, binance_spot_ohlcv_capabilities,
     binance_spot_ohlcv_provider_from_response, binance_spot_ohlcv_rest_request_descriptor,
+    execute_binance_futures_usd_funding_rate_rest, execute_binance_futures_usd_mark_price_rest,
+    execute_binance_futures_usd_ohlcv_rest, execute_binance_futures_usd_open_interest_rest,
     execute_binance_spot_historical_trades_rest, execute_binance_spot_ohlcv_rest,
     historical_trade_dedupe_key, validate_historical_backfill_request,
     BarterIntegrationHistoricalRestExecutor, BinanceSpotHistoricalTradesProvider,
