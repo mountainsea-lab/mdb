@@ -40,7 +40,7 @@ Stage 1 的目标是证明 `fdc-barter` 可以稳定采集合约基础数据，�
 - `src/model/event.rs` 中必要的 adapter payload 扩展。
 - `src/lib.rs` 导出新增 public adapter API。
 - `tests/*binance_futures*_contract.rs` offline contract tests。
-- `examples/*binance_futures*_historical*.rs` 或 ignored smoke test。
+- `examples/*binance_futures*_historical*.rs` 可运行示例，日志必须直观输出 endpoint、symbol、records、关键字段样例。
 - `crates/fdc-adapter/barter/docs/*` 下的验证报告或 capability 更新。
 
 ### 2.2 本阶段不包含
@@ -340,7 +340,58 @@ Descriptor path：
 - current snapshot endpoint 返回 `complete=true`。
 - paginated endpoint 在返回数量小于 limit 时 `complete=true`。
 
-### 10.3 Real-network smoke
+### 10.3 Runnable examples with visible logs
+
+Stage 1 的验收输出必须包含可运行 example，而不只是测试。example 的目的不是替代 contract tests，而是让开发者和使用者能直观看到 Binance Futures 数据已经被采集、解析并转换为 adapter envelope。
+
+建议新增 example：
+
+- `examples/historical_binance_futures_usd_derivatives.rs`
+
+example 至少支持：
+
+- funding rate。
+- open interest。
+- mark/index price。
+- futures kline。
+
+默认行为：
+
+- 默认不访问公网。
+- 未设置真实网络环境变量时，example 使用内置 fixture 或清晰提示如何启用真实网络。
+- 设置 `MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1` 后访问 Binance Futures public endpoint。
+
+日志必须包含以下直观字段：
+
+```text
+endpoint=/fapi/v1/fundingRate
+exchange=binance_futures_usd
+market_type=perpetual
+symbol=BTCUSDT
+kind=funding_rate
+records=1
+first_event_time=...
+first_payload={ funding_rate: ..., funding_time: ..., mark_price: ... }
+complete=true
+```
+
+对不同数据类型，日志中的 `first_payload` 应展示关键业务字段：
+
+- funding：`funding_rate`、`funding_time`、可选 `mark_price`。
+- open interest：`open_interest`、`timestamp`。
+- mark price：`mark_price`、`index_price`、`funding_rate`、`next_funding_time`。
+- kline：`open_time`、`close_time`、`open`、`high`、`low`、`close`、`volume`。
+
+推荐运行命令：
+
+```bash
+rtk cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives
+
+MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1 \
+rtk cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives
+```
+
+### 10.4 Real-network smoke
 
 新增 ignored smoke：
 
@@ -365,13 +416,16 @@ rtk cargo test -p fdc-barter --test binance_futures_historical_rest_execution_co
 1. `rtk cargo test -p fdc-barter` 默认离线测试通过。
 2. Binance Futures descriptor tests 覆盖所有本阶段 endpoint。
 3. Binance Futures provider fixture tests 覆盖所有本阶段 payload。
-4. 至少一次手动 real-network smoke 成功，并在 validation report 中记录命令、时间、symbol、endpoint 和结果摘要。
-5. `fdc-barter` 文档更新，明确：
+4. `rtk cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives` 可运行，并在默认 fixture 模式下输出可读日志，能直观看到 endpoint、symbol、kind、records 和首条 payload 关键字段。
+5. 设置 `MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1` 后，example 可以访问 Binance Futures public endpoint，并输出真实数据摘要。
+6. 至少一次手动 real-network smoke 成功，并在 validation report 中记录命令、时间、symbol、endpoint 和结果摘要。
+7. `fdc-barter` 文档更新，明确：
    - 已验证 endpoint。
    - 字段语义。
+   - example 运行方式和日志样例。
    - 不支持项。
    - 下一阶段 storage tags 建议。
-6. 没有修改 `fdc-storage`、`fdc-server`、`fdc-analytics`。
+8. 没有修改 `fdc-storage`、`fdc-server`、`fdc-analytics`。
 
 ## 12. 下一阶段衔接输出
 
@@ -398,6 +452,6 @@ Stage 2 只消费 adapter envelope，不直接调用 Binance endpoint，也不�
 1. **Data model commit：** 新增 derivatives market data kinds 与 payload，补充 unit/mapper tests。
 2. **Descriptor commit：** 新增 Binance Futures REST descriptor 和 validation tests。
 3. **Provider commit：** 新增 fixture parser/provider tests 与实现。
-4. **Smoke/docs commit：** 新增 ignored real-network smoke、更新 validation report 和 capability 文档。
+4. **Smoke/docs/examples commit：** 新增可运行 example、ignored real-network smoke、更新 validation report 和 capability 文档。
 
 每个提交都必须能独立通过 `rtk cargo test -p fdc-barter`。
