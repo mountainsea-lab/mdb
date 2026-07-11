@@ -630,6 +630,165 @@ pub fn binance_spot_historical_trades_rest_request_descriptor(
     })
 }
 
+fn binance_futures_usd_capabilities_for(
+    kind: BarterMarketDataKind,
+    intervals: Vec<String>,
+    max_limit: Option<usize>,
+) -> HistoricalProviderCapabilities {
+    HistoricalProviderCapabilities {
+        exchange: "binance_futures_usd".to_string(),
+        market_types: vec![BarterMarketType::Perpetual],
+        kinds: vec![kind],
+        intervals,
+        max_limit,
+    }
+}
+
+pub fn binance_futures_usd_funding_rate_capabilities() -> HistoricalProviderCapabilities {
+    binance_futures_usd_capabilities_for(BarterMarketDataKind::FundingRate, Vec::new(), Some(1000))
+}
+
+pub fn binance_futures_usd_open_interest_capabilities() -> HistoricalProviderCapabilities {
+    binance_futures_usd_capabilities_for(BarterMarketDataKind::OpenInterest, Vec::new(), None)
+}
+
+pub fn binance_futures_usd_mark_price_capabilities() -> HistoricalProviderCapabilities {
+    binance_futures_usd_capabilities_for(BarterMarketDataKind::MarkPrice, Vec::new(), None)
+}
+
+pub fn binance_futures_usd_ohlcv_capabilities() -> HistoricalProviderCapabilities {
+    binance_futures_usd_capabilities_for(
+        BarterMarketDataKind::Candle,
+        vec![
+            "1m".to_string(),
+            "3m".to_string(),
+            "5m".to_string(),
+            "15m".to_string(),
+            "30m".to_string(),
+            "1h".to_string(),
+            "2h".to_string(),
+            "4h".to_string(),
+            "6h".to_string(),
+            "8h".to_string(),
+            "12h".to_string(),
+            "1d".to_string(),
+            "3d".to_string(),
+            "1w".to_string(),
+            "1M".to_string(),
+        ],
+        Some(1500),
+    )
+}
+
+fn validate_binance_futures_request_against(
+    request: &HistoricalBackfillRequest,
+    capabilities: &HistoricalProviderCapabilities,
+) -> Result<()> {
+    validate_historical_backfill_request(request)?;
+    capabilities.validate_request(request)?;
+
+    if normalize_exchange(&request.exchange) != capabilities.normalized_exchange() {
+        return Err(BarterAdapterError::UnsupportedHistoricalExchange(
+            request.exchange.clone(),
+        ));
+    }
+
+    Ok(())
+}
+
+pub fn binance_futures_usd_funding_rate_rest_request_descriptor(
+    request: &HistoricalBackfillRequest,
+) -> Result<HistoricalRestRequestDescriptor> {
+    let capabilities = binance_futures_usd_funding_rate_capabilities();
+    validate_binance_futures_request_against(request, &capabilities)?;
+
+    Ok(HistoricalRestRequestDescriptor {
+        exchange: capabilities.exchange,
+        method: "GET".to_string(),
+        path: "/fapi/v1/fundingRate".to_string(),
+        query: vec![
+            ("symbol".to_string(), request.symbol.to_ascii_uppercase()),
+            (
+                "startTime".to_string(),
+                nanos_to_millis(request.start).to_string(),
+            ),
+            (
+                "endTime".to_string(),
+                nanos_to_millis(request.end).to_string(),
+            ),
+            (
+                "limit".to_string(),
+                request.limit.unwrap_or(1000).to_string(),
+            ),
+        ],
+        timeout_ms: 5_000,
+    })
+}
+
+pub fn binance_futures_usd_open_interest_rest_request_descriptor(
+    request: &HistoricalBackfillRequest,
+) -> Result<HistoricalRestRequestDescriptor> {
+    let capabilities = binance_futures_usd_open_interest_capabilities();
+    validate_binance_futures_request_against(request, &capabilities)?;
+
+    Ok(HistoricalRestRequestDescriptor {
+        exchange: capabilities.exchange,
+        method: "GET".to_string(),
+        path: "/fapi/v1/openInterest".to_string(),
+        query: vec![("symbol".to_string(), request.symbol.to_ascii_uppercase())],
+        timeout_ms: 5_000,
+    })
+}
+
+pub fn binance_futures_usd_mark_price_rest_request_descriptor(
+    request: &HistoricalBackfillRequest,
+) -> Result<HistoricalRestRequestDescriptor> {
+    let capabilities = binance_futures_usd_mark_price_capabilities();
+    validate_binance_futures_request_against(request, &capabilities)?;
+
+    Ok(HistoricalRestRequestDescriptor {
+        exchange: capabilities.exchange,
+        method: "GET".to_string(),
+        path: "/fapi/v1/premiumIndex".to_string(),
+        query: vec![("symbol".to_string(), request.symbol.to_ascii_uppercase())],
+        timeout_ms: 5_000,
+    })
+}
+
+pub fn binance_futures_usd_ohlcv_rest_request_descriptor(
+    request: &HistoricalBackfillRequest,
+) -> Result<HistoricalRestRequestDescriptor> {
+    let capabilities = binance_futures_usd_ohlcv_capabilities();
+    validate_binance_futures_request_against(request, &capabilities)?;
+
+    let interval = request.interval.clone().ok_or_else(|| {
+        BarterAdapterError::InvalidHistoricalRequest("candle interval is required".to_string())
+    })?;
+
+    Ok(HistoricalRestRequestDescriptor {
+        exchange: capabilities.exchange,
+        method: "GET".to_string(),
+        path: "/fapi/v1/klines".to_string(),
+        query: vec![
+            ("symbol".to_string(), request.symbol.to_ascii_uppercase()),
+            ("interval".to_string(), interval),
+            (
+                "startTime".to_string(),
+                nanos_to_millis(request.start).to_string(),
+            ),
+            (
+                "endTime".to_string(),
+                nanos_to_millis(request.end).to_string(),
+            ),
+            (
+                "limit".to_string(),
+                request.limit.unwrap_or(500).to_string(),
+            ),
+        ],
+        timeout_ms: 5_000,
+    })
+}
+
 /// Offline-testable Binance Spot OHLCV provider backed by parsed public klines response rows.
 #[derive(Debug, Clone)]
 pub struct BinanceSpotOhlcvProvider {

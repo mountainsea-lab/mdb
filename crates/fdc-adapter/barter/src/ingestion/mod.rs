@@ -11,6 +11,13 @@ pub use acquisition::{
 };
 pub use envelope::{BarterIngestionEnvelope, DataQualityFlags};
 pub use historical::{
+    binance_futures_usd_funding_rate_capabilities,
+    binance_futures_usd_funding_rate_rest_request_descriptor,
+    binance_futures_usd_mark_price_capabilities,
+    binance_futures_usd_mark_price_rest_request_descriptor,
+    binance_futures_usd_ohlcv_capabilities, binance_futures_usd_ohlcv_rest_request_descriptor,
+    binance_futures_usd_open_interest_capabilities,
+    binance_futures_usd_open_interest_rest_request_descriptor,
     binance_spot_historical_trades_capabilities,
     binance_spot_historical_trades_provider_from_response,
     binance_spot_historical_trades_rest_request_descriptor, binance_spot_ohlcv_capabilities,
