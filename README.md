@@ -1,279 +1,256 @@
-# Financial Data Center (FDC) v3.0
+# Financial Data Center (FDC)
 
-🚀 **高性能金融级高频交易数据中心** - 基于Rust + WASM插件系统的可扩展架构
+面向金融行情数据采集、分层存储、查询和生产化运行验证的 Rust 数据中心项目。
 
-[![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](LICENSE)
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)](https://github.com/financial-data-center/mdb)
+当前分支 `mdb-mqdev` 的开发重点已经从早期架构蓝图推进到 **内部 MVP / 受控生产化验证阶段**：项目可以构建 `fdc_server`，通过 Docker Compose 或本地二进制启动，使用四层行情存储配置，提供健康检查、就绪检查、版本信息、行情查询、live 采集控制和存储维护接口。
 
-## 🌟 核心特性
+> 状态来源：`docs/DEVELOPMENT_STATUS.md`、`docs/runbooks/market-data-production-runbook.md`、`docs/runbooks/market-data-package-deployment-verification.md`。
 
-### 🔥 **极致性能**
-- **端到端延迟**: < 3微秒 (tick-to-trade)
-- **吞吐量**: 2000万+ ticks/秒
-- **查询响应**: < 50微秒 (P99)
-- **零拷贝**: Apache Arrow + 自定义内存管理
+## 当前开发阶段
 
-### 🧩 **WASM插件系统**
-- **多语言支持**: Rust、C++、Go、Python、JavaScript
-- **热加载**: 零停机插件更新
-- **安全沙箱**: 完全隔离的执行环境
-- **高性能**: 接近原生性能的执行效率
+- **阶段定位**：内部 MVP、生产运行时装配、部署包验证和短周期 smoke/soak 验证。
+- **主服务**：`fdc-server` 包中的 `fdc_server` 二进制。
+- **默认部署方式**：Docker Compose，本地监听 `127.0.0.1:18080`，容器内监听 `0.0.0.0:18080`。
+- **默认存储形态**：tiered market-data storage，L1 内存层加 L2 redb、L3 DuckDB、L4 RocksDB 持久化层。
+- **默认安全模型**：live acquisition 可手动启用但不自动启动；resume/reset 等恢复类操作通过环境变量显式开关保护。
+- **近期完成重点**：P38 查询 API 加固、P39 生产 runbook 与配置包、P40 生产运行时装配修复与 `/version` 就绪端点。
 
-### 🏷️ **自定义类型系统**
-- **金融专用类型**: PRICE、VOLUME、SYMBOL、OPTION_CONTRACT
-- **用户定义类型**: 支持复杂业务逻辑的自定义类型
-- **动态类型转换**: WASM驱动的智能类型转换
-- **类型验证**: 实时数据完整性检查
+## 已具备的可验证能力
 
-### 🗄️ **多引擎存储架构**
-- **L1**: 超热缓存 (自定义格式 + WASM优化) - <1μs
-- **L2**: 热数据缓存 (redb + Apache Arrow) - <5μs
-- **L3**: 温数据存储 (DuckDB + WASM UDF) - <100μs
-- **L4**: 冷数据存储 (RocksDB + WASM压缩) - <10ms
+### 生产运行时与部署
 
-## 🏗️ 项目结构
+- `fdc_server` 会从运行时配置装配 `ProductionServerState`，生产配置中的 tiered storage 会驱动实际服务状态。
+- Dockerfile 使用多阶段构建，最终镜像只保留运行依赖和 `/usr/local/bin/fdc_server`。
+- `docker-compose.yml` 挂载 `./data/fdc-market-data` 到容器内 `/app/var/fdc-market-data`，用于持久化行情存储。
+- 配置示例位于：
+  - `config/docker.env.example`
+  - `config/production.local.example.env`
+  - `config/production.auto-live.local.example.env`
 
+### 行情采集与查询
+
+- 支持通过 `crates/fdc-adapter/barter` 接入 Barter 生态的 Binance spot/futures live 与 historical 数据能力。
+- `GET /market-data/trades` 已完成生产化查询加固：限制 `limit` 范围、规范化 symbol、返回稳定查询元数据，并对非法参数返回确定的 HTTP 400 JSON 错误。
+- live 采集支持手动 start/stop/status/resume，并暴露失败次数、重试状态、suppressed 状态和安全恢复门禁信息。
+
+### 存储与维护
+
+- `fdc-storage` 提供面向行情数据的四层存储边界和查询接口。
+- 生产服务暴露存储状态、健康检查、手动 maintenance、maintenance audit 和 scheduler 状态/恢复接口。
+- 默认 Docker 配置启用手动 maintenance，关闭后台 scheduler 自动运行。
+
+## 项目结构
+
+```text
+mdb/
+├── Cargo.toml                         # Rust workspace 配置
+├── Dockerfile                         # fdc_server 生产镜像多阶段构建
+├── docker-compose.yml                 # 本地/受控环境 Compose 部署
+├── README.md                          # 项目入口文档
+├── config/
+│   ├── docker.env.example             # Compose 默认安全配置
+│   ├── production.local.example.env   # 本地生产 smoke 配置
+│   └── production.auto-live.local.example.env
+├── crates/
+│   ├── fdc-core/                      # 核心数据类型、时间、指标等基础能力
+│   ├── fdc-storage/                   # 行情数据分层存储、维护和查询边界
+│   ├── fdc-query/                     # 查询引擎相关模块
+│   ├── fdc-ingestion/                 # 数据接入流水线基础模块
+│   ├── fdc-api/                       # API/demo 层与早期服务接口
+│   ├── fdc-analytics/                 # 聚合、指标、风险、批/流分析模块
+│   ├── fdc-wasm/                      # WASM 插件系统基础模块
+│   ├── fdc-types/                     # 自定义类型系统基础模块
+│   ├── fdc-transform/                 # 数据转换模块
+│   ├── fdc-adapter/
+│   │   └── barter/                    # Barter 行情适配器、模型、mapper、采集能力
+│   ├── fdc-common/                    # 通用工具与共享类型
+│   ├── fdc-proto/                     # Protocol Buffers / gRPC 相关定义
+│   ├── fdc-cli/                       # 命令行入口
+│   ├── fdc-server/                    # 当前生产运行时主服务 fdc_server
+│   └── fdc-orchestrator/              # 编排与调度相关模块
+└── docs/
+    ├── DEVELOPMENT_STATUS.md          # 当前开发状态与恢复入口
+    ├── runbooks/                      # 生产运行、部署验证、操作检查清单
+    └── superpowers/                   # 设计与实施计划归档
 ```
-financial-data-center/
-├── Cargo.toml                 # 工作空间配置
-├── README.md
-├── LICENSE
-├── plan1.md                   # 详细技术方案
-├── crates/                    # 核心包
-│   ├── fdc-core/              # ✅ 核心库 (已完成)
-│   ├── fdc-wasm/              # 🚧 WASM插件系统
-│   ├── fdc-types/             # 🚧 自定义类型系统
-│   ├── fdc-storage/           # 🚧 存储引擎
-│   ├── fdc-query/             # 🚧 查询引擎
-│   ├── fdc-ingestion/         # 🚧 数据接入
-│   ├── fdc-api/               # 🚧 API服务
-│   ├── fdc-analytics/         # 🚧 分析引擎
-│   ├── fdc-transform/         # 🚧 数据转换引擎
-│   ├── fdc-common/            # 🚧 通用工具
-│   ├── fdc-proto/             # 🚧 Protocol Buffers
-│   ├── fdc-cli/               # 🚧 命令行工具
-│   └── fdc-server/            # 🚧 服务器主程序
-├── plugins/                   # WASM插件目录
-│   ├── rust-plugins/          # Rust编写的插件
-│   ├── cpp-plugins/           # C++编写的插件
-│   ├── go-plugins/            # Go编写的插件
-│   ├── python-plugins/        # Python编写的插件
-│   └── js-plugins/            # JavaScript编写的插件
-├── schemas/                   # 自定义类型定义
-├── examples/                  # 示例代码
-├── benchmarks/                # 性能基准测试
-├── docs/                      # 文档
-└── k8s/                       # Kubernetes部署配置
-```
 
-## 🚀 快速开始
+## 快速开始
 
 ### 前置要求
 
-- Rust 1.95+
+- Rust workspace 声明的 MSRV：Rust `1.75`
+- Docker 镜像构建使用：Rust `1.95-bookworm`
 - Cargo
-- Git
+- Docker 与 Docker Compose（如需容器部署）
+- 首次构建 DuckDB/RocksDB 相关依赖时建议预留至少 10 GiB 可用空间
 
-### 安装与构建
+### 本地构建与测试
 
 ```bash
-# 克隆仓库
-git clone https://github.com/financial-data-center/mdb.git
-cd mdb
+# 构建 workspace
+cargo build
 
-# 构建所有包
-cargo build --release
-
-# 运行测试
+# 运行全部测试
 cargo test
 
-# 运行核心功能演示
-cargo run -p fdc-core --example fdc_core_demo
+# 构建当前主服务二进制
+cargo build -p fdc-server --release --bin fdc_server
 ```
 
-### Docker 镜像构建与 Compose 部署
-
-项目提供生产镜像构建文件和本地 `docker compose` 部署配置，默认运行 `fdc-server` 的 `fdc_server` 二进制服务，监听 `18080` 端口，并将行情分层存储持久化到宿主机 `./data/fdc-market-data`。
-
-#### 1. 构建 Docker 镜像
+常用聚焦验证命令：
 
 ```bash
-# 在项目根目录构建生产镜像
-docker build -t fdc-server:local .
+# 生产配置解析合同
+cargo test -p fdc-server --test runtime_config_contract
+
+# 生产路由合同
+cargo test -p fdc-server --test production_server_router_contract
+
+# 生产二进制运行时装配合同
+cargo test -p fdc-server --test production_binary_runtime_contract
+
+# fdc-storage 依赖边界守卫
+cargo test -p fdc-storage dependency_guard
 ```
 
-镜像使用多阶段构建：builder 阶段编译 `cargo build --release --bin fdc_server`，runtime 阶段只保留运行所需依赖和 `/usr/local/bin/fdc_server`。
+## Docker Compose 部署
 
-#### 2. 使用 docker compose 启动
+项目提供生产镜像构建文件和本地 Compose 配置。默认服务地址为 `http://127.0.0.1:18080`。
 
 ```bash
-# 使用 config/docker.env.example 中的安全默认配置启动
+# 构建镜像并启动服务
 docker compose up -d --build
 
-# 查看服务状态和日志
+# 查看容器状态和日志
 docker compose ps
 docker compose logs -f fdc-server
 ```
 
-默认配置说明：
+默认 Compose 配置：
 
-- 服务地址：`http://127.0.0.1:18080`
-- 容器监听：`FDC_SERVER_ADDR=0.0.0.0:18080`
-- 环境配置：`config/docker.env.example`
+- 镜像：`fdc-server:local`
+- 环境文件：`config/docker.env.example`
+- 端口映射：`127.0.0.1:18080 -> container:18080`
 - 持久化目录：`./data/fdc-market-data:/app/var/fdc-market-data`
 - 健康检查：`GET /health`
-- 默认开启手动 live acquisition 能力，但不自动启动：`FDC_LIVE_ENABLED=1`、`FDC_LIVE_AUTOSTART=0`
+- live acquisition：可手动启动，默认不 autostart
+- storage maintenance：手动 maintenance 开启，scheduler 默认关闭
 
-如果需要私有化配置，可复制示例文件后修改 `docker-compose.yml` 的 `env_file`：
+如果需要私有化配置：
 
 ```bash
 cp config/docker.env.example config/docker.env
 # 编辑 config/docker.env 后，将 docker-compose.yml 的 env_file 改为 config/docker.env
 ```
 
-#### 3. 验证部署
+停止服务：
 
 ```bash
-# 健康检查
-curl http://127.0.0.1:18080/health
-
-# 就绪检查
-curl http://127.0.0.1:18080/ready
-
-# 查看 live 行情状态
-curl http://127.0.0.1:18080/market-data/live/status
-
-# 手动启动一次有界 live 行情采集
-curl -X POST http://127.0.0.1:18080/market-data/live/start \
-  -H 'content-type: application/json' \
-  -d '{"timeout_secs":10,"max_envelopes":5}'
-
-# 查询最近交易数据
-curl 'http://127.0.0.1:18080/market-data/trades?limit=5'
-```
-
-#### 4. 停止与清理
-
-```bash
-# 停止容器但保留持久化数据
+# 停止容器，保留持久化数据
 docker compose down
 
 # 如需清理本地持久化行情数据
 rm -rf ./data/fdc-market-data
 ```
 
-### 基础使用示例
+## 运行时检查
 
-```rust
-use fdc_core::{
-    types::*,
-    time::TimeUtils,
-    metrics::Metrics,
-};
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 创建tick数据
-    let symbol = Symbol::new("AAPL");
-    let price = Price::from_f64(150.25).unwrap();
-    let volume = Volume::new(1000);
-    let exchange_id = ExchangeId::new(1);
-    let sequence_number = SequenceNumber::new(12345);
-
-    let tick_data = TickData::new(
-        symbol,
-        price,
-        volume,
-        exchange_id,
-        MessageType::Trade,
-        sequence_number,
-    );
-
-    println!("Created tick: {} @ ${}", tick_data.symbol, tick_data.price);
-
-    // 指标收集
-    let metrics = Metrics::new();
-    metrics.increment_counter("trades_processed", 1);
-
-    Ok(())
-}
-```
-
-## 📊 性能对比
-
-| 指标 | kdb+ | QuestDB | InfluxDB | TimescaleDB | **FDC v3.0** |
-|------|------|---------|----------|-------------|-------------|
-| 写入延迟(P99) | 1-5μs | 10-50μs | 100μs-1ms | 1-10ms | **<3μs** |
-| 查询延迟(P99) | 100-500μs | 1-10ms | 10-100ms | 10-100ms | **<50μs** |
-| 吞吐量 | 1000万/s | 400万/s | 100万/s | 50万/s | **2000万/s** |
-| SQL支持 | q语言 | 完整 | 部分 | 完整 | **完整+扩展** |
-| 扩展性 | 有限 | 基础 | 基础 | 基础 | **WASM无限** |
-| 成本 | $100K+/年 | 开源+商业 | 开源+商业 | 开源 | **完全开源** |
-
-## 🛣️ 开发路线图
-
-### ✅ **已完成** (Phase 1)
-- [x] 项目结构搭建
-- [x] fdc-core核心包实现
-- [x] 基础数据类型系统
-- [x] 配置管理
-- [x] 错误处理
-- [x] 时间工具
-- [x] 内存管理
-- [x] 指标收集
-- [x] 类型注册表基础
-
-### 🚧 **进行中** (Phase 2)
-- [ ] WASM插件系统 (fdc-wasm)
-- [ ] 自定义类型系统 (fdc-types)
-- [ ] 存储引擎 (fdc-storage)
-- [ ] 查询引擎 (fdc-query)
-- [ ] 数据转换引擎 (fdc-transform)
-
-### 📋 **计划中** (Phase 3)
-- [ ] 数据接入系统 (fdc-ingestion)
-- [ ] API服务层 (fdc-api)
-- [ ] 分析引擎 (fdc-analytics)
-- [ ] 命令行工具 (fdc-cli)
-- [ ] 服务器程序 (fdc-server)
-
-## 🤝 贡献指南
-
-我们欢迎所有形式的贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md) 了解详细信息。
-
-### 开发环境设置
+服务启动后，可以按以下顺序执行 smoke 检查：
 
 ```bash
-# 安装开发依赖
-cargo install cargo-watch cargo-tarpaulin
+# 基础健康与就绪
+curl --noproxy '*' -sS http://127.0.0.1:18080/health
+curl --noproxy '*' -sS http://127.0.0.1:18080/ready
+curl --noproxy '*' -sS http://127.0.0.1:18080/version
 
-# 运行开发模式
-cargo watch -x check -x test
+# 存储状态与四层健康
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/storage/status
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/storage/health
 
-# 代码覆盖率
-cargo tarpaulin --out Html
+# live 行情状态
+curl --noproxy '*' -sS http://127.0.0.1:18080/market-data/live/status
+
+# 查询最近交易数据
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/trades?limit=5'
 ```
 
-## 📄 许可证
+手动启动一次有界 live 采集：
 
-本项目采用双许可证：
+```bash
+curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/market-data/live/start \
+  -H 'content-type: application/json' \
+  -d '{"timeout_secs":10,"max_envelopes":5}'
+```
 
-- MIT License ([LICENSE-MIT](LICENSE-MIT))
-- Apache License 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
+手动运行一次存储维护：
 
-## 🔗 相关链接
+```bash
+curl --noproxy '*' -sS -X POST http://127.0.0.1:18080/market-data/storage/maintenance/run-once \
+  -H 'content-type: application/json' \
+  -d '{"confirmation":"run_storage_maintenance_once"}'
 
-- [技术方案详细文档](plan1.md)
-- [API文档](https://docs.rs/financial-data-center)
-- [性能基准测试](benchmarks/)
-- [示例代码](examples/)
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/storage/maintenance/audit?limit=10'
+```
 
-## 💬 社区
+更完整的操作流程请使用 runbook，而不是只依赖 README。
 
-- [GitHub Discussions](https://github.com/financial-data-center/mdb/discussions)
-- [Discord](https://discord.gg/financial-data-center)
-- [邮件列表](mailto:dev@financial-data-center.org)
+## 主要 API 端点
 
----
+| 端点 | 用途 |
+|---|---|
+| `GET /health` | 进程健康检查 |
+| `GET /ready` | 服务就绪检查，包含关键运行时状态 |
+| `GET /version` | 服务名称和包版本元数据 |
+| `GET /market-data/trades` | 查询交易数据，支持 `limit` 与 symbol 过滤 |
+| `POST /market-data/live/start` | 手动启动有界 live 采集 |
+| `POST /market-data/live/stop` | 停止 live 采集 |
+| `POST /market-data/live/resume` | 受门禁保护的 live 恢复操作 |
+| `GET /market-data/live/status` | 查看 live runner 状态、失败、重试和 suppressed 信息 |
+| `GET /market-data/storage/status` | 查看存储 backend 与 tier 配置状态 |
+| `GET /market-data/storage/health` | 查看四层存储健康状态 |
+| `POST /market-data/storage/maintenance/run-once` | 手动运行一次存储维护 |
+| `GET /market-data/storage/maintenance/audit` | 查看维护审计记录 |
+| `GET /market-data/storage/maintenance/scheduler/status` | 查看 maintenance scheduler 状态 |
 
-**Financial Data Center** - 让金融数据处理更快、更强、更智能 🚀
+## 文档入口
+
+- 当前开发状态与恢复入口：[`docs/DEVELOPMENT_STATUS.md`](docs/DEVELOPMENT_STATUS.md)
+- 生产运行手册：[`docs/runbooks/market-data-production-runbook.md`](docs/runbooks/market-data-production-runbook.md)
+- 部署包验证清单：[`docs/runbooks/market-data-package-deployment-verification.md`](docs/runbooks/market-data-package-deployment-verification.md)
+- Barter 行情采集需求与计划：
+  - [`crates/fdc-adapter/barter/docs/market-data-collection-requirements.md`](crates/fdc-adapter/barter/docs/market-data-collection-requirements.md)
+  - [`crates/fdc-adapter/barter/docs/market-data-collection-implementation-plan.md`](crates/fdc-adapter/barter/docs/market-data-collection-implementation-plan.md)
+- 存储模块状态：[`crates/fdc-storage/README.md`](crates/fdc-storage/README.md)
+
+## 当前路线图
+
+### 已完成或已具备验证入口
+
+- [x] Rust workspace 与核心 crate 拆分
+- [x] `fdc_server` 生产运行时启动路径
+- [x] 本地生产配置包与 Docker Compose 配置
+- [x] `/health`、`/ready`、`/version` 基础运行检查
+- [x] tiered storage 运行时装配、状态检查与健康检查
+- [x] `GET /market-data/trades` 查询参数校验与稳定元数据
+- [x] live acquisition 手动控制、重试、suppressed 状态和受保护 resume
+- [x] storage maintenance 手动执行、audit 与 scheduler 状态接口
+- [x] 部署验证清单和生产 runbook
+
+### 下一阶段重点
+
+- [ ] 按 P40 后建议重新执行内部 MVP smoke，记录实际部署结果。
+- [ ] 基于 smoke/soak 结果选择下一项生产就绪缺口。
+- [ ] 扩展 candle/OHLCV 等查询路由，目前生产加固范围主要覆盖 `/market-data/trades`。
+- [ ] 将更多真实网络 live 采集验证保持为显式 opt-in，避免默认测试依赖外部网络。
+- [ ] 持续补齐 CLI、orchestrator、analytics、wasm/types 等模块的生产化边界。
+
+## 贡献与开发约定
+
+- 优先阅读 `docs/DEVELOPMENT_STATUS.md`，确认当前分支状态和推荐下一步。
+- 对生产运行时、存储、live acquisition、维护门禁相关改动，应优先增加或更新合同测试。
+- 默认保持危险操作关闭，通过环境变量和确认字符串显式启用。
+- 生产验证命令建议参考 runbook 中的 `curl --noproxy '*'` 写法，避免代理导致本地 smoke 误判。
+
+## 许可证
+
+Cargo workspace 当前声明许可证为 `MIT OR Apache-2.0`。仓库根目录暂未包含独立许可证文本文件，正式发布前应补齐对应 LICENSE 文件。
