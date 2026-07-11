@@ -2,7 +2,7 @@
 
 Date: 2026-05-31
 Module: `crates/fdc-adapter/barter`
-Status: design proposal
+Status: Stage 1 Binance Futures USD derivatives historical validation completed on 2026-07-11
 
 ## 1. Purpose
 
@@ -31,6 +31,10 @@ Current models and boundaries:
   - `OrderBook`
   - `Candle`
   - `Liquidation`
+  - `FundingRate`
+  - `OpenInterest`
+  - `MarkPrice`
+  - `IndexPrice`
 - `BarterMarketDataMode`
   - `Live`
   - `Historical`
@@ -46,6 +50,10 @@ Current models and boundaries:
   - structured `OrderBookPayload`
   - structured `CandlePayload`
   - structured `LiquidationPayload`
+  - structured `FundingRatePayload`
+  - structured `OpenInterestPayload`
+  - structured `MarkPricePayload`
+  - structured `IndexPricePayload`
   - `RawPayload` fallback
 - `BarterIngestionEnvelope`
 - `DataQualityFlags`
@@ -78,16 +86,29 @@ Current historical acquisition functions:
 
 - `binance_spot_ohlcv_capabilities`
 - `binance_spot_historical_trades_capabilities`
+- `binance_futures_usd_funding_rate_capabilities`
+- `binance_futures_usd_open_interest_capabilities`
+- `binance_futures_usd_mark_price_capabilities`
+- `binance_futures_usd_ohlcv_capabilities`
 - `binance_spot_ohlcv_rest_request_descriptor`
 - `binance_spot_historical_trades_rest_request_descriptor`
+- `binance_futures_usd_funding_rate_rest_request_descriptor`
+- `binance_futures_usd_open_interest_rest_request_descriptor`
+- `binance_futures_usd_mark_price_rest_request_descriptor`
+- `binance_futures_usd_ohlcv_rest_request_descriptor`
 - `execute_binance_spot_ohlcv_rest`
 - `execute_binance_spot_historical_trades_rest`
+- `execute_binance_futures_usd_funding_rate_rest`
+- `execute_binance_futures_usd_open_interest_rest`
+- `execute_binance_futures_usd_mark_price_rest`
+- `execute_binance_futures_usd_ohlcv_rest`
 - `run_historical_backfill_pages`
 - `validate_historical_backfill_request`
 - `historical_trade_dedupe_key`
 
 Current examples:
 
+- `historical_binance_futures_usd_derivatives`
 - `historical_binance_spot_ohlcv`
 - `historical_binance_spot_trades`
 - `live_binance_futures_usd_market_data`
@@ -99,6 +120,8 @@ Current production behavior:
 - Binance Spot public trades can be collected live through Barter-rs.
 - Binance Spot public trades, Spot L1 order books, Spot L2 order books, and Binance Futures USD liquidations have structured mapper coverage.
 - Binance Spot OHLCV and historical trades can be fetched through adapter-owned REST descriptors/executors.
+- Binance Futures USD funding rate, open interest snapshot, premium index / mark price, and OHLCV can be fetched through adapter-owned REST descriptors/executors and validated through offline fixture providers.
+- `historical_binance_futures_usd_derivatives` prints fixture records by default and uses real Binance Futures REST only when `MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1` is set.
 - Bounded live and historical helpers provide finite acquisition outcomes for tests, examples, and future pipeline integration.
 - Collected events can be mapped into mdb envelopes and written through the existing orchestrator/storage path where that cross-module path is already wired.
 - Production live smoke has already proven real Binance Spot trades are queryable through the production API.
@@ -107,8 +130,8 @@ Current production behavior:
 
 The adapter is no longer trade-only, but several production-level gaps remain:
 
-- Historical REST support is currently Binance Spot focused; multi-exchange historical REST providers are future work.
-- Historical support covers Binance Spot OHLCV and trades; historical order-book reconstruction is not implemented.
+- Historical REST support now covers Binance Spot OHLCV/trades and Binance Futures USD derivatives basics; multi-exchange historical REST providers are future work.
+- Binance Futures historical open-interest time series via `/futures/data/openInterestHist` is not implemented; current OI support is the `/fapi/v1/openInterest` snapshot endpoint.
 - L2 order-book payloads preserve snapshot/update, levels, timestamps, and sequence where available, but durable book reconstruction, gap detection, and out-of-order repair are future work.
 - Live smoke and historical smoke tests require explicit environment variables and public internet access, so routine CI still relies on offline contract tests by default.
 - Cross-module glue from `fdc-barter` bounded helpers to the generic `fdc-ingestion` source pipeline is future work and intentionally outside this document update.
