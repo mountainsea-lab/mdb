@@ -7,22 +7,11 @@ use fdc_core::types::TimestampNs;
 
 // Manual run commands for troubleshooting:
 //
-// Safe dry run, no network access:
+// Default real Binance Spot REST run, prints visible records:
 //   cargo run --example historical_binance_spot_trades
-//
-// Historical REST network run:
-//   FDC_BARTER_HISTORICAL_EXAMPLE=1 cargo run --example historical_binance_spot_trades
-//
-// IDE main run:
-//   Add environment variable FDC_BARTER_HISTORICAL_EXAMPLE=1 to the run configuration.
 #[tokio::main]
 async fn main() -> fdc_barter::Result<()> {
-    if std::env::var("FDC_BARTER_HISTORICAL_EXAMPLE").as_deref() != Ok("1") {
-        println!(
-            "set FDC_BARTER_HISTORICAL_EXAMPLE=1 to run the historical Binance Spot trades example"
-        );
-        return Ok(());
-    }
+    println!("example=historical_binance_spot_trades mode=real_network symbol=BTCUSDT");
 
     let end_ms = chrono::Utc::now().timestamp_millis() - 60_000;
     let start_ms = end_ms - 10 * 60_000;
@@ -51,7 +40,7 @@ async fn main() -> fdc_barter::Result<()> {
     .await?;
 
     println!(
-        "pages={} records={} complete={} stopped_reason={:?}",
+        "endpoint=/api/v3/aggTrades exchange=binance_spot market_type=Spot symbol=BTCUSDT kind=Trade pages={} records={} complete={} stopped_reason={:?}",
         outcome.pages.len(),
         outcome.records_received,
         outcome.complete,
@@ -65,9 +54,10 @@ async fn main() -> fdc_barter::Result<()> {
     {
         if let BarterMarketPayload::Trade(trade) = envelope.event.payload {
             println!(
-                "{} {} trade_id={:?} side={:?} price={} quantity={}",
+                "record exchange={} symbol={} kind=Trade event_time={} trade_id={:?} side={:?} price={} quantity={}",
                 envelope.event.exchange,
                 envelope.event.symbol.as_str(),
+                envelope.event.timestamp.as_nanos(),
                 trade.trade_id,
                 trade.side,
                 trade.price.to_f64(),
