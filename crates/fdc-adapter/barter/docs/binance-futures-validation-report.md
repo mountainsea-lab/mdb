@@ -35,8 +35,8 @@ The stage remains adapter-only. It does not write to `fdc-storage`, expose serve
   - `BarterIntegrationHistoricalRestExecutor::binance_futures_usd()`
 - Runnable example:
   - `crates/fdc-adapter/barter/examples/historical_binance_futures_usd_derivatives.rs`
-  - Default mode is fixture/no-network and prints visible records.
-  - Real network mode is opt-in with `MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1`.
+  - Default mode calls real Binance Futures REST and prints visible records.
+  - Offline fixture mode is opt-in with `MDB_BARTER_EXAMPLE_MODE=fixture`.
 
 ## Validation commands
 
@@ -46,6 +46,7 @@ rtk cargo test -p fdc-barter --test binance_futures_historical_rest_contract
 rtk cargo test -p fdc-barter --test binance_futures_derivatives_provider_contract
 rtk cargo test -p fdc-barter --test binance_futures_historical_rest_execution_contract
 rtk cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives
+MDB_BARTER_EXAMPLE_MODE=fixture rtk cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives
 rtk cargo test -p fdc-barter
 ```
 
@@ -58,8 +59,12 @@ cargo test -p fdc-barter --test binance_futures_derivatives_provider_contract
   5 passed
 
 cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives
+  mode=real_network
+  fetched public Binance Futures REST data from /fapi/v1/fundingRate, /fapi/v1/openInterest, /fapi/v1/premiumIndex, and /fapi/v1/klines
+
+MDB_BARTER_EXAMPLE_MODE=fixture cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives
   mode=fixture
-  emitted visible endpoint/exchange/market_type/symbol/kind/records/first_event_time/first_payload/complete lines
+  emitted visible endpoint/exchange/market_type/symbol/kind/records/first_event_time/first_payload/complete lines without network access
 
 cargo test -p fdc-barter --test binance_futures_historical_rest_execution_contract
   4 passed, 1 ignored
@@ -70,14 +75,26 @@ cargo test -p fdc-barter
 
 ## Example output evidence
 
-Default fixture mode produces visible records without network access:
+Default example mode calls real Binance Futures REST and produces visible records:
 
 ```text
+example=historical_binance_futures_usd_derivatives mode=real_network symbol=BTCUSDT
+endpoint=/fapi/v1/fundingRate exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=FundingRate records=1 first_event_time=1783756800000000000 first_payload=Some(FundingRate(FundingRatePayload { funding_rate: 0.00000942, funding_time: TimestampNs(1783756800000000000), mark_price: Some(Price(64132.60000000)) })) complete=false
+endpoint=/fapi/v1/openInterest exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=OpenInterest records=1 first_event_time=1783785675026468000 first_payload=Some(OpenInterest(OpenInterestPayload { open_interest: 102389.451, timestamp: TimestampNs(1783785675026468000) })) complete=true
+endpoint=/fapi/v1/premiumIndex exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=MarkPrice records=1 first_event_time=1783785675004000000 first_payload=Some(MarkPrice(MarkPricePayload { mark_price: Price(64123.50000000), index_price: Some(Price(64159.38282609)), estimated_settle_price: Some(Price(64182.98033394)), funding_rate: Some(0.00004156), next_funding_time: Some(TimestampNs(1783814400000000000)) })) complete=true
+endpoint=/fapi/v1/klines exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=Candle records=1 first_event_time=1783785120000000000 first_payload=Some(Candle(CandlePayload { interval: Some("1m"), open_time: TimestampNs(1783785120000000000), close_time: TimestampNs(1783785179999000000), open: Price(64017.20), high: Price(64076.80), low: Price(64017.20), close: Price(64053.80), volume: 108.578, trade_count: Some(2453), quote_volume: Some(6955110.03820) })) complete=false
+example=historical_binance_futures_usd_derivatives complete=true
+```
+
+Offline fixture mode is still available for deterministic, no-network troubleshooting:
+
+```text
+MDB_BARTER_EXAMPLE_MODE=fixture cargo run -p fdc-barter --example historical_binance_futures_usd_derivatives
 example=historical_binance_futures_usd_derivatives mode=fixture symbol=BTCUSDT
-endpoint=/fapi/v1/fundingRate exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=FundingRate records=1 first_event_time=1700000000000000000 first_payload=Some(FundingRate(...)) complete=false
-endpoint=/fapi/v1/openInterest exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=OpenInterest records=1 first_event_time=<adapter_received_at> first_payload=Some(OpenInterest(...)) complete=true
-endpoint=/fapi/v1/premiumIndex exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=MarkPrice records=1 first_event_time=1700000000000000000 first_payload=Some(MarkPrice(...)) complete=true
-endpoint=/fapi/v1/klines exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=Candle records=1 first_event_time=1700000000000000000 first_payload=Some(Candle(...)) complete=false
+endpoint=/fapi/v1/fundingRate exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=FundingRate records=1 first_payload=Some(FundingRate(...)) complete=false
+endpoint=/fapi/v1/openInterest exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=OpenInterest records=1 first_payload=Some(OpenInterest(...)) complete=true
+endpoint=/fapi/v1/premiumIndex exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=MarkPrice records=1 first_payload=Some(MarkPrice(...)) complete=true
+endpoint=/fapi/v1/klines exchange=binance_futures_usd market_type=Perpetual symbol=BTCUSDT kind=Candle records=1 first_payload=Some(Candle(...)) complete=false
 example=historical_binance_futures_usd_derivatives complete=true
 ```
 

@@ -121,7 +121,7 @@ Current production behavior:
 - Binance Spot public trades, Spot L1 order books, Spot L2 order books, and Binance Futures USD liquidations have structured mapper coverage.
 - Binance Spot OHLCV and historical trades can be fetched through adapter-owned REST descriptors/executors.
 - Binance Futures USD funding rate, open interest snapshot, premium index / mark price, and OHLCV can be fetched through adapter-owned REST descriptors/executors and validated through offline fixture providers.
-- `historical_binance_futures_usd_derivatives` prints fixture records by default and uses real Binance Futures REST only when `MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1` is set.
+- `historical_binance_futures_usd_derivatives` calls real Binance Futures REST by default and prints records; deterministic fixture mode is explicit via `MDB_BARTER_EXAMPLE_MODE=fixture`.
 - Bounded live and historical helpers provide finite acquisition outcomes for tests, examples, and future pipeline integration.
 - Collected events can be mapped into mdb envelopes and written through the existing orchestrator/storage path where that cross-module path is already wired.
 - Production live smoke has already proven real Binance Spot trades are queryable through the production API.

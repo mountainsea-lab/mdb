@@ -12,28 +12,27 @@ use fdc_core::types::TimestampNs;
 
 // Manual run commands for troubleshooting:
 //
-// Default fixture run, no network access, prints visible records:
+// Default real Binance Futures REST run, prints visible records:
 //   cargo run --example historical_binance_futures_usd_derivatives
 //
-// Historical REST network run:
-//   MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1 cargo run --example historical_binance_futures_usd_derivatives
+// Offline fixture run, no network access:
+//   MDB_BARTER_EXAMPLE_MODE=fixture cargo run --example historical_binance_futures_usd_derivatives
 #[tokio::main]
 async fn main() -> fdc_barter::Result<()> {
-    let use_real_network =
-        std::env::var("MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES").as_deref() == Ok("1");
+    let use_fixture = std::env::var("MDB_BARTER_EXAMPLE_MODE").as_deref() == Ok("fixture");
     println!(
         "example=historical_binance_futures_usd_derivatives mode={} symbol=BTCUSDT",
-        if use_real_network {
-            "real_network"
-        } else {
+        if use_fixture {
             "fixture"
+        } else {
+            "real_network"
         }
     );
 
-    let pages = if use_real_network {
-        fetch_real_pages().await?
-    } else {
+    let pages = if use_fixture {
         fetch_fixture_pages().await?
+    } else {
+        fetch_real_pages().await?
     };
 
     for (endpoint, page) in pages {
