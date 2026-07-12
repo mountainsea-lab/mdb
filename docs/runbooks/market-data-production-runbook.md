@@ -172,6 +172,13 @@ Expected:
 - Startup remains a no-op unless both `FDC_MARKET_DATA_CANDLES_ENABLED=1` and `FDC_MARKET_DATA_CANDLES_AUTOSTART=1` are set.
 - Each configured symbol/base interval expands to a bounded historical candle task.
 - Successful pages are written to the existing `candles` collection.
+- `verify_intervals` expand to reference-only candle tasks. Reference candles are compared against base candles or base-derived higher intervals and are not written as canonical production candles.
+- Inspect last-run status with:
+
+```bash
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/candles/acquisition/status'
+```
+
 - Query collected candles with:
 
 ```bash
@@ -181,8 +188,9 @@ curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/candles?symbol=BTCUSD
 Current Stage 5 scope:
 
 - `base_intervals` are the canonical collection intervals. Prefer `1m` first.
-- `verify_intervals` are parsed and documented for reference/verification policy, but higher-interval aggregation is a later stage.
-- Offline contract tests cover request expansion, storage writes, and safe disabled autostart. Real-network smoke is opt-in.
+- `verify_intervals` are reference-only cross-check intervals. Higher intervals can be derived from base candle payloads for verification.
+- Offline contract tests cover request expansion, storage writes, checkpoint resume, status API, verify mismatch accounting, derived interval aggregation, and safe disabled autostart. Real-network smoke is opt-in.
+- Historical acquisition for trades, derivatives, and other non-candle market-data kinds is intentionally deferred until the next explicit scope decision.
 
 ## Live recovery flow
 
