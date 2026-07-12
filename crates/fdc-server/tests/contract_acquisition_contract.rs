@@ -28,6 +28,7 @@ fn config() -> MarketDataContractAcquisitionRuntimeConfig {
     MarketDataContractAcquisitionRuntimeConfig {
         enabled: true,
         autostart: false,
+        scheduler_enabled: false,
         exchange: "binance_futures_usd".to_string(),
         symbols: vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()],
         kinds: vec!["candle".to_string()],
@@ -36,6 +37,9 @@ fn config() -> MarketDataContractAcquisitionRuntimeConfig {
         end_ns: Some(1_700_000_060_000_000_000),
         limit_per_page: 500,
         max_pages_per_run: 2,
+        scheduler_interval_seconds: 3600,
+        scheduler_jitter_seconds: 0,
+        scheduler_max_consecutive_failures: 3,
     }
 }
 

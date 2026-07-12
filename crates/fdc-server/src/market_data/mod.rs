@@ -1,5 +1,6 @@
 pub mod candle_acquisition;
 pub mod contract_acquisition;
+pub mod contract_acquisition_scheduler;
 pub mod maintenance_audit;
 pub mod maintenance_scheduler;
 pub mod model;
