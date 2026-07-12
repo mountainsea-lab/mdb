@@ -42,7 +42,7 @@ docs: mark <stage> validated
 | Stage 3 | `fdc-storage` | Candle generic write/query and derivatives storage mapping | `validated` | `b41d5d1`, `c6f1fb0` | `rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture` → `3 passed`; orchestrator storage mapping contract → `9 passed` | `MarketDataQuery::for_candles()`, collections `candles`, `funding_rates`, `open_interest`, `mark_prices`, `index_prices` |
 | Stage 4 | `fdc-server` | Candle 受控查询接口和运行时验证 | `validated` | `b41d5d1` | `rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture` → `1 passed` | `GET /market-data/candles?symbol=<SYMBOL>&limit=<N>` |
 | Stage 5 | Candle acquisition maintenance | 配置化 candle 采集、维护、checkpoint、runbook | `validated` | `4a3a689`, `b6eacdd` | Stage 2-4 validated | Config-driven candle backfill + maintenance contract |
-| Stage 6 | `fdc-analytics` | 因子计算 | `planned` | - | 待数据采集、存储、查询闭环 validated | Factor input datasets |
+| Stage 6 | `fdc-analytics` | 因子计算 | `blocked` | - | 等待 Stage 5.x 历史数据维护 gate 完成或明确 re-scope | Factor input datasets |
 
 ## 4. Stage 完成记录模板
 
@@ -309,3 +309,22 @@ rtk cargo check -p fdc-server
 - `verify_intervals` 当前仅配置解析/策略记录，未自动执行官方低频校验。
 - 高周期 candle 聚合尚未实现。
 - 真实网络 Binance smoke 未作为默认 CI 验收运行，仍为 operator opt-in。
+
+
+## 9. Stage 5.x gate：Historical market data maintenance completion before next stage
+
+**状态：** `planned / blocking Stage 6`  
+**规划日期：** `2026-07-12`  
+**原因：** Stage 5 MVP 只覆盖 Binance Spot historical candle maintenance。进入 analytics 或下一阶段前，需要补齐数据维护能力，避免因子层依赖不稳定的 ad-hoc/manual 数据。
+
+**Stage 5.x 任务安排：**
+
+| Slice | Scope | Status | Required before Stage 6? | Plan anchor |
+| --- | --- | --- | --- | --- |
+| Stage 5.1 | Durable candle checkpoint persistence and resume | `planned` | yes | `docs/superpowers/plans/2026-07-12-candle-acquisition-maintenance.md#task-51-durable-candle-checkpoint-persistence` |
+| Stage 5.2 | Candle acquisition status API | `planned` | yes | `docs/superpowers/plans/2026-07-12-candle-acquisition-maintenance.md#task-52-candle-acquisition-status-api` |
+| Stage 5.3 | `verify_intervals` official candle cross-check | `planned` | yes | `docs/superpowers/plans/2026-07-12-candle-acquisition-maintenance.md#task-53-verify-intervals-and-official-candle-cross-check` |
+| Stage 5.4 | Higher-interval candle aggregation from base intervals | `planned` | yes | `docs/superpowers/plans/2026-07-12-candle-acquisition-maintenance.md#task-54-higher-interval-candle-aggregation` |
+| Stage 5.5 | General historical acquisition for trades and derivative market-data kinds | `planned` | yes, unless explicitly re-scoped | `docs/superpowers/plans/2026-07-12-candle-acquisition-maintenance.md#task-55-general-historical-market-data-maintenance-framework` |
+
+**Next-stage gate:** Stage 6 remains `blocked` until every Stage 5.x slice is either validated or explicitly re-scoped in this roadmap with rationale, commit hash, and replacement acceptance criteria.
