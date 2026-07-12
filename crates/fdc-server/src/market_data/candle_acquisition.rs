@@ -6,7 +6,7 @@ use fdc_barter::{
     BinanceSpotOhlcvHistoricalPageFetcher, CandlePayload, HistoricalBackfillRequest,
     HistoricalBackfillRunRequest, HistoricalCursor, HistoricalPageFetcher,
 };
-use fdc_core::{error::Error, types::TimestampNs, Result};
+use fdc_core::{error::Error, types::{Price, TimestampNs}, Result};
 use fdc_orchestrator::pipeline::run_barter_envelopes_to_storage_once;
 use fdc_storage::StorageWriteSink;
 
@@ -155,6 +155,43 @@ fn candle_payloads_from_envelopes(envelopes: &[BarterIngestionEnvelope]) -> Vec<
         .collect()
 }
 
+pub fn aggregate_candle_payloads(
+    candles: &[CandlePayload],
+    interval: &str,
+) -> Result<Option<CandlePayload>> {
+    let Some(first) = candles.first() else {
+        return Ok(None);
+    };
+    let last = candles.last().expect("first candle exists");
+    let high = candles
+        .iter()
+        .map(|candle| candle.high)
+        .max()
+        .unwrap_or(first.high);
+    let low = candles
+        .iter()
+        .map(|candle| candle.low)
+        .min()
+        .unwrap_or(first.low);
+    let volume = candles
+        .iter()
+        .map(|candle| candle.volume)
+        .sum();
+
+    Ok(Some(CandlePayload {
+        interval: Some(interval.to_string()),
+        open_time: first.open_time,
+        close_time: last.close_time,
+        open: Price::new(first.open.as_decimal()),
+        high,
+        low,
+        close: Price::new(last.close.as_decimal()),
+        volume,
+        trade_count: None,
+        quote_volume: None,
+    }))
+}
+
 fn count_candle_mismatches(expected: &[CandlePayload], official: &[CandlePayload]) -> usize {
     let common = expected.len().min(official.len());
     let mut mismatches = expected.len().max(official.len()) - common;
@@ -165,6 +202,24 @@ fn count_candle_mismatches(expected: &[CandlePayload], official: &[CandlePayload
     }
 
     mismatches
+}
+
+fn expected_candles_for_verify(
+    base_candles: &[CandlePayload],
+    official: &[CandlePayload],
+) -> Result<Vec<CandlePayload>> {
+    let Some(official_interval) = official.first().and_then(|candle| candle.interval.as_deref()) else {
+        return Ok(base_candles.to_vec());
+    };
+    let base_matches_official_interval = base_candles
+        .first()
+        .and_then(|candle| candle.interval.as_deref())
+        == Some(official_interval);
+    if base_matches_official_interval {
+        return Ok(base_candles.to_vec());
+    }
+
+    Ok(aggregate_candle_payloads(base_candles, official_interval)?.into_iter().collect())
 }
 
 fn candle_payload_matches(left: &CandlePayload, right: &CandlePayload) -> bool {
@@ -239,9 +294,10 @@ where
                 }
                 CandleAcquisitionRequestRole::Verify => {
                     let official = candle_payloads_from_envelopes(&page.envelopes);
+                    let expected = expected_candles_for_verify(&expected_verify_candles, &official)?;
                     status.verify_candles_checked += official.len();
                     status.verify_mismatches +=
-                        count_candle_mismatches(&expected_verify_candles, &official);
+                        count_candle_mismatches(&expected, &official);
                 }
             }
         }
@@ -315,9 +371,10 @@ where
                 }
                 CandleAcquisitionRequestRole::Verify => {
                     let official = candle_payloads_from_envelopes(&page.envelopes);
+                    let expected = expected_candles_for_verify(&expected_verify_candles, &official)?;
                     status.verify_candles_checked += official.len();
                     status.verify_mismatches +=
-                        count_candle_mismatches(&expected_verify_candles, &official);
+                        count_candle_mismatches(&expected, &official);
                 }
             }
         }

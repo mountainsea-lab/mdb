@@ -9,7 +9,7 @@ use fdc_barter::{
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{
     market_data::candle_acquisition::{
-        expand_candle_backfill_requests, run_candle_acquisition_once,
+        aggregate_candle_payloads, expand_candle_backfill_requests, run_candle_acquisition_once,
     },
     MarketDataCandleAcquisitionRuntimeConfig, ServerRuntimeConfig,
 };
@@ -29,6 +29,53 @@ fn config() -> MarketDataCandleAcquisitionRuntimeConfig {
         limit_per_page: 500,
         max_pages_per_run: 2,
     }
+}
+
+fn candle_payload_for_window(
+    interval: &str,
+    open_ns: i64,
+    close_ns: i64,
+    open_cents: i64,
+    high_cents: i64,
+    low_cents: i64,
+    close_cents: i64,
+    volume_tenths: i64,
+) -> CandlePayload {
+    CandlePayload {
+        interval: Some(interval.to_string()),
+        open_time: TimestampNs::from_nanos(open_ns),
+        close_time: TimestampNs::from_nanos(close_ns),
+        open: Price::new(Decimal::new(open_cents, 2)),
+        high: Price::new(Decimal::new(high_cents, 2)),
+        low: Price::new(Decimal::new(low_cents, 2)),
+        close: Price::new(Decimal::new(close_cents, 2)),
+        volume: DecimalQuantity::new(volume_tenths, 1),
+        trade_count: Some(100),
+        quote_volume: Some(DecimalQuantity::new(1_000_000, 2)),
+    }
+}
+
+#[test]
+fn aggregates_base_candles_into_higher_interval_ohlcv() {
+    let first = candle_payload_for_window(
+        "1m", 1_700_000_000_000_000_000, 1_700_000_060_000_000_000,
+        42_000_00, 42_150_00, 41_950_00, 42_100_00, 25,
+    );
+    let second = candle_payload_for_window(
+        "1m", 1_700_000_060_000_000_001, 1_700_000_120_000_000_000,
+        42_100_00, 42_300_00, 42_050_00, 42_250_00, 35,
+    );
+
+    let aggregated = aggregate_candle_payloads(&[first, second], "2m")
+        .expect("aggregation should succeed")
+        .expect("complete aggregate should exist");
+
+    assert_eq!(aggregated.interval.as_deref(), Some("2m"));
+    assert_eq!(aggregated.open.as_decimal(), Decimal::new(42_000_00, 2));
+    assert_eq!(aggregated.high.as_decimal(), Decimal::new(42_300_00, 2));
+    assert_eq!(aggregated.low.as_decimal(), Decimal::new(41_950_00, 2));
+    assert_eq!(aggregated.close.as_decimal(), Decimal::new(42_250_00, 2));
+    assert_eq!(aggregated.volume, DecimalQuantity::new(60, 1));
 }
 
 #[test]
@@ -99,6 +146,41 @@ fn candle_envelope_with_values(
             trade_count: Some(100),
             quote_volume: Some(DecimalQuantity::new(1_000_000, 2)),
         }),
+        sequence: Some(sequence.to_string()),
+        checkpoint: None,
+    };
+
+    let mut envelope = BarterIngestionEnvelope::from_backfill_event(
+        "barter:binance_spot:historical:candle",
+        event,
+    );
+    envelope.envelope_id = format!("historical-candle-env-{sequence}");
+    envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
+    envelope.quality = DataQualityFlags {
+        is_replay: false,
+        is_backfill: true,
+        is_duplicate_candidate: false,
+        has_gap_before: false,
+        is_out_of_order: false,
+    };
+    envelope
+}
+
+fn candle_envelope_from_payload(
+    symbol: &str,
+    sequence: &str,
+    payload: CandlePayload,
+) -> BarterIngestionEnvelope {
+    let event = BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_spot".to_string(),
+        symbol: Symbol::new(symbol),
+        market_type: BarterMarketType::Spot,
+        kind: BarterMarketDataKind::Candle,
+        timestamp: payload.open_time,
+        received_at: TimestampNs::from_nanos(payload.open_time.as_nanos() + 10),
+        payload: BarterMarketPayload::Candle(payload),
         sequence: Some(sequence.to_string()),
         checkpoint: None,
     };
@@ -378,4 +460,62 @@ async fn candle_acquisition_verify_intervals_cross_checks_official_candles() {
     assert_eq!(status.verify_mismatches, 1);
     let stored = store.query(&MarketDataQuery::for_candles().with_symbol("BTCUSDT"));
     assert_eq!(stored.len(), 1, "verify candles should not be stored as production candles");
+}
+
+#[tokio::test]
+async fn candle_acquisition_verify_intervals_compare_aggregated_base_candles() {
+    let mut cfg = config();
+    cfg.symbols = vec!["BTCUSDT".to_string()];
+    cfg.base_intervals = vec!["1m".to_string()];
+    cfg.verify_intervals = vec!["2m".to_string()];
+    cfg.max_pages_per_run = 1;
+
+    let requests = expand_candle_backfill_requests(&cfg).expect("requests should expand");
+    let base_request = requests
+        .iter()
+        .find(|request| request.interval.as_deref() == Some("1m"))
+        .cloned()
+        .expect("base request should exist");
+    let verify_request = requests
+        .iter()
+        .find(|request| request.interval.as_deref() == Some("2m"))
+        .cloned()
+        .expect("verify request should exist");
+    let first = candle_payload_for_window(
+        "1m", 1_700_000_000_000_000_000, 1_700_000_060_000_000_000,
+        42_000_00, 42_150_00, 41_950_00, 42_100_00, 25,
+    );
+    let second = candle_payload_for_window(
+        "1m", 1_700_000_060_000_000_001, 1_700_000_120_000_000_000,
+        42_100_00, 42_300_00, 42_050_00, 42_250_00, 35,
+    );
+    let official = aggregate_candle_payloads(&[first.clone(), second.clone()], "2m")
+        .expect("aggregation should succeed")
+        .expect("aggregate should exist");
+    let source = ScriptedCandleSource::new(vec![
+        HistoricalBackfillPage {
+            request: base_request,
+            envelopes: vec![
+                candle_envelope_from_payload("BTCUSDT", "base-1m-1", first),
+                candle_envelope_from_payload("BTCUSDT", "base-1m-2", second),
+            ],
+            next_cursor: None,
+            complete: true,
+        },
+        HistoricalBackfillPage {
+            request: verify_request,
+            envelopes: vec![candle_envelope_from_payload("BTCUSDT", "official-2m", official)],
+            next_cursor: None,
+            complete: true,
+        },
+    ]);
+    let store = QueryableMarketDataStore::new();
+
+    let status = run_candle_acquisition_once(&cfg, &source, &store)
+        .await
+        .expect("runner should complete");
+
+    assert_eq!(status.verify_candles_checked, 1);
+    assert_eq!(status.verify_mismatches, 0);
+    assert_eq!(status.storage_records_written, 2);
 }
