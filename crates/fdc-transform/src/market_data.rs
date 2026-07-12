@@ -9,6 +9,10 @@ pub enum MarketDataKind {
     OrderBook,
     Candle,
     Liquidation,
+    FundingRate,
+    OpenInterest,
+    MarkPrice,
+    IndexPrice,
     Raw,
 }
 
@@ -52,12 +56,44 @@ pub struct RawMarketDataDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FundingRateDto {
+    pub funding_rate: Decimal,
+    pub funding_time: TimestampNs,
+    pub mark_price: Option<Price>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenInterestDto {
+    pub open_interest: Decimal,
+    pub timestamp: TimestampNs,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MarkPriceDto {
+    pub mark_price: Price,
+    pub index_price: Option<Price>,
+    pub estimated_settle_price: Option<Price>,
+    pub funding_rate: Option<Decimal>,
+    pub next_funding_time: Option<TimestampNs>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IndexPriceDto {
+    pub index_price: Price,
+    pub timestamp: TimestampNs,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MarketDataPayload {
     Trade(TradeDto),
     OrderBookL1(OrderBookL1Dto),
     OrderBookDelta(RawMarketDataDto),
     Candle(CandleDto),
     Liquidation(RawMarketDataDto),
+    FundingRate(FundingRateDto),
+    OpenInterest(OpenInterestDto),
+    MarkPrice(MarkPriceDto),
+    IndexPrice(IndexPriceDto),
     Raw(RawMarketDataDto),
 }
 

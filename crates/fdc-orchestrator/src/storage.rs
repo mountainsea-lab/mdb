@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use fdc_core::{error::Error, Result};
+use fdc_core::{Result, error::Error};
 use fdc_storage::{
     StorageAccessPatternHint, StorageDurabilityHint, StoragePlacementHint, StorageWriteMetadata,
     StorageWriteRecord,
@@ -90,6 +90,10 @@ fn data_kind_tags_for_kind(kind: MarketDataKind) -> (&'static str, &'static str)
         MarketDataKind::OrderBook => ("state", "order_book"),
         MarketDataKind::Candle => ("aggregate", "candle"),
         MarketDataKind::Liquidation => ("event", "liquidation"),
+        MarketDataKind::FundingRate => ("derivative", "funding_rate"),
+        MarketDataKind::OpenInterest => ("derivative", "open_interest"),
+        MarketDataKind::MarkPrice => ("derivative", "mark_price"),
+        MarketDataKind::IndexPrice => ("derivative", "index_price"),
         MarketDataKind::Raw => ("raw", "raw"),
     }
 }
@@ -101,6 +105,10 @@ fn collection_for_kind(kind: MarketDataKind) -> &'static str {
         MarketDataKind::OrderBook => "order_book",
         MarketDataKind::Candle => "candles",
         MarketDataKind::Liquidation => "liquidations",
+        MarketDataKind::FundingRate => "funding_rates",
+        MarketDataKind::OpenInterest => "open_interest",
+        MarketDataKind::MarkPrice => "mark_prices",
+        MarketDataKind::IndexPrice => "index_prices",
         MarketDataKind::Raw => "raw",
     }
 }
@@ -112,6 +120,10 @@ fn schema_kind_for_kind(kind: MarketDataKind) -> &'static str {
         MarketDataKind::OrderBook => "order_book",
         MarketDataKind::Candle => "candle",
         MarketDataKind::Liquidation => "liquidation",
+        MarketDataKind::FundingRate => "funding_rate",
+        MarketDataKind::OpenInterest => "open_interest",
+        MarketDataKind::MarkPrice => "mark_price",
+        MarketDataKind::IndexPrice => "index_price",
         MarketDataKind::Raw => "raw",
     }
 }
@@ -121,7 +133,11 @@ fn access_pattern_for_kind(kind: MarketDataKind) -> StorageAccessPatternHint {
         MarketDataKind::Trade | MarketDataKind::OrderBookL1 | MarketDataKind::OrderBook => {
             StorageAccessPatternHint::Hot
         }
-        MarketDataKind::Candle => StorageAccessPatternHint::Warm,
+        MarketDataKind::Candle
+        | MarketDataKind::FundingRate
+        | MarketDataKind::OpenInterest
+        | MarketDataKind::MarkPrice
+        | MarketDataKind::IndexPrice => StorageAccessPatternHint::Warm,
         MarketDataKind::Liquidation | MarketDataKind::Raw => StorageAccessPatternHint::Unspecified,
     }
 }

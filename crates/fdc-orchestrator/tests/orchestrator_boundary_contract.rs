@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use fdc_barter::{
     BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
     BarterMarketPayload, BarterMarketType, CandlePayload, DataQualityFlags, DecimalQuantity,
-    FundingRatePayload, TradePayload, TradeSide,
+    FundingRatePayload, IndexPricePayload, MarkPricePayload, OpenInterestPayload, TradePayload,
+    TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_ingestion::{SourceEnvelope, SourceType};
@@ -125,6 +126,84 @@ fn sample_funding_rate_envelope() -> BarterIngestionEnvelope {
         sample_funding_rate_event(),
     );
     envelope.envelope_id = "funding-env-1".to_string();
+    envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
+    envelope.quality = DataQualityFlags {
+        is_replay: false,
+        is_backfill: true,
+        is_duplicate_candidate: false,
+        has_gap_before: false,
+        is_out_of_order: false,
+    };
+    envelope
+}
+
+fn sample_open_interest_event() -> BarterMarketEvent {
+    BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_futures_usd".to_string(),
+        symbol: Symbol::new("BTCUSDT"),
+        market_type: BarterMarketType::Perpetual,
+        kind: BarterMarketDataKind::OpenInterest,
+        timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_100),
+        received_at: TimestampNs::from_nanos(1_700_000_000_000_000_110),
+        payload: BarterMarketPayload::OpenInterest(OpenInterestPayload {
+            open_interest: Decimal::new(987_654_321, 3),
+            timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_100),
+        }),
+        sequence: Some("open-interest-seq-1".to_string()),
+        checkpoint: None,
+    }
+}
+
+fn sample_mark_price_event() -> BarterMarketEvent {
+    BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_futures_usd".to_string(),
+        symbol: Symbol::new("BTCUSDT"),
+        market_type: BarterMarketType::Perpetual,
+        kind: BarterMarketDataKind::MarkPrice,
+        timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_200),
+        received_at: TimestampNs::from_nanos(1_700_000_000_000_000_210),
+        payload: BarterMarketPayload::MarkPrice(MarkPricePayload {
+            mark_price: Price::new(Decimal::new(42_010_00, 2)),
+            index_price: Some(Price::new(Decimal::new(42_000_00, 2))),
+            estimated_settle_price: Some(Price::new(Decimal::new(42_020_00, 2))),
+            funding_rate: Some(Decimal::new(126, 6)),
+            next_funding_time: Some(TimestampNs::from_nanos(1_700_028_800_000_000_000)),
+        }),
+        sequence: Some("mark-price-seq-1".to_string()),
+        checkpoint: None,
+    }
+}
+
+fn sample_index_price_event() -> BarterMarketEvent {
+    BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_futures_usd".to_string(),
+        symbol: Symbol::new("BTCUSDT"),
+        market_type: BarterMarketType::Perpetual,
+        kind: BarterMarketDataKind::IndexPrice,
+        timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_300),
+        received_at: TimestampNs::from_nanos(1_700_000_000_000_000_310),
+        payload: BarterMarketPayload::IndexPrice(IndexPricePayload {
+            index_price: Price::new(Decimal::new(42_000_00, 2)),
+            timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_300),
+        }),
+        sequence: Some("index-price-seq-1".to_string()),
+        checkpoint: None,
+    }
+}
+
+fn historical_derivatives_envelope(
+    source_id: &str,
+    envelope_id: &str,
+    event: BarterMarketEvent,
+) -> BarterIngestionEnvelope {
+    let mut envelope = BarterIngestionEnvelope::from_event(source_id, event);
+    envelope.envelope_id = envelope_id.to_string();
     envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
     envelope.quality = DataQualityFlags {
         is_replay: false,
@@ -336,21 +415,116 @@ fn market_data_candle_maps_to_generic_aggregate_storage_tags() {
 }
 
 #[test]
-fn derivatives_payload_maps_to_raw_market_data() {
+fn derivatives_payload_maps_to_structured_market_data() {
     let source = barter_envelope_to_source_envelope(sample_funding_rate_envelope());
 
     let dto = barter_event_to_market_data_dto(&source).expect("funding rate should map to DTO");
 
-    assert_eq!(dto.kind, MarketDataKind::Raw);
+    assert_eq!(dto.kind, MarketDataKind::FundingRate);
     assert_eq!(dto.exchange, "binance_futures_usd");
     assert_eq!(dto.symbol.as_str(), "BTCUSDT");
     assert!(dto.quality.is_backfill);
     match dto.payload {
-        MarketDataPayload::Raw(raw) => {
-            assert!(raw.description.contains("funding_rate"));
-            assert!(raw.description.contains("0.000125"));
+        MarketDataPayload::FundingRate(funding) => {
+            assert_eq!(funding.funding_rate, Decimal::new(125, 6));
+            assert_eq!(
+                funding.mark_price,
+                Some(Price::new(Decimal::new(42_000_00, 2)))
+            );
         }
-        other => panic!("expected raw payload, got {other:?}"),
+        other => panic!("expected funding rate payload, got {other:?}"),
+    }
+}
+
+#[test]
+fn derivatives_payloads_map_to_structured_market_data_and_storage() {
+    let cases = [
+        (
+            historical_derivatives_envelope(
+                "barter:binance_futures_usd",
+                "funding-env-structured",
+                sample_funding_rate_event(),
+            ),
+            MarketDataKind::FundingRate,
+            "funding_rates",
+            "funding_rate",
+        ),
+        (
+            historical_derivatives_envelope(
+                "barter:binance_futures_usd",
+                "open-interest-env-structured",
+                sample_open_interest_event(),
+            ),
+            MarketDataKind::OpenInterest,
+            "open_interest",
+            "open_interest",
+        ),
+        (
+            historical_derivatives_envelope(
+                "barter:binance_futures_usd",
+                "mark-price-env-structured",
+                sample_mark_price_event(),
+            ),
+            MarketDataKind::MarkPrice,
+            "mark_prices",
+            "mark_price",
+        ),
+        (
+            historical_derivatives_envelope(
+                "barter:binance_futures_usd",
+                "index-price-env-structured",
+                sample_index_price_event(),
+            ),
+            MarketDataKind::IndexPrice,
+            "index_prices",
+            "index_price",
+        ),
+    ];
+
+    for (envelope, expected_kind, expected_collection, expected_record_kind) in cases {
+        let source = barter_envelope_to_source_envelope(envelope);
+        let dto = barter_event_to_market_data_dto(&source).expect("derivative should map to DTO");
+        let record = market_data_dto_to_storage_record(&dto).expect("derivative DTO should map");
+
+        assert_eq!(dto.kind, expected_kind);
+        assert_eq!(record.collection, expected_collection);
+        assert_eq!(
+            record.metadata.schema.as_deref(),
+            Some(format!("market_data.{expected_record_kind}").as_str())
+        );
+        assert_eq!(
+            record.metadata.tags.get("data.kind").map(String::as_str),
+            Some("derivative")
+        );
+        assert_eq!(
+            record.metadata.tags.get("record.kind").map(String::as_str),
+            Some(expected_record_kind)
+        );
+        assert_eq!(
+            record.placement.durability,
+            StorageDurabilityHint::Persistent
+        );
+
+        match (expected_kind, dto.payload) {
+            (MarketDataKind::FundingRate, MarketDataPayload::FundingRate(payload)) => {
+                assert_eq!(payload.funding_rate, Decimal::new(125, 6));
+                assert_eq!(
+                    payload.mark_price,
+                    Some(Price::new(Decimal::new(42_000_00, 2)))
+                );
+            }
+            (MarketDataKind::OpenInterest, MarketDataPayload::OpenInterest(payload)) => {
+                assert_eq!(payload.open_interest, Decimal::new(987_654_321, 3));
+            }
+            (MarketDataKind::MarkPrice, MarketDataPayload::MarkPrice(payload)) => {
+                assert_eq!(payload.mark_price, Price::new(Decimal::new(42_010_00, 2)));
+                assert_eq!(payload.funding_rate, Some(Decimal::new(126, 6)));
+            }
+            (MarketDataKind::IndexPrice, MarketDataPayload::IndexPrice(payload)) => {
+                assert_eq!(payload.index_price, Price::new(Decimal::new(42_000_00, 2)));
+            }
+            (_, other) => panic!("expected structured derivative payload, got {other:?}"),
+        }
     }
 }
 
