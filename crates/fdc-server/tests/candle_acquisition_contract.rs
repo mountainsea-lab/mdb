@@ -229,3 +229,82 @@ async fn candle_acquisition_autostart_disabled_is_noop() {
     assert_eq!(status.tasks_started, 0);
     assert_eq!(status.storage_records_written, 0);
 }
+
+#[tokio::test]
+async fn candle_acquisition_persists_final_cursor_for_resume() {
+    use fdc_server::market_data::candle_acquisition::{
+        run_candle_acquisition_once_with_checkpoints, InMemoryCandleCheckpointStore,
+    };
+
+    let mut cfg = config();
+    cfg.symbols = vec!["BTCUSDT".to_string()];
+    cfg.base_intervals = vec!["1m".to_string()];
+    cfg.max_pages_per_run = 1;
+
+    let first_request = expand_candle_backfill_requests(&cfg)
+        .expect("request should expand")
+        .remove(0);
+    let final_cursor = HistoricalCursor {
+        exchange: "binance_spot".to_string(),
+        symbol: "BTCUSDT".to_string(),
+        kind: BarterMarketDataKind::Candle,
+        next_start: Some(TimestampNs::from_nanos(1_700_000_060_000_000_001)),
+        page_token: Some("resume-token".to_string()),
+        last_seen_exchange_id: Some("kline-1".to_string()),
+    };
+    let checkpoint_store = InMemoryCandleCheckpointStore::default();
+    let first_source = ScriptedCandleSource::new(vec![HistoricalBackfillPage {
+        request: first_request,
+        envelopes: vec![candle_envelope("BTCUSDT", "checkpoint-seq-1")],
+        next_cursor: Some(final_cursor.clone()),
+        complete: true,
+    }]);
+    let first_storage = QueryableMarketDataStore::new();
+
+    let first_status = run_candle_acquisition_once_with_checkpoints(
+        &cfg,
+        &first_source,
+        &first_storage,
+        &checkpoint_store,
+    )
+    .await
+    .expect("first run should complete");
+    assert_eq!(first_status.final_cursors, vec![final_cursor.clone()]);
+
+    let second_request = HistoricalBackfillRequest {
+        source_id: "barter:binance_spot:historical:candle".to_string(),
+        exchange: "binance_spot".to_string(),
+        market_type: BarterMarketType::Spot,
+        symbol: "BTCUSDT".to_string(),
+        kind: BarterMarketDataKind::Candle,
+        interval: Some("1m".to_string()),
+        start: TimestampNs::from_nanos(1_700_000_060_000_000_001),
+        end: TimestampNs::from_nanos(1_700_000_060_000_000_000),
+        limit: Some(500),
+        cursor: Some(final_cursor.clone()),
+    };
+    let second_source = ScriptedCandleSource::new(vec![HistoricalBackfillPage {
+        request: second_request,
+        envelopes: vec![candle_envelope("BTCUSDT", "checkpoint-seq-2")],
+        next_cursor: None,
+        complete: true,
+    }]);
+    let second_storage = QueryableMarketDataStore::new();
+
+    run_candle_acquisition_once_with_checkpoints(
+        &cfg,
+        &second_source,
+        &second_storage,
+        &checkpoint_store,
+    )
+    .await
+    .expect("second run should complete from checkpoint");
+
+    let second_requests = second_source.requests();
+    assert_eq!(second_requests.len(), 1);
+    assert_eq!(
+        second_requests[0].start,
+        TimestampNs::from_nanos(1_700_000_060_000_000_001)
+    );
+    assert_eq!(second_requests[0].cursor, Some(final_cursor));
+}
