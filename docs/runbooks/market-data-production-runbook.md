@@ -218,11 +218,33 @@ set +a
 CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo run -p fdc-server
 ```
 
+For a manual operator run, keep `FDC_MARKET_DATA_CONTRACTS_ENABLED=1`. `FDC_MARKET_DATA_CONTRACTS_AUTOSTART` can be `0` or unset if you do not want collection during server startup. Then trigger one bounded run:
+
+```bash
+curl --noproxy '*' -sS -X POST \
+  'http://127.0.0.1:18080/market-data/contracts/acquisition/run-once'
+```
+
+Expected response fields:
+
+- `status=success`
+- `data.tasks_started >= 1`
+- `data.storage_records_written >= 1` when the selected Binance window has candles
+- `data.audit_records_written >= 1`
+- `data.market_data_store_records` increases as canonical candles and maintenance metadata are written
+
 Expected checks:
 
 ```bash
 curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/contracts/acquisition/status'
 curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/candles?symbol=BTCUSDT&limit=10'
+```
+
+Use `/market-data/candles` as the canonical factor-research input surface. The run-once and status endpoints prove acquisition health, but the data source for later factors is still the existing candle query path:
+
+```bash
+curl --noproxy '*' -sS \
+  'http://127.0.0.1:18080/market-data/candles?symbol=BTCUSDT&limit=5'
 ```
 
 Expected:
@@ -234,6 +256,7 @@ Expected:
 - Resume cursors are persisted through market-data storage in collection `contract_checkpoints` with key `exchange:symbol:kind:interval` and JSON cursor payload.
 - Run summaries are persisted through market-data storage in collection `contract_acquisition_audits` with run id, exchange, symbol, kind, interval, page count, envelope count, storage write count, final cursor, and timestamp metadata.
 - `contract_checkpoints` and `contract_acquisition_audits` are maintenance metadata collections. They must not be consumed as canonical factor inputs.
+- Checkpoints advance only after canonical candle writes and acquisition audit writes succeed. A failed canonical write must not skip data on retry.
 - Funding rate, open interest, mark price, and index price acquisition are intentionally deferred. Expand them one data kind at a time using this validated pattern.
 
 ## Live recovery flow
