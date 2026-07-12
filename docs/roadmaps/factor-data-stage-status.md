@@ -1,6 +1,6 @@
 # 因子数据阶段状态台账
 
-**日期：** 2026-07-11  
+**日期：** 2026-07-12  
 **用途：** 记录因子数据路线图各开发阶段的状态、交付物、验收结果和下一阶段交接输入，避免重复开发和跨模块衔接遗漏。
 
 每个模块或阶段完成后，必须更新本文档。未更新本文档的阶段不得视为完成。
@@ -38,9 +38,9 @@ docs: mark <stage> validated
 | Stage | 模块 | 范围 | 状态 | 完成提交 | 验收证据 | 下游交接 |
 |---|---|---|---|---|---|---|
 | Stage 1 | `fdc-adapter/barter` | Binance Futures funding/OI/mark/index/OHLCV 采集验证 | `validated` | `f417ece`, `fa998a0`, `2b09b03`, `7f3e537` | `rtk cargo test -p fdc-barter` → `77 passed, 7 ignored`; example 默认真实网络已返回 Binance `/fapi` 实盘公开数据；fixture 模式需显式 `MDB_BARTER_EXAMPLE_MODE=fixture` | Adapter envelope contract，见完成记录和验证报告 |
-| Stage 2 | `fdc-orchestrator` | Adapter envelope → storage write input | `planned` | - | 待 Stage 1 validated | StorageWriteRecord tags/metadata |
-| Stage 3 | `fdc-storage` | Derivatives records generic write/query | `planned` | - | 待 Stage 2 validated | Queryable storage contract |
-| Stage 4 | `fdc-server` | 受控查询接口和运行时验证 | `planned` | - | 待 Stage 3 validated | HTTP query API / runbook |
+| Stage 2 | `fdc-orchestrator` | Adapter envelope → storage write input | `validated` | `dd4e273`, `c6f1fb0` | `rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract -- --nocapture` → `9 passed`; `rtk cargo check -p fdc-orchestrator` → `0 errors` | Structured `MarketDataDto` + `StorageWriteRecord` tags/metadata |
+| Stage 3 | `fdc-storage` | Candle generic write/query and derivatives storage mapping | `validated` | `b41d5d1`, `c6f1fb0` | `rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture` → `3 passed`; orchestrator storage mapping contract → `9 passed` | `MarketDataQuery::for_candles()`, collections `candles`, `funding_rates`, `open_interest`, `mark_prices`, `index_prices` |
+| Stage 4 | `fdc-server` | Candle 受控查询接口和运行时验证 | `validated` | `b41d5d1` | `rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture` → `1 passed` | `GET /market-data/candles?symbol=<SYMBOL>&limit=<N>` |
 | Stage 5 | Spot data | 现货数据补齐 | `planned` | - | 待合约链路 validated | Spot adapter/storage/query contract |
 | Stage 6 | `fdc-analytics` | 因子计算 | `planned` | - | 待数据采集、存储、查询闭环 validated | Factor input datasets |
 
@@ -169,3 +169,60 @@ checkpoint=<optional historical checkpoint>
 ```
 
 Stage 2 只能依赖该 adapter envelope contract，不得直接依赖 Binance 原始 response schema。
+
+
+## 6. Stage 2-4：Candle downstream / derivatives DTO completion record
+
+**状态：** `validated`  
+**完成提交：** `dd4e273`, `b41d5d1`, `c6f1fb0`  
+**完成日期：** `2026-07-12`  
+**范围：** 完成 adapter envelope 下游接入、candle DTO/storage/query 闭环，以及 derivatives structured DTO/storage mapping。
+
+**验收命令：**
+
+```bash
+rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture
+rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture
+rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract -- --nocapture
+rtk cargo test -p fdc-transform -- --nocapture
+rtk cargo check -p fdc-orchestrator
+```
+
+**关键输出摘要：**
+
+```text
+fdc-server realtime_mvp_contract: 3 passed
+fdc-server p39_market_data_candles_query_returns_candle_records: 1 passed, 66 filtered out
+fdc-orchestrator orchestrator_boundary_contract: 9 passed
+fdc-transform: 2 passed
+fdc-orchestrator cargo check: 0 errors, 20 existing warnings
+```
+
+**下游消费 contract：**
+
+```text
+Candle:
+collection=candles
+tag kind=candle
+tag data.kind=aggregate
+tag record.kind=candle
+query=MarketDataQuery::for_candles().with_symbol(...).with_limit(...)
+HTTP=GET /market-data/candles?symbol=<SYMBOL>&limit=<N>
+
+Derivatives:
+MarketDataKind=FundingRate | OpenInterest | MarkPrice | IndexPrice
+MarketDataPayload=FundingRateDto | OpenInterestDto | MarkPriceDto | IndexPriceDto
+collections=funding_rates | open_interest | mark_prices | index_prices
+tag data.kind=derivative
+tag record.kind=funding_rate | open_interest | mark_price | index_price
+storage durability=Persistent
+storage access_pattern=Warm
+```
+
+**明确未完成 / 不支持：**
+
+- 本次状态更新未重新运行真实网络 `historical_binance_spot_ohlcv` smoke。
+- Derivatives 已有 structured DTO/storage mapping，但尚未提供独立 HTTP 查询 API。
+- 多 symbol / 多 interval candle 回补调度、checkpoint 连续性和 production runbook 仍需后续切片。
+
+**下一阶段建议：** 进入 Stage 5 / Stage 6 前，优先补 derivatives 查询 API 或 candle 回补 runbook，并把真实网络 smoke 纳入最终验收。

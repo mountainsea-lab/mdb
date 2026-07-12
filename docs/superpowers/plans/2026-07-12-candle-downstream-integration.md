@@ -32,23 +32,23 @@
 - Modify: `crates/fdc-orchestrator/src/market_data.rs`
 - Modify: `crates/fdc-orchestrator/tests/orchestrator_boundary_contract.rs`
 
-- [ ] **Step 1: Run failing compile/test**
+- [x] **Step 1: Run failing compile/test**
 
 Run: `rtk cargo check -p fdc-orchestrator`
 
 Expected before fix: FAIL with non-exhaustive match errors for `FundingRate`, `OpenInterest`, `MarkPrice`, `IndexPrice`.
 
-- [ ] **Step 2: Add failing behavior test for derivatives fallback**
+- [x] **Step 2: Add failing behavior test for derivatives fallback**
 
 Add a test in `crates/fdc-orchestrator/tests/orchestrator_boundary_contract.rs` that creates a `BarterMarketDataKind::FundingRate` event with `BarterMarketPayload::FundingRate`, maps it through `barter_envelope_to_source_envelope` and `barter_event_to_market_data_dto`, and asserts `MarketDataKind::Raw` plus a raw description containing `funding_rate`.
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract derivatives_payload_maps_to_raw_market_data -- --nocapture`
 
 Expected before fix: FAIL to compile with the same non-exhaustive match errors.
 
-- [ ] **Step 4: Implement minimal fallback**
+- [x] **Step 4: Implement minimal fallback**
 
 In `barter_kind_label`, add labels:
 
@@ -63,7 +63,7 @@ In `barter_kind_to_market_data_kind`, map matching derivatives payloads to `Mark
 
 In `barter_payload_to_market_data_payload`, convert derivatives payloads to `MarketDataPayload::Raw(RawMarketDataDto { description: ... })`.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run:
 
@@ -74,7 +74,7 @@ rtk cargo check -p fdc-orchestrator
 
 Expected: PASS / exit 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/fdc-orchestrator/src/barter.rs crates/fdc-orchestrator/src/market_data.rs crates/fdc-orchestrator/tests/orchestrator_boundary_contract.rs
@@ -93,7 +93,7 @@ git commit -m "fix: restore orchestrator derivatives mapping"
 - Modify: `crates/fdc-server/tests/realtime_mvp_contract.rs`
 - Modify: `crates/fdc-server/tests/production_server_router_contract.rs`
 
-- [ ] **Step 1: Add failing storage/query test for candle envelopes**
+- [x] **Step 1: Add failing storage/query test for candle envelopes**
 
 In `realtime_mvp_contract.rs`, add sample candle event/envelope helpers and a test that runs `run_realtime_barter_envelope_stream` over one candle, then queries `MarketDataQuery::for_candles().with_symbol("BTCUSDT")` and asserts one record in collection `candles` with tag `kind=candle`.
 
@@ -101,7 +101,7 @@ Run: `rtk cargo test -p fdc-server --test realtime_mvp_contract realtime_runner_
 
 Expected before implementation: FAIL because `MarketDataQuery::for_candles` does not exist.
 
-- [ ] **Step 2: Implement `MarketDataQuery::for_candles`**
+- [x] **Step 2: Implement `MarketDataQuery::for_candles`**
 
 Add:
 
@@ -113,13 +113,13 @@ pub fn for_candles() -> Self {
 
 Run the same test. Expected: PASS if downstream candle storage already works.
 
-- [ ] **Step 3: Add failing HTTP route test**
+- [x] **Step 3: Add failing HTTP route test**
 
 In `production_server_router_contract.rs`, add a test that ingests a test candle into state, calls `/market-data/candles?symbol=BTCUSDT&limit=10`, and asserts `status=success`, `data_kind=candle`, `returned_records=1`, and the JSON payload contains `Candle.close`.
 
 Expected before route implementation: FAIL with 404 or compile error for missing helper.
 
-- [ ] **Step 4: Implement candle service models and route**
+- [x] **Step 4: Implement candle service models and route**
 
 Add `MarketDataCandlesResponse` and `MarketDataCandleRecord` mirroring the trade response shape.
 
@@ -133,7 +133,7 @@ Add `GET /market-data/candles` route and handler.
 
 Add `ingest_test_candle` helper for router tests.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run:
 
@@ -144,7 +144,7 @@ rtk cargo test -p fdc-server --test production_server_router_contract p39_market
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/fdc-storage/src/queryable.rs crates/fdc-server/src/market_data/model.rs crates/fdc-server/src/market_data/service.rs crates/fdc-server/src/market_data/router.rs crates/fdc-server/tests/realtime_mvp_contract.rs crates/fdc-server/tests/production_server_router_contract.rs
@@ -162,25 +162,25 @@ git commit -m "feat: expose candle market data query"
 - Modify: `crates/fdc-orchestrator/src/storage.rs`
 - Modify: `crates/fdc-orchestrator/tests/orchestrator_boundary_contract.rs`
 
-- [ ] **Step 1: Add failing derivatives structured mapping tests**
+- [x] **Step 1: Add failing derivatives structured mapping tests**
 
 Add tests for `FundingRate`, `OpenInterest`, `MarkPrice`, and `IndexPrice` payloads asserting structured DTO variants and storage collections `funding_rates`, `open_interest`, `mark_prices`, and `index_prices`.
 
 Expected before implementation: FAIL because transform DTO variants do not exist.
 
-- [ ] **Step 2: Add transform DTO types**
+- [x] **Step 2: Add transform DTO types**
 
 Add variants to `MarketDataKind` and `MarketDataPayload`, plus DTO structs preserving all adapter fields.
 
-- [ ] **Step 3: Map derivatives in orchestrator**
+- [x] **Step 3: Map derivatives in orchestrator**
 
 Map derivative payloads to structured DTO variants instead of Raw.
 
-- [ ] **Step 4: Map derivatives to storage**
+- [x] **Step 4: Map derivatives to storage**
 
 Add collection/schema/tag/access/durability mappings for derivative kinds.
 
-- [ ] **Step 5: Verify green**
+- [x] **Step 5: Verify green**
 
 Run:
 
@@ -191,7 +191,7 @@ rtk cargo test -p fdc-transform --test market_data_boundary_contract -- --nocapt
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add crates/fdc-transform/src/market_data.rs crates/fdc-transform/src/lib.rs crates/fdc-orchestrator/src/market_data.rs crates/fdc-orchestrator/src/storage.rs crates/fdc-orchestrator/tests/orchestrator_boundary_contract.rs
@@ -215,3 +215,46 @@ rtk cargo run -p fdc-barter --example historical_binance_spot_ohlcv
 ```
 
 Expected: all targeted tests pass and the example prints visible candle records.
+
+
+---
+
+## Completion Record
+
+**Status:** completed  
+**Completion date:** 2026-07-12  
+**Commits:**
+
+- `dd4e273 fix: restore orchestrator derivatives mapping`
+- `b41d5d1 feat: expose candle market data query`
+- `c6f1fb0 feat: add structured derivatives market data dto`
+
+**Fresh verification evidence:**
+
+```bash
+rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture
+# cargo test: 3 passed (1 suite, 0.00s)
+
+rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture
+# cargo test: 1 passed, 66 filtered out (1 suite, 0.00s)
+
+rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract -- --nocapture
+# cargo test: 9 passed (1 suite, 0.00s)
+
+rtk cargo test -p fdc-transform -- --nocapture
+# cargo test: 2 passed (3 suites, 0.00s)
+
+rtk cargo check -p fdc-orchestrator
+# cargo build: 0 errors, 20 existing warnings
+```
+
+**Delivered scope:**
+
+- Restored downstream orchestrator compilation for new derivatives payload kinds.
+- Completed candle storage/query business loop: candle envelopes flow through realtime runner/orchestrator into the `candles` collection and are exposed by `GET /market-data/candles`.
+- Added structured derivative DTO/storage mappings for `FundingRate`, `OpenInterest`, `MarkPrice`, and `IndexPrice`.
+
+**Explicit remaining work:**
+
+- Final real-network `historical_binance_spot_ohlcv` smoke was not rerun during this status update.
+- Broader production query APIs for derivatives are not yet exposed as server routes.
