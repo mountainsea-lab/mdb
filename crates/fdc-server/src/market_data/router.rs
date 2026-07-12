@@ -1,18 +1,18 @@
 use axum::{
-    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     routing::{get, post},
+    Json, Router,
 };
 use serde::Deserialize;
 
 use crate::{
-    ProductionServerState,
     market_data::{
         model::{
             LiveMarketDataStatusResponse, MarketDataCandleAcquisitionStatusResponse,
-            MarketDataCandlesResponse, MarketDataContractAcquisitionStatusResponse,
-            MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditResetRequest,
+            MarketDataCandlesResponse, MarketDataContractAcquisitionRunOnceResponse,
+            MarketDataContractAcquisitionStatusResponse, MarketDataStorageHealthResponse,
+            MarketDataStorageMaintenanceAuditResetRequest,
             MarketDataStorageMaintenanceAuditResetResponse,
             MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
             MarketDataStorageMaintenanceRunResponse,
@@ -25,14 +25,15 @@ use crate::{
             StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
         service::{
-            StorageMaintenanceHttpStatus, candle_acquisition_status, contract_acquisition_status,
-            live_status, query_candles, query_trades, reset_storage_maintenance_audit,
-            reset_storage_maintenance_scheduler, resume_live,
-            resume_storage_maintenance_scheduler, run_storage_maintenance_once, start_live,
-            start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
-            storage_maintenance_scheduler_status, storage_status,
+            candle_acquisition_status, contract_acquisition_status, live_status, query_candles,
+            query_trades, reset_storage_maintenance_audit, reset_storage_maintenance_scheduler,
+            resume_live, resume_storage_maintenance_scheduler, run_contract_acquisition_once,
+            run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
+            storage_health, storage_maintenance_audit, storage_maintenance_scheduler_status,
+            storage_status, StorageMaintenanceHttpStatus,
         },
     },
+    ProductionServerState,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -112,6 +113,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
             "/market-data/contracts/acquisition/status",
             get(contract_acquisition_status_handler),
         )
+        .route(
+            "/market-data/contracts/acquisition/run-once",
+            post(contract_acquisition_run_once_handler),
+        )
         .route("/market-data/candles", get(query_candles_handler))
         .with_state(state)
 }
@@ -186,13 +191,45 @@ async fn live_status_handler(
 async fn candle_acquisition_status_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<MarketDataCandleAcquisitionStatusResponse>> {
-    Json(ServerApiResponse::success(candle_acquisition_status(&state)))
+    Json(ServerApiResponse::success(candle_acquisition_status(
+        &state,
+    )))
 }
 
 async fn contract_acquisition_status_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<MarketDataContractAcquisitionStatusResponse>> {
-    Json(ServerApiResponse::success(contract_acquisition_status(&state)))
+    Json(ServerApiResponse::success(contract_acquisition_status(
+        &state,
+    )))
+}
+
+async fn contract_acquisition_run_once_handler(
+    State(state): State<ProductionServerState>,
+) -> Json<ServerApiResponse<MarketDataContractAcquisitionRunOnceResponse>> {
+    match run_contract_acquisition_once(&state).await {
+        Ok(data) => Json(ServerApiResponse::success(data)),
+        Err(message) => {
+            let config = &state.config().market_data_contract_acquisition;
+            Json(ServerApiResponse::error(
+                MarketDataContractAcquisitionRunOnceResponse {
+                    enabled: config.enabled,
+                    exchange: config.exchange.clone(),
+                    symbols: config.symbols.clone(),
+                    intervals: config.intervals.clone(),
+                    tasks_started: 0,
+                    tasks_completed: 0,
+                    pages_fetched: 0,
+                    envelopes_received: 0,
+                    storage_records_written: 0,
+                    audit_records_written: 0,
+                    final_cursors: 0,
+                    market_data_store_records: state.market_data_store().record_count(),
+                },
+                message,
+            ))
+        }
+    }
 }
 
 async fn storage_status_handler(

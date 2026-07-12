@@ -6,17 +6,18 @@ use fdc_core::Result;
 use fdc_storage::QueryableMarketDataStore;
 
 use crate::{
-    ServerRuntimeConfig, build_market_data_store_from_runtime_config,
+    build_market_data_store_from_runtime_config,
     health::build_health_router,
     market_data::{
         build_market_data_router, ingest_test_candle, ingest_test_trade,
         maintenance_audit::MarketDataStorageMaintenanceAuditLog,
         maintenance_scheduler::{
-            StorageMaintenanceSchedulerState, StorageMaintenanceSchedulerTaskHandle,
-            spawn_storage_maintenance_scheduler_into_handle,
+            spawn_storage_maintenance_scheduler_into_handle, StorageMaintenanceSchedulerState,
+            StorageMaintenanceSchedulerTaskHandle,
         },
         supervisor::MarketDataSupervisor,
     },
+    ServerRuntimeConfig,
 };
 
 #[derive(Clone)]
@@ -247,16 +248,18 @@ impl ProductionServerState {
     where
         S: HistoricalPageFetcher + ?Sized,
     {
-        let checkpoint_store = crate::market_data::candle_acquisition::StorageBackedCandleCheckpointStore::new(
-            self.market_data_store.as_ref(),
-        );
-        let result = crate::market_data::candle_acquisition::run_candle_acquisition_once_with_checkpoints(
-            &self.config.market_data_candle_acquisition,
-            source,
-            self.market_data_store.as_ref(),
-            &checkpoint_store,
-        )
-        .await;
+        let checkpoint_store =
+            crate::market_data::candle_acquisition::StorageBackedCandleCheckpointStore::new(
+                self.market_data_store.as_ref(),
+            );
+        let result =
+            crate::market_data::candle_acquisition::run_candle_acquisition_once_with_checkpoints(
+                &self.config.market_data_candle_acquisition,
+                source,
+                self.market_data_store.as_ref(),
+                &checkpoint_store,
+            )
+            .await;
         self.record_candle_acquisition_result(&result);
         result
     }
@@ -267,16 +270,18 @@ impl ProductionServerState {
         if !(self.config.market_data_candle_acquisition.enabled
             && self.config.market_data_candle_acquisition.autostart)
         {
-            let result = Ok(crate::market_data::candle_acquisition::CandleAcquisitionRunStatus::default());
+            let result =
+                Ok(crate::market_data::candle_acquisition::CandleAcquisitionRunStatus::default());
             self.record_candle_acquisition_result(&result);
             return result;
         }
 
-        let result = crate::market_data::candle_acquisition::run_binance_spot_candle_acquisition_once(
-            &self.config.market_data_candle_acquisition,
-            self.market_data_store.as_ref(),
-        )
-        .await;
+        let result =
+            crate::market_data::candle_acquisition::run_binance_spot_candle_acquisition_once(
+                &self.config.market_data_candle_acquisition,
+                self.market_data_store.as_ref(),
+            )
+            .await;
         self.record_candle_acquisition_result(&result);
         result
     }
@@ -288,9 +293,10 @@ impl ProductionServerState {
     where
         S: HistoricalPageFetcher + ?Sized,
     {
-        let checkpoint_store = crate::market_data::contract_acquisition::StorageBackedContractCheckpointStore::new(
-            self.market_data_store.as_ref(),
-        );
+        let checkpoint_store =
+            crate::market_data::contract_acquisition::StorageBackedContractCheckpointStore::new(
+                self.market_data_store.as_ref(),
+            );
         let result = crate::market_data::contract_acquisition::run_contract_acquisition_once_with_checkpoints(
             &self.config.market_data_contract_acquisition,
             source,
@@ -308,7 +314,29 @@ impl ProductionServerState {
         if !(self.config.market_data_contract_acquisition.enabled
             && self.config.market_data_contract_acquisition.autostart)
         {
-            let result = Ok(crate::market_data::contract_acquisition::ContractAcquisitionRunStatus::default());
+            let result = Ok(
+                crate::market_data::contract_acquisition::ContractAcquisitionRunStatus::default(),
+            );
+            self.record_contract_acquisition_result(&result);
+            return result;
+        }
+
+        let result = crate::market_data::contract_acquisition::run_binance_futures_usd_contract_candle_acquisition_once(
+            &self.config.market_data_contract_acquisition,
+            self.market_data_store.as_ref(),
+        )
+        .await;
+        self.record_contract_acquisition_result(&result);
+        result
+    }
+
+    pub async fn run_contract_acquisition_once_if_enabled(
+        &self,
+    ) -> Result<crate::market_data::contract_acquisition::ContractAcquisitionRunStatus> {
+        if !self.config.market_data_contract_acquisition.enabled {
+            let result = Ok(
+                crate::market_data::contract_acquisition::ContractAcquisitionRunStatus::default(),
+            );
             self.record_contract_acquisition_result(&result);
             return result;
         }

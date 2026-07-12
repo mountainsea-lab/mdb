@@ -273,20 +273,43 @@ async fn contract_acquisition_runner_writes_candles_checkpoints_and_audit_to_sto
     assert_eq!(status.audit_records_written, 1);
     assert_eq!(status.final_cursors, vec![final_cursor.clone()]);
     assert_eq!(source.requests().len(), 1);
+    let candles = store.query(&MarketDataQuery::for_candles().with_symbol("BTCUSDT"));
+    assert_eq!(candles.len(), 1);
+    let candle = &candles[0];
+    assert_eq!(candle.collection, "candles");
     assert_eq!(
-        store
-            .query(&MarketDataQuery::for_candles().with_symbol("BTCUSDT"))
-            .len(),
-        1
+        candle.metadata.tags.get("kind").map(String::as_str),
+        Some("candle")
     );
-    assert!(store
-        .all_records()
+    assert_eq!(
+        candle.metadata.tags.get("symbol").map(String::as_str),
+        Some("BTCUSDT")
+    );
+    assert_eq!(
+        candle.metadata.tags.get("exchange").map(String::as_str),
+        Some("binance_futures_usd")
+    );
+    assert_eq!(
+        candle.metadata.tags.get("record.kind").map(String::as_str),
+        Some("candle")
+    );
+    assert_eq!(
+        candle.metadata.tags.get("mode").map(String::as_str),
+        Some("backfill")
+    );
+
+    let all_records = store.all_records();
+    assert!(all_records
         .iter()
         .any(|record| record.collection == "contract_checkpoints"));
-    assert!(store
-        .all_records()
+    assert!(all_records
         .iter()
         .any(|record| record.collection == "contract_acquisition_audits"));
+    assert!(all_records.iter().all(|record| {
+        record.collection == "candles"
+            || record.collection == "contract_checkpoints"
+            || record.collection == "contract_acquisition_audits"
+    }));
 }
 
 #[tokio::test]

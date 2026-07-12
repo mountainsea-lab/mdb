@@ -1,14 +1,14 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
 use fdc_barter::{
-    BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
-    BarterMarketPayload, BarterMarketType, CandlePayload, DataQualityFlags,
-    LiveMarketDataSubscription, TradePayload, TradeSide, collect_live_market_data_envelopes,
-    default_binance_spot_market_data_subscriptions, init_binance_spot_market_data,
+    collect_live_market_data_envelopes, default_binance_spot_market_data_subscriptions,
+    init_binance_spot_market_data, BarterIngestionEnvelope, BarterMarketDataKind,
+    BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload, BarterMarketType, CandlePayload,
+    DataQualityFlags, LiveMarketDataSubscription, TradePayload, TradeSide,
 };
 use fdc_core::{
-    Result,
     types::{Price, Symbol, TimestampNs},
+    Result,
 };
 use fdc_storage::{
     MarketDataQuery, QueryableMarketDataStore, StorageMaintenanceAuditEntry,
@@ -19,18 +19,16 @@ use futures::stream;
 use rust_decimal::Decimal;
 
 use crate::{
-    MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig, ProductionServerState,
-    RealtimeMarketDataMvpConfig, ServerRuntimeConfig,
     market_data::maintenance_audit::MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY,
     market_data::maintenance_scheduler::{
         claim_storage_maintenance_scheduler_task, spawn_storage_maintenance_scheduler_into_handle,
     },
     market_data::model::{
-        MarketDataCandleRecord, MarketDataCandlesResponse, MarketDataLiveState,
-        MarketDataCandleAcquisitionRunStatusResponse,
-        MarketDataCandleAcquisitionStatusResponse,
+        MarketDataCandleAcquisitionRunStatusResponse, MarketDataCandleAcquisitionStatusResponse,
+        MarketDataCandleRecord, MarketDataCandlesResponse,
+        MarketDataContractAcquisitionRunOnceResponse,
         MarketDataContractAcquisitionRunStatusResponse,
-        MarketDataContractAcquisitionStatusResponse,
+        MarketDataContractAcquisitionStatusResponse, MarketDataLiveState,
         MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditEntryResponse,
         MarketDataStorageMaintenanceAuditResetRequest,
         MarketDataStorageMaintenanceAuditResetResponse, MarketDataStorageMaintenanceAuditResponse,
@@ -44,7 +42,9 @@ use crate::{
         MarketDataTradesResponse, ResumeLiveMarketDataRequest, ResumeLiveMarketDataResponse,
         StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
     },
-    run_realtime_barter_envelope_stream,
+    run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
+    MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
+    ServerRuntimeConfig,
 };
 
 pub fn live_status(
@@ -119,6 +119,35 @@ pub fn contract_acquisition_status(
         last_run,
         last_error: state.market_data_contract_acquisition_last_error(),
     }
+}
+
+pub async fn run_contract_acquisition_once(
+    state: &ProductionServerState,
+) -> std::result::Result<MarketDataContractAcquisitionRunOnceResponse, String> {
+    let config = &state.config().market_data_contract_acquisition;
+    if !config.enabled {
+        return Err("contract candle acquisition is disabled".to_string());
+    }
+
+    let status = state
+        .run_contract_acquisition_once_if_enabled()
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(MarketDataContractAcquisitionRunOnceResponse {
+        enabled: config.enabled,
+        exchange: config.exchange.clone(),
+        symbols: config.symbols.clone(),
+        intervals: config.intervals.clone(),
+        tasks_started: status.tasks_started,
+        tasks_completed: status.tasks_completed,
+        pages_fetched: status.pages_fetched,
+        envelopes_received: status.envelopes_received,
+        storage_records_written: status.storage_records_written,
+        audit_records_written: status.audit_records_written,
+        final_cursors: status.final_cursors.len(),
+        market_data_store_records: state.market_data_store().record_count(),
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1942,8 +1971,8 @@ mod tests {
 mod live_retry_tests {
     use super::*;
     use std::sync::{
-        Arc,
         atomic::{AtomicUsize, Ordering},
+        Arc,
     };
 
     #[tokio::test]
