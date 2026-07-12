@@ -12,7 +12,7 @@ use fdc_server::{
         expand_contract_backfill_requests, run_contract_acquisition_once_with_checkpoints,
         ContractCheckpointKey, ContractCheckpointStore, StorageBackedContractCheckpointStore,
     },
-    MarketDataContractAcquisitionRuntimeConfig,
+    MarketDataContractAcquisitionRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
 };
 use fdc_storage::{MarketDataQuery, QueryableMarketDataStore};
 use rust_decimal::Decimal;
@@ -233,4 +233,49 @@ async fn contract_acquisition_runner_writes_candles_checkpoints_and_audit_to_sto
         .all_records()
         .iter()
         .any(|record| record.collection == "contract_acquisition_audits"));
+}
+
+#[tokio::test]
+async fn production_state_runs_configured_contract_acquisition_once_with_source() {
+    let runtime = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+        ("FDC_MARKET_DATA_CONTRACTS_START_NS", "1700000000000000000"),
+        ("FDC_MARKET_DATA_CONTRACTS_END_NS", "1700000060000000000"),
+    ])
+    .expect("runtime config should parse");
+    let state = ProductionServerState::new(runtime);
+    let request = expand_contract_backfill_requests(&state.config().market_data_contract_acquisition)
+        .expect("request should expand")
+        .remove(0);
+    let source = ScriptedContractCandleSource::new(vec![HistoricalBackfillPage {
+        request,
+        envelopes: vec![candle_envelope("BTCUSDT", "state-seq-1")],
+        next_cursor: None,
+        complete: true,
+    }]);
+
+    let status = state
+        .run_contract_acquisition_once_with_source(&source)
+        .await
+        .expect("state runner should complete");
+
+    assert_eq!(status.tasks_completed, 1);
+    assert_eq!(status.storage_records_written, 1);
+    assert_eq!(status.audit_records_written, 1);
+    assert_eq!(
+        state
+            .market_data_store()
+            .query(&MarketDataQuery::for_candles().with_symbol("BTCUSDT"))
+            .len(),
+        1
+    );
+    assert_eq!(
+        state
+            .market_data_contract_acquisition_last_run()
+            .expect("last run should be recorded")
+            .audit_records_written,
+        1
+    );
 }

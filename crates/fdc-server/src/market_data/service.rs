@@ -29,6 +29,8 @@ use crate::{
         MarketDataCandleRecord, MarketDataCandlesResponse, MarketDataLiveState,
         MarketDataCandleAcquisitionRunStatusResponse,
         MarketDataCandleAcquisitionStatusResponse,
+        MarketDataContractAcquisitionRunStatusResponse,
+        MarketDataContractAcquisitionStatusResponse,
         MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditEntryResponse,
         MarketDataStorageMaintenanceAuditResetRequest,
         MarketDataStorageMaintenanceAuditResetResponse, MarketDataStorageMaintenanceAuditResponse,
@@ -84,6 +86,38 @@ pub fn candle_acquisition_status(
         max_pages_per_run: config.max_pages_per_run,
         last_run,
         last_error: state.market_data_candle_acquisition_last_error(),
+    }
+}
+
+pub fn contract_acquisition_status(
+    state: &ProductionServerState,
+) -> MarketDataContractAcquisitionStatusResponse {
+    let config = &state.config().market_data_contract_acquisition;
+    let last_run = state
+        .market_data_contract_acquisition_last_run()
+        .map(|status| MarketDataContractAcquisitionRunStatusResponse {
+            tasks_started: status.tasks_started,
+            tasks_completed: status.tasks_completed,
+            pages_fetched: status.pages_fetched,
+            envelopes_received: status.envelopes_received,
+            storage_records_written: status.storage_records_written,
+            audit_records_written: status.audit_records_written,
+            final_cursors: status.final_cursors.len(),
+        });
+
+    MarketDataContractAcquisitionStatusResponse {
+        enabled: config.enabled,
+        autostart: config.autostart,
+        exchange: config.exchange.clone(),
+        symbols: config.symbols.clone(),
+        kinds: config.kinds.clone(),
+        intervals: config.intervals.clone(),
+        start_ns: config.start_ns,
+        end_ns: config.end_ns,
+        limit_per_page: config.limit_per_page,
+        max_pages_per_run: config.max_pages_per_run,
+        last_run,
+        last_error: state.market_data_contract_acquisition_last_error(),
     }
 }
 

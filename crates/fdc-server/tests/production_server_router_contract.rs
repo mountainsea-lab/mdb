@@ -227,6 +227,34 @@ async fn response_body_json(response: axum::response::Response) -> serde_json::V
     serde_json::from_slice(&body).expect("response body should be json")
 }
 
+#[tokio::test]
+async fn market_data_contract_acquisition_status_reports_disabled_defaults() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).unwrap(),
+    );
+    let app = build_production_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/contracts/acquisition/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["enabled"], false);
+    assert_eq!(json["data"]["autostart"], false);
+    assert_eq!(json["data"]["exchange"], "binance_futures_usd");
+    assert_eq!(json["data"]["kinds"], serde_json::json!(["candle"]));
+    assert!(json["data"]["last_run"].is_null());
+    assert!(json["data"]["last_error"].is_null());
+}
+
 fn p37_durable_config(root: &std::path::Path, extra_env: &[(&str, &str)]) -> ServerRuntimeConfig {
     let mut env = durable_tier_env(root).to_vec();
     env.extend(

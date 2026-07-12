@@ -30,6 +30,9 @@ pub struct ProductionServerState {
     market_data_candle_acquisition_last_run:
         Arc<Mutex<Option<crate::market_data::candle_acquisition::CandleAcquisitionRunStatus>>>,
     market_data_candle_acquisition_last_error: Arc<Mutex<Option<String>>>,
+    market_data_contract_acquisition_last_run:
+        Arc<Mutex<Option<crate::market_data::contract_acquisition::ContractAcquisitionRunStatus>>>,
+    market_data_contract_acquisition_last_error: Arc<Mutex<Option<String>>>,
 }
 
 impl ProductionServerState {
@@ -47,6 +50,8 @@ impl ProductionServerState {
                 StorageMaintenanceSchedulerTaskHandle::default(),
             market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
             market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
+            market_data_contract_acquisition_last_run: Arc::new(Mutex::new(None)),
+            market_data_contract_acquisition_last_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -76,6 +81,8 @@ impl ProductionServerState {
             market_data_storage_maintenance_scheduler_task,
             market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
             market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
+            market_data_contract_acquisition_last_run: Arc::new(Mutex::new(None)),
+            market_data_contract_acquisition_last_error: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -96,6 +103,8 @@ impl ProductionServerState {
                 StorageMaintenanceSchedulerTaskHandle::default(),
             market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
             market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
+            market_data_contract_acquisition_last_run: Arc::new(Mutex::new(None)),
+            market_data_contract_acquisition_last_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -167,6 +176,46 @@ impl ProductionServerState {
         }
     }
 
+    pub fn market_data_contract_acquisition_last_run(
+        &self,
+    ) -> Option<crate::market_data::contract_acquisition::ContractAcquisitionRunStatus> {
+        self.market_data_contract_acquisition_last_run
+            .lock()
+            .expect("contract acquisition status lock")
+            .clone()
+    }
+
+    pub fn market_data_contract_acquisition_last_error(&self) -> Option<String> {
+        self.market_data_contract_acquisition_last_error
+            .lock()
+            .expect("contract acquisition error lock")
+            .clone()
+    }
+
+    fn record_contract_acquisition_result(
+        &self,
+        result: &Result<crate::market_data::contract_acquisition::ContractAcquisitionRunStatus>,
+    ) {
+        match result {
+            Ok(status) => {
+                *self
+                    .market_data_contract_acquisition_last_run
+                    .lock()
+                    .expect("contract acquisition status lock") = Some(status.clone());
+                *self
+                    .market_data_contract_acquisition_last_error
+                    .lock()
+                    .expect("contract acquisition error lock") = None;
+            }
+            Err(error) => {
+                *self
+                    .market_data_contract_acquisition_last_error
+                    .lock()
+                    .expect("contract acquisition error lock") = Some(error.to_string());
+            }
+        }
+    }
+
     pub async fn ingest_test_trade(&self, symbol: &str, trade_id: &str) -> Result<()> {
         ingest_test_trade(self, symbol, trade_id).await.map(|_| ())
     }
@@ -229,6 +278,47 @@ impl ProductionServerState {
         )
         .await;
         self.record_candle_acquisition_result(&result);
+        result
+    }
+
+    pub async fn run_contract_acquisition_once_with_source<S>(
+        &self,
+        source: &S,
+    ) -> Result<crate::market_data::contract_acquisition::ContractAcquisitionRunStatus>
+    where
+        S: HistoricalPageFetcher + ?Sized,
+    {
+        let checkpoint_store = crate::market_data::contract_acquisition::StorageBackedContractCheckpointStore::new(
+            self.market_data_store.as_ref(),
+        );
+        let result = crate::market_data::contract_acquisition::run_contract_acquisition_once_with_checkpoints(
+            &self.config.market_data_contract_acquisition,
+            source,
+            self.market_data_store.as_ref(),
+            &checkpoint_store,
+        )
+        .await;
+        self.record_contract_acquisition_result(&result);
+        result
+    }
+
+    pub async fn start_contract_acquisition_autostart_if_enabled(
+        &self,
+    ) -> Result<crate::market_data::contract_acquisition::ContractAcquisitionRunStatus> {
+        if !(self.config.market_data_contract_acquisition.enabled
+            && self.config.market_data_contract_acquisition.autostart)
+        {
+            let result = Ok(crate::market_data::contract_acquisition::ContractAcquisitionRunStatus::default());
+            self.record_contract_acquisition_result(&result);
+            return result;
+        }
+
+        let result = crate::market_data::contract_acquisition::run_binance_futures_usd_contract_candle_acquisition_once(
+            &self.config.market_data_contract_acquisition,
+            self.market_data_store.as_ref(),
+        )
+        .await;
+        self.record_contract_acquisition_result(&result);
         result
     }
 }

@@ -11,7 +11,7 @@ use crate::{
     market_data::{
         model::{
             LiveMarketDataStatusResponse, MarketDataCandleAcquisitionStatusResponse,
-            MarketDataCandlesResponse,
+            MarketDataCandlesResponse, MarketDataContractAcquisitionStatusResponse,
             MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditResetRequest,
             MarketDataStorageMaintenanceAuditResetResponse,
             MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
@@ -25,8 +25,9 @@ use crate::{
             StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
         service::{
-            StorageMaintenanceHttpStatus, candle_acquisition_status, live_status, query_candles, query_trades,
-            reset_storage_maintenance_audit, reset_storage_maintenance_scheduler, resume_live,
+            StorageMaintenanceHttpStatus, candle_acquisition_status, contract_acquisition_status,
+            live_status, query_candles, query_trades, reset_storage_maintenance_audit,
+            reset_storage_maintenance_scheduler, resume_live,
             resume_storage_maintenance_scheduler, run_storage_maintenance_once, start_live,
             start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
             storage_maintenance_scheduler_status, storage_status,
@@ -107,6 +108,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
             "/market-data/candles/acquisition/status",
             get(candle_acquisition_status_handler),
         )
+        .route(
+            "/market-data/contracts/acquisition/status",
+            get(contract_acquisition_status_handler),
+        )
         .route("/market-data/candles", get(query_candles_handler))
         .with_state(state)
 }
@@ -182,6 +187,12 @@ async fn candle_acquisition_status_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<MarketDataCandleAcquisitionStatusResponse>> {
     Json(ServerApiResponse::success(candle_acquisition_status(&state)))
+}
+
+async fn contract_acquisition_status_handler(
+    State(state): State<ProductionServerState>,
+) -> Json<ServerApiResponse<MarketDataContractAcquisitionStatusResponse>> {
+    Json(ServerApiResponse::success(contract_acquisition_status(&state)))
 }
 
 async fn storage_status_handler(
