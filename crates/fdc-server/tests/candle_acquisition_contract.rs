@@ -15,6 +15,7 @@ use fdc_server::{
     MarketDataCandleAcquisitionRuntimeConfig, ServerRuntimeConfig,
 };
 use fdc_storage::{MarketDataQuery, QueryableMarketDataStore};
+use serde_json::Value;
 use rust_decimal::Decimal;
 
 fn config() -> MarketDataCandleAcquisitionRuntimeConfig {
@@ -496,6 +497,19 @@ async fn candle_acquisition_verify_intervals_cross_checks_official_candles() {
     assert_eq!(status.verify_mismatches, 1);
     let stored = store.query(&MarketDataQuery::for_candles().with_symbol("BTCUSDT"));
     assert_eq!(stored.len(), 1, "verify candles should not be stored as production candles");
+    let audits: Vec<_> = store
+        .all_records()
+        .into_iter()
+        .filter(|record| record.collection == "candle_verify_audits")
+        .collect();
+    assert_eq!(audits.len(), 1, "one verify audit should be persisted");
+    assert_eq!(audits[0].metadata.tags.get("kind").map(String::as_str), Some("candle_verify_audit"));
+    assert_eq!(audits[0].metadata.tags.get("symbol").map(String::as_str), Some("BTCUSDT"));
+    assert_eq!(audits[0].metadata.tags.get("interval").map(String::as_str), Some("1m"));
+    let audit: Value = serde_json::from_slice(&audits[0].value).expect("audit should be json");
+    assert_eq!(audit["checked"], 1);
+    assert_eq!(audit["mismatches"], 1);
+    assert_eq!(audit["pages_fetched"], 1);
 }
 
 #[tokio::test]

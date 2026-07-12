@@ -65,6 +65,7 @@ pub trait CandleCheckpointStore: Send + Sync {
 }
 
 const CANDLE_CHECKPOINT_COLLECTION: &str = "candle_checkpoints";
+const CANDLE_VERIFY_AUDIT_COLLECTION: &str = "candle_verify_audits";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct CandleCheckpointStorageValue {
@@ -130,6 +131,64 @@ where
 
 fn candle_checkpoint_storage_key(key: &CandleCheckpointKey) -> Vec<u8> {
     format!("{}:{}:{}", key.exchange, key.symbol, key.interval).into_bytes()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CandleVerifyAuditStorageValue {
+    run_id: String,
+    exchange: String,
+    symbol: String,
+    interval: String,
+    checked: usize,
+    mismatches: usize,
+    pages_fetched: usize,
+    updated_at_ns: i64,
+}
+
+fn write_candle_verify_audit<W>(
+    storage_sink: &W,
+    run_id: &str,
+    request: &HistoricalBackfillRequest,
+    checked: usize,
+    mismatches: usize,
+    pages_fetched: usize,
+) -> Result<()>
+where
+    W: StorageWriteSink,
+{
+    let interval = request.interval.clone().unwrap_or_else(|| "unknown".to_string());
+    let updated_at_ns = TimestampNs::now().as_nanos();
+    let value = CandleVerifyAuditStorageValue {
+        run_id: run_id.to_string(),
+        exchange: request.exchange.clone(),
+        symbol: request.symbol.clone(),
+        interval: interval.clone(),
+        checked,
+        mismatches,
+        pages_fetched,
+        updated_at_ns,
+    };
+    let mut metadata = StorageWriteMetadata::default();
+    metadata.content_type = Some("application/json".to_string());
+    metadata.schema = Some("candle_verify_audit".to_string());
+    metadata.schema_version = Some("1".to_string());
+    metadata.source = Some("fdc-server:candle_acquisition".to_string());
+    metadata.tags.insert("kind".to_string(), "candle_verify_audit".to_string());
+    metadata.tags.insert("run_id".to_string(), run_id.to_string());
+    metadata.tags.insert("exchange".to_string(), request.exchange.clone());
+    metadata.tags.insert("symbol".to_string(), request.symbol.clone());
+    metadata.tags.insert("interval".to_string(), interval.clone());
+    let key = format!("{}:{}:{}:{}", run_id, request.symbol, interval, updated_at_ns).into_bytes();
+    let record = StorageWriteRecord::new(
+        "market_data",
+        CANDLE_VERIFY_AUDIT_COLLECTION,
+        key,
+        serde_json::to_vec(&value).map_err(|error| Error::internal(error.to_string()))?,
+    )
+    .with_timestamp(Utc::now())
+    .with_metadata(metadata);
+    futures::executor::block_on(storage_sink.write_batch(StorageWriteBatch::new(vec![record])))?;
+    Ok(())
 }
 
 #[derive(Debug, Default)]
@@ -332,6 +391,7 @@ where
     W: StorageWriteSink,
 {
     let requests = expand_candle_acquisition_requests(config)?;
+    let run_id = format!("candle-acquisition-{}", TimestampNs::now().as_nanos());
     let mut status = CandleAcquisitionRunStatus::default();
     let mut expected_verify_candles = Vec::new();
 
@@ -340,6 +400,7 @@ where
         if acquisition_request.role == CandleAcquisitionRequestRole::Verify {
             status.verify_tasks_started += 1;
         }
+        let request_for_audit = acquisition_request.request.clone();
         let outcome = run_historical_backfill_pages(
             source,
             HistoricalBackfillRunRequest {
@@ -357,6 +418,9 @@ where
             status.final_cursors.push(cursor);
         }
 
+        let pages_fetched = outcome.pages.len();
+        let mut verify_checked = 0usize;
+        let mut verify_mismatches = 0usize;
         for page in outcome.pages {
             match acquisition_request.role {
                 CandleAcquisitionRequestRole::Base => {
@@ -368,11 +432,24 @@ where
                 CandleAcquisitionRequestRole::Verify => {
                     let official = candle_payloads_from_envelopes(&page.envelopes);
                     let expected = expected_candles_for_verify(&expected_verify_candles, &official)?;
+                    let mismatches = count_candle_mismatches(&expected, &official);
                     status.verify_candles_checked += official.len();
-                    status.verify_mismatches +=
-                        count_candle_mismatches(&expected, &official);
+                    status.verify_mismatches += mismatches;
+                    verify_checked += official.len();
+                    verify_mismatches += mismatches;
                 }
             }
+        }
+
+        if acquisition_request.role == CandleAcquisitionRequestRole::Verify {
+            write_candle_verify_audit(
+                storage_sink,
+                &run_id,
+                &request_for_audit,
+                verify_checked,
+                verify_mismatches,
+                pages_fetched,
+            )?;
         }
 
         if outcome.complete {
@@ -395,6 +472,7 @@ where
     C: CandleCheckpointStore,
 {
     let mut requests = expand_candle_acquisition_requests(config)?;
+    let run_id = format!("candle-acquisition-{}", TimestampNs::now().as_nanos());
     let mut status = CandleAcquisitionRunStatus::default();
     let mut expected_verify_candles = Vec::new();
 
@@ -414,6 +492,7 @@ where
         } else {
             None
         };
+        let request_for_audit = acquisition_request.request.clone();
         let outcome = run_historical_backfill_pages(
             source,
             HistoricalBackfillRunRequest {
@@ -434,6 +513,9 @@ where
             status.final_cursors.push(cursor);
         }
 
+        let pages_fetched = outcome.pages.len();
+        let mut verify_checked = 0usize;
+        let mut verify_mismatches = 0usize;
         for page in outcome.pages {
             match acquisition_request.role {
                 CandleAcquisitionRequestRole::Base => {
@@ -445,11 +527,24 @@ where
                 CandleAcquisitionRequestRole::Verify => {
                     let official = candle_payloads_from_envelopes(&page.envelopes);
                     let expected = expected_candles_for_verify(&expected_verify_candles, &official)?;
+                    let mismatches = count_candle_mismatches(&expected, &official);
                     status.verify_candles_checked += official.len();
-                    status.verify_mismatches +=
-                        count_candle_mismatches(&expected, &official);
+                    status.verify_mismatches += mismatches;
+                    verify_checked += official.len();
+                    verify_mismatches += mismatches;
                 }
             }
+        }
+
+        if acquisition_request.role == CandleAcquisitionRequestRole::Verify {
+            write_candle_verify_audit(
+                storage_sink,
+                &run_id,
+                &request_for_audit,
+                verify_checked,
+                verify_mismatches,
+                pages_fetched,
+            )?;
         }
 
         if outcome.complete {
