@@ -41,7 +41,7 @@ docs: mark <stage> validated
 | Stage 2 | `fdc-orchestrator` | Adapter envelope → storage write input | `validated` | `dd4e273`, `c6f1fb0` | `rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract -- --nocapture` → `9 passed`; `rtk cargo check -p fdc-orchestrator` → `0 errors` | Structured `MarketDataDto` + `StorageWriteRecord` tags/metadata |
 | Stage 3 | `fdc-storage` | Candle generic write/query and derivatives storage mapping | `validated` | `b41d5d1`, `c6f1fb0` | `rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture` → `3 passed`; orchestrator storage mapping contract → `9 passed` | `MarketDataQuery::for_candles()`, collections `candles`, `funding_rates`, `open_interest`, `mark_prices`, `index_prices` |
 | Stage 4 | `fdc-server` | Candle 受控查询接口和运行时验证 | `validated` | `b41d5d1` | `rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture` → `1 passed` | `GET /market-data/candles?symbol=<SYMBOL>&limit=<N>` |
-| Stage 5 | Candle acquisition maintenance | 配置化 candle 采集、维护、checkpoint、runbook | `validated` | `4a3a689`, `b6eacdd` | Stage 2-4 validated | Config-driven candle backfill + maintenance contract |
+| Stage 5 | Candle acquisition maintenance | 配置化 candle 采集、维护、checkpoint、runbook | `validated` | `4a3a689`, `b6eacdd`, `f09a2cc`, `28f4d0d` | Stage 2-4 validated; candle storage metadata hardening validated | Config-driven candle backfill + maintenance contract |
 | Stage 6 | `fdc-analytics` | 因子计算 | `blocked` | - | 等待 Stage 5.x 历史数据维护 gate 完成或明确 re-scope | Factor input datasets |
 
 ## 4. Stage 完成记录模板
@@ -321,9 +321,9 @@ rtk cargo check -p fdc-server
 
 | Slice | Scope | Status | Required before Stage 6? | Plan anchor |
 | --- | --- | --- | --- | --- |
-| Stage 5.1 | Durable candle checkpoint persistence and resume | `validated` | yes | `d8ef071 feat: persist candle acquisition checkpoints` |
+| Stage 5.1 | Durable candle checkpoint persistence and resume | `validated` | yes | `d8ef071 feat: persist candle acquisition checkpoints`; storage-backed hardening `f09a2cc feat: persist candle checkpoints in market storage` |
 | Stage 5.2 | Candle acquisition status API | `validated` | yes | `83b3102 feat: expose candle acquisition status` |
-| Stage 5.3 | `verify_intervals` official candle cross-check | `validated` | yes | `89cdb6c feat: verify official candle intervals` |
+| Stage 5.3 | `verify_intervals` official candle cross-check | `validated` | yes | `89cdb6c feat: verify official candle intervals`; audit persistence `28f4d0d feat: persist candle verify audits` |
 | Stage 5.4 | Higher-interval candle aggregation from base intervals | `validated` | yes | `93ee52b feat: aggregate base candles for verification` |
 | Stage 5.5 | General historical acquisition for trades and derivative market-data kinds | `deferred / out of current candle gate` | no | Re-scope: do not go broad until candle acquisition/maintenance is accepted and next-stage scope is chosen. |
 
@@ -334,5 +334,7 @@ rtk cargo test -p fdc-server --test candle_acquisition_contract -- --nocapture
 rtk cargo test -p fdc-server --test production_server_router_contract market_data_candle_acquisition_status_reports_ -- --nocapture
 rtk cargo check -p fdc-server
 ```
+
+**Storage metadata hardening:** Candle maintenance now stores base interval resume cursors in `market_data/candle_checkpoints` and verify run summaries in `market_data/candle_verify_audits`. Canonical candle payloads remain in `candles`; official verify candles remain reference-only and are not persisted as production candles.
 
 **Next-stage gate:** The candle acquisition maintenance gate is complete for the current scope. Stage 6 or any broader historical acquisition work should start only after an explicit follow-up decision. Trades, derivatives, and generalized historical acquisition remain intentionally deferred.

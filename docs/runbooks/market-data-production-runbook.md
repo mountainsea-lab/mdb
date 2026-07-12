@@ -172,6 +172,8 @@ Expected:
 - Startup remains a no-op unless both `FDC_MARKET_DATA_CANDLES_ENABLED=1` and `FDC_MARKET_DATA_CANDLES_AUTOSTART=1` are set.
 - Each configured symbol/base interval expands to a bounded historical candle task.
 - Successful pages are written to the existing `candles` collection.
+- Base interval resume cursors are persisted through market-data storage in collection `candle_checkpoints` with key `exchange:symbol:interval` and JSON cursor payload.
+- Verify run summaries are persisted through market-data storage in collection `candle_verify_audits` with run id, exchange, symbol, interval, checked count, mismatch count, page count, and timestamp metadata.
 - `verify_intervals` expand to reference-only candle tasks. Reference candles are compared against base candles or base-derived higher intervals and are not written as canonical production candles.
 - Inspect last-run status with:
 
@@ -188,8 +190,9 @@ curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/candles?symbol=BTCUSD
 Current Stage 5 scope:
 
 - `base_intervals` are the canonical collection intervals. Prefer `1m` first.
+- `candle_checkpoints` and `candle_verify_audits` are maintenance metadata collections in the same market-data storage boundary as canonical `candles`.
 - `verify_intervals` are reference-only cross-check intervals. Higher intervals can be derived from base candle payloads for verification.
-- Offline contract tests cover request expansion, storage writes, checkpoint resume, status API, verify mismatch accounting, derived interval aggregation, and safe disabled autostart. Real-network smoke is opt-in.
+- Offline contract tests cover request expansion, storage writes, storage-backed checkpoint resume, status API, verify mismatch accounting, verify audit persistence, derived interval aggregation, and safe disabled autostart. Real-network smoke is opt-in.
 - Historical acquisition for trades, derivatives, and other non-candle market-data kinds is intentionally deferred until the next explicit scope decision.
 
 ## Live recovery flow
