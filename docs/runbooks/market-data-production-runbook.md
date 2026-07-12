@@ -144,6 +144,46 @@ Expected:
 - Live status shows progress, completion, failure, or suppression.
 - Query route returns any collected trades through the normal P38 response envelope.
 
+## Candle acquisition operator run
+
+Candle acquisition is disabled by default. Stage 5 adds a bounded Binance Spot OHLCV historical runner that uses the existing `fdc-barter -> fdc-orchestrator -> candles storage -> /market-data/candles` path. Use small page limits first because autostart runs before the HTTP listener is bound.
+
+Safe manual/autostart configuration example:
+
+```bash
+set -a
+. ./.env.p39.local
+export FDC_MARKET_DATA_CANDLES_ENABLED=1
+export FDC_MARKET_DATA_CANDLES_AUTOSTART=1
+export FDC_MARKET_DATA_CANDLES_EXCHANGE=binance_spot
+export FDC_MARKET_DATA_CANDLES_SYMBOLS=BTCUSDT,ETHUSDT
+export FDC_MARKET_DATA_CANDLES_BASE_INTERVALS=1m
+export FDC_MARKET_DATA_CANDLES_VERIFY_INTERVALS=1h,1d
+export FDC_MARKET_DATA_CANDLES_START_NS=1700000000000000000
+export FDC_MARKET_DATA_CANDLES_END_NS=1700000060000000000
+export FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE=100
+export FDC_MARKET_DATA_CANDLES_MAX_PAGES_PER_RUN=1
+set +a
+CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo run -p fdc-server
+```
+
+Expected:
+
+- Startup remains a no-op unless both `FDC_MARKET_DATA_CANDLES_ENABLED=1` and `FDC_MARKET_DATA_CANDLES_AUTOSTART=1` are set.
+- Each configured symbol/base interval expands to a bounded historical candle task.
+- Successful pages are written to the existing `candles` collection.
+- Query collected candles with:
+
+```bash
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/candles?symbol=BTCUSDT&limit=10'
+```
+
+Current Stage 5 scope:
+
+- `base_intervals` are the canonical collection intervals. Prefer `1m` first.
+- `verify_intervals` are parsed and documented for reference/verification policy, but higher-interval aggregation is a later stage.
+- Offline contract tests cover request expansion, storage writes, and safe disabled autostart. Real-network smoke is opt-in.
+
 ## Live recovery flow
 
 Use this only after inspecting live status and deciding resume is safe.

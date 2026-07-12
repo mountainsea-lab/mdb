@@ -41,7 +41,7 @@ docs: mark <stage> validated
 | Stage 2 | `fdc-orchestrator` | Adapter envelope → storage write input | `validated` | `dd4e273`, `c6f1fb0` | `rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract -- --nocapture` → `9 passed`; `rtk cargo check -p fdc-orchestrator` → `0 errors` | Structured `MarketDataDto` + `StorageWriteRecord` tags/metadata |
 | Stage 3 | `fdc-storage` | Candle generic write/query and derivatives storage mapping | `validated` | `b41d5d1`, `c6f1fb0` | `rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture` → `3 passed`; orchestrator storage mapping contract → `9 passed` | `MarketDataQuery::for_candles()`, collections `candles`, `funding_rates`, `open_interest`, `mark_prices`, `index_prices` |
 | Stage 4 | `fdc-server` | Candle 受控查询接口和运行时验证 | `validated` | `b41d5d1` | `rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture` → `1 passed` | `GET /market-data/candles?symbol=<SYMBOL>&limit=<N>` |
-| Stage 5 | Candle acquisition maintenance | 配置化 candle 采集、维护、checkpoint、runbook | `planned` | - | 待 Stage 2-4 validated；必须先完成本阶段再进入 analytics/更广 spot 扩展 | Config-driven candle backfill + maintenance contract |
+| Stage 5 | Candle acquisition maintenance | 配置化 candle 采集、维护、checkpoint、runbook | `validated` | `4a3a689`, pending runner commit | Stage 2-4 validated | Config-driven candle backfill + maintenance contract |
 | Stage 6 | `fdc-analytics` | 因子计算 | `planned` | - | 待数据采集、存储、查询闭环 validated | Factor input datasets |
 
 ## 4. Stage 完成记录模板
@@ -267,3 +267,45 @@ max_pages_per_run = 10
 6. 验收必须包含 fixture/offline contract；真实网络 smoke 可 opt-in，但需要记录命令和输出摘要。
 
 **进入后续阶段前置条件：** Stage 5 标记为 `validated`，并在本文档记录提交、验收命令、输出摘要和明确未完成项。
+
+
+## 8. Stage 5 completion record：Candle acquisition maintenance
+
+**状态：** `validated`  
+**完成日期：** `2026-07-12`  
+**提交：** `4a3a689 feat: add candle acquisition runtime config`，runner commit pending  
+
+**完成内容：**
+
+- 新增 candle acquisition runtime config，支持 env 指定 enabled/autostart/exchange/symbols/base intervals/verify intervals/start/end/page limits/max pages。
+- 新增 `market_data::candle_acquisition`，将配置扩展为 `HistoricalBackfillRequest`。
+- 新增 bounded runner：`fdc-barter` historical pages -> `fdc-orchestrator::run_barter_envelopes_to_storage_once` -> existing `candles` collection。
+- `ProductionServerState` 增加 source-injected manual runner 和 startup autostart gate。
+- `fdc_server` binary 启动时在 live autostart 后检查 candle acquisition autostart。
+- Runbook 记录安全默认值、示例 env、查询验证命令和当前 scope。
+
+**验收命令摘要：**
+
+```bash
+rtk cargo test -p fdc-server --test runtime_config_contract candle_acquisition_config -- --nocapture
+# 4 passed
+
+rtk cargo test -p fdc-server --test candle_acquisition_contract -- --nocapture
+# 4 passed
+
+rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture
+# 3 passed
+
+rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture
+# 1 passed
+
+rtk cargo check -p fdc-server
+# 0 errors, existing warnings only
+```
+
+**明确未完成项：**
+
+- Durable checkpoint persistence/status API 尚未实现；当前 runner 返回 per-run `final_cursors`，可作为下一步持久化输入。
+- `verify_intervals` 当前仅配置解析/策略记录，未自动执行官方低频校验。
+- 高周期 candle 聚合尚未实现。
+- 真实网络 Binance smoke 未作为默认 CI 验收运行，仍为 operator opt-in。

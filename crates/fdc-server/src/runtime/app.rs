@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::Router;
+use fdc_barter::HistoricalPageFetcher;
 use fdc_core::Result;
 use fdc_storage::QueryableMarketDataStore;
 
@@ -139,6 +140,37 @@ impl ProductionServerState {
         .await
         .map(|_| ())
         .map_err(fdc_core::error::Error::internal)
+    }
+
+    pub async fn run_candle_acquisition_once_with_source<S>(
+        &self,
+        source: &S,
+    ) -> Result<crate::market_data::candle_acquisition::CandleAcquisitionRunStatus>
+    where
+        S: HistoricalPageFetcher + ?Sized,
+    {
+        crate::market_data::candle_acquisition::run_candle_acquisition_once(
+            &self.config.market_data_candle_acquisition,
+            source,
+            self.market_data_store.as_ref(),
+        )
+        .await
+    }
+
+    pub async fn start_candle_acquisition_autostart_if_enabled(
+        &self,
+    ) -> Result<crate::market_data::candle_acquisition::CandleAcquisitionRunStatus> {
+        if !(self.config.market_data_candle_acquisition.enabled
+            && self.config.market_data_candle_acquisition.autostart)
+        {
+            return Ok(crate::market_data::candle_acquisition::CandleAcquisitionRunStatus::default());
+        }
+
+        crate::market_data::candle_acquisition::run_binance_spot_candle_acquisition_once(
+            &self.config.market_data_candle_acquisition,
+            self.market_data_store.as_ref(),
+        )
+        .await
     }
 }
 
