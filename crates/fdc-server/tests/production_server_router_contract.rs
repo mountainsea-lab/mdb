@@ -1,4 +1,7 @@
-use std::{collections::BTreeSet, sync::{Arc, Mutex}};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, Mutex},
+};
 
 use async_trait::async_trait;
 use axum::{
@@ -12,13 +15,13 @@ use fdc_barter::{
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{
+    build_market_data_store_from_runtime_config, build_production_router,
     market_data::{
         candle_acquisition::expand_candle_backfill_requests,
         contract_acquisition::expand_contract_backfill_requests,
     },
     MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig,
     MarketDataStorageRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
-    build_market_data_store_from_runtime_config, build_production_router,
 };
 use fdc_storage::{
     QueryableMarketDataStore, QueryableStorage, StorageQuery, StorageTier, StorageTierScope,
@@ -112,7 +115,9 @@ impl HistoricalPageFetcher for ScriptedContractStatusSource {
 
 impl ScriptedCandleStatusSource {
     fn new(pages: Vec<HistoricalBackfillPage>) -> Self {
-        Self { pages: Mutex::new(pages) }
+        Self {
+            pages: Mutex::new(pages),
+        }
     }
 }
 
@@ -295,6 +300,34 @@ async fn market_data_contract_acquisition_status_reports_disabled_defaults() {
 }
 
 #[tokio::test]
+async fn market_data_contract_acquisition_run_once_reports_disabled_defaults() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).unwrap(),
+    );
+    let app = build_production_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/market-data/contracts/acquisition/run-once")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "error");
+    assert_eq!(json["message"], "contract candle acquisition is disabled");
+    assert_eq!(json["data"]["enabled"], false);
+    assert_eq!(json["data"]["exchange"], "binance_futures_usd");
+    assert_eq!(json["data"]["tasks_started"], 0);
+    assert_eq!(json["data"]["storage_records_written"], 0);
+}
+
+#[tokio::test]
 async fn market_data_contract_acquisition_status_reports_last_run() {
     let runtime = ServerRuntimeConfig::from_env_pairs([
         ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
@@ -305,9 +338,10 @@ async fn market_data_contract_acquisition_status_reports_last_run() {
     ])
     .expect("contract runtime config should parse");
     let state = ProductionServerState::new(runtime);
-    let request = expand_contract_backfill_requests(&state.config().market_data_contract_acquisition)
-        .expect("request should expand")
-        .remove(0);
+    let request =
+        expand_contract_backfill_requests(&state.config().market_data_contract_acquisition)
+            .expect("request should expand")
+            .remove(0);
     let source = ScriptedContractStatusSource::new(vec![HistoricalBackfillPage {
         request,
         envelopes: vec![contract_candle_status_envelope("BTCUSDT", "status-run-1")],
@@ -661,13 +695,11 @@ async fn production_storage_status_reports_memory_defaults() {
     assert_eq!(json["data"]["tiers"][0]["tier"], "L1");
     assert_eq!(json["data"]["tiers"][0]["engine"], "memory");
     assert_eq!(json["data"]["tiers"][0]["durable_path_configured"], false);
-    assert!(
-        json["data"]["tiers"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|tier| tier["engine"] == "memory")
-    );
+    assert!(json["data"]["tiers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|tier| tier["engine"] == "memory"));
 }
 
 #[tokio::test]
@@ -1878,25 +1910,21 @@ async fn storage_maintenance_audit_route_returns_successful_run_entry() {
     assert_eq!(json["data"]["total_recorded_entries"], 1);
     assert_eq!(json["data"]["reset_count"], 0);
     assert_eq!(json["data"]["total_cleared_entries"], 0);
-    assert!(
-        json["data"]["last_recorded_at"]
-            .as_str()
-            .unwrap()
-            .contains('T')
-    );
+    assert!(json["data"]["last_recorded_at"]
+        .as_str()
+        .unwrap()
+        .contains('T'));
     assert!(json["data"]["last_reset_at"].is_null());
     let entries = json["data"]["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["scanned_entries"], 0);
     assert_eq!(entries[0]["healthy_tiers"], 4);
-    assert!(
-        entries[0]
-            .get("recorded_at")
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .contains('T')
-    );
+    assert!(entries[0]
+        .get("recorded_at")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .contains('T'));
 }
 
 #[tokio::test]
@@ -2179,18 +2207,14 @@ async fn storage_maintenance_audit_route_returns_metadata_after_reset() {
     assert_eq!(json["data"]["total_recorded_entries"], 1);
     assert_eq!(json["data"]["reset_count"], 1);
     assert_eq!(json["data"]["total_cleared_entries"], 1);
-    assert!(
-        json["data"]["last_recorded_at"]
-            .as_str()
-            .unwrap()
-            .contains('T')
-    );
-    assert!(
-        json["data"]["last_reset_at"]
-            .as_str()
-            .unwrap()
-            .contains('T')
-    );
+    assert!(json["data"]["last_recorded_at"]
+        .as_str()
+        .unwrap()
+        .contains('T'));
+    assert!(json["data"]["last_reset_at"]
+        .as_str()
+        .unwrap()
+        .contains('T'));
     assert!(json["data"]["entries"].as_array().unwrap().is_empty());
 }
 
@@ -2220,12 +2244,10 @@ async fn production_live_start_is_explicitly_disabled_by_default() {
     let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(json["status"], "error");
     assert_eq!(json["data"]["state"], "idle");
-    assert!(
-        json["message"]
-            .as_str()
-            .unwrap()
-            .contains("FDC_LIVE_ENABLED=1")
-    );
+    assert!(json["message"]
+        .as_str()
+        .unwrap()
+        .contains("FDC_LIVE_ENABLED=1"));
 }
 
 #[tokio::test]
@@ -2764,13 +2786,11 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     let before_router = build_production_router(first_state.clone());
     let before_json = p37_query_trades(before_router, "BTCUSDT", 10).await;
     p37_assert_trade_ids(&before_json, &["p37-btc-1", "p37-btc-2"]);
-    assert!(
-        before_json["data"]["records"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|record| record["symbol"] == "BTCUSDT")
-    );
+    assert!(before_json["data"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|record| record["symbol"] == "BTCUSDT"));
 
     drop(first_state);
 
@@ -2787,13 +2807,11 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     let reopened_router = build_production_router(reopened_state);
     let reopened_json = p37_query_trades(reopened_router, "BTCUSDT", 10).await;
     p37_assert_trade_ids(&reopened_json, &["p37-btc-1", "p37-btc-2"]);
-    assert!(
-        reopened_json["data"]["records"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|record| record["symbol"] == "BTCUSDT")
-    );
+    assert!(reopened_json["data"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|record| record["symbol"] == "BTCUSDT"));
 
     let _ = std::fs::remove_dir_all(root);
 }
