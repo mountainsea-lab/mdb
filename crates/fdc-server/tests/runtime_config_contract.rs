@@ -411,3 +411,97 @@ fn production_local_example_env_keeps_dangerous_controls_disabled() {
     assert_eq!(config.live_retry_max_delay_ms, 30000);
     assert_eq!(config.live_max_consecutive_failures, 3);
 }
+
+#[test]
+fn candle_acquisition_config_is_disabled_by_default() {
+    let config = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0])
+        .expect("defaults should parse");
+
+    assert!(!config.market_data_candle_acquisition.enabled);
+    assert!(!config.market_data_candle_acquisition.autostart);
+    assert_eq!(config.market_data_candle_acquisition.exchange, "binance_spot");
+    assert!(config.market_data_candle_acquisition.symbols.is_empty());
+    assert!(config.market_data_candle_acquisition.base_intervals.is_empty());
+    assert!(config.market_data_candle_acquisition.verify_intervals.is_empty());
+    assert_eq!(config.market_data_candle_acquisition.limit_per_page, 1000);
+    assert_eq!(config.market_data_candle_acquisition.max_pages_per_run, 1);
+}
+
+#[test]
+fn candle_acquisition_config_accepts_env_overrides() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CANDLES_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CANDLES_AUTOSTART", "1"),
+        ("FDC_MARKET_DATA_CANDLES_EXCHANGE", "binance_spot"),
+        ("FDC_MARKET_DATA_CANDLES_SYMBOLS", "BTCUSDT, ethusdt"),
+        ("FDC_MARKET_DATA_CANDLES_BASE_INTERVALS", "1m,5m"),
+        ("FDC_MARKET_DATA_CANDLES_VERIFY_INTERVALS", "1h,1d"),
+        ("FDC_MARKET_DATA_CANDLES_START_NS", "1000000000"),
+        ("FDC_MARKET_DATA_CANDLES_END_NS", "2000000000"),
+        ("FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE", "500"),
+        ("FDC_MARKET_DATA_CANDLES_MAX_PAGES_PER_RUN", "3"),
+    ])
+    .expect("candle acquisition env should parse");
+
+    assert!(config.market_data_candle_acquisition.enabled);
+    assert!(config.market_data_candle_acquisition.autostart);
+    assert_eq!(config.market_data_candle_acquisition.exchange, "binance_spot");
+    assert_eq!(
+        config.market_data_candle_acquisition.symbols,
+        vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()]
+    );
+    assert_eq!(
+        config.market_data_candle_acquisition.base_intervals,
+        vec!["1m".to_string(), "5m".to_string()]
+    );
+    assert_eq!(
+        config.market_data_candle_acquisition.verify_intervals,
+        vec!["1h".to_string(), "1d".to_string()]
+    );
+    assert_eq!(config.market_data_candle_acquisition.start_ns, Some(1_000_000_000));
+    assert_eq!(config.market_data_candle_acquisition.end_ns, Some(2_000_000_000));
+    assert_eq!(config.market_data_candle_acquisition.limit_per_page, 500);
+    assert_eq!(config.market_data_candle_acquisition.max_pages_per_run, 3);
+}
+
+#[test]
+fn candle_acquisition_config_rejects_enabled_without_symbols_or_intervals() {
+    let missing_symbols = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CANDLES_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CANDLES_BASE_INTERVALS", "1m"),
+    ])
+    .expect_err("enabled candle acquisition requires symbols");
+    assert!(missing_symbols
+        .to_string()
+        .contains("FDC_MARKET_DATA_CANDLES_SYMBOLS"));
+
+    let missing_intervals = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CANDLES_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CANDLES_SYMBOLS", "BTCUSDT"),
+    ])
+    .expect_err("enabled candle acquisition requires base intervals");
+    assert!(missing_intervals
+        .to_string()
+        .contains("FDC_MARKET_DATA_CANDLES_BASE_INTERVALS"));
+}
+
+#[test]
+fn candle_acquisition_config_rejects_invalid_ranges() {
+    let zero_limit = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE",
+        "0",
+    )])
+    .expect_err("zero page limit should be rejected");
+    assert!(zero_limit
+        .to_string()
+        .contains("FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE"));
+
+    let inverted_time = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CANDLES_START_NS", "2000"),
+        ("FDC_MARKET_DATA_CANDLES_END_NS", "1000"),
+    ])
+    .expect_err("end before start should be rejected");
+    assert!(inverted_time
+        .to_string()
+        .contains("FDC_MARKET_DATA_CANDLES_END_NS"));
+}
