@@ -1,5 +1,6 @@
 use std::sync::Mutex;
 
+use chrono::Utc;
 use fdc_barter::{
     run_historical_backfill_pages, BarterIntegrationHistoricalRestExecutor, BarterIngestionEnvelope,
     BarterMarketDataKind, BarterMarketPayload, BarterMarketType,
@@ -8,7 +9,11 @@ use fdc_barter::{
 };
 use fdc_core::{error::Error, types::{Price, TimestampNs}, Result};
 use fdc_orchestrator::pipeline::run_barter_envelopes_to_storage_once;
-use fdc_storage::StorageWriteSink;
+use fdc_storage::{
+    QueryableStorage, StorageQuery, StorageWriteBatch, StorageWriteMetadata, StorageWriteRecord,
+    StorageWriteSink,
+};
+use serde::{Deserialize, Serialize};
 
 use crate::runtime::config::MarketDataCandleAcquisitionRuntimeConfig;
 
@@ -57,6 +62,74 @@ impl CandleCheckpointKey {
 pub trait CandleCheckpointStore: Send + Sync {
     fn load(&self, key: &CandleCheckpointKey) -> Result<Option<HistoricalCursor>>;
     fn save(&self, key: CandleCheckpointKey, cursor: HistoricalCursor) -> Result<()>;
+}
+
+const CANDLE_CHECKPOINT_COLLECTION: &str = "candle_checkpoints";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct CandleCheckpointStorageValue {
+    cursor: HistoricalCursor,
+    updated_at_ns: i64,
+}
+
+pub struct StorageBackedCandleCheckpointStore<'a, S> {
+    storage: &'a S,
+}
+
+impl<'a, S> StorageBackedCandleCheckpointStore<'a, S> {
+    pub fn new(storage: &'a S) -> Self {
+        Self { storage }
+    }
+}
+
+impl<S> CandleCheckpointStore for StorageBackedCandleCheckpointStore<'_, S>
+where
+    S: StorageWriteSink + QueryableStorage,
+{
+    fn load(&self, key: &CandleCheckpointKey) -> Result<Option<HistoricalCursor>> {
+        let records = futures::executor::block_on(self.storage.query_storage(
+            &StorageQuery::new("market_data")
+                .with_collection(CANDLE_CHECKPOINT_COLLECTION)
+                .with_key_prefix(candle_checkpoint_storage_key(key)),
+        ))?;
+        let Some(record) = records.last() else {
+            return Ok(None);
+        };
+        let value: CandleCheckpointStorageValue = serde_json::from_slice(&record.value)
+            .map_err(|error| Error::internal(error.to_string()))?;
+        Ok(Some(value.cursor))
+    }
+
+    fn save(&self, key: CandleCheckpointKey, cursor: HistoricalCursor) -> Result<()> {
+        let storage_key = candle_checkpoint_storage_key(&key);
+        let value = CandleCheckpointStorageValue {
+            cursor,
+            updated_at_ns: TimestampNs::now().as_nanos(),
+        };
+        let mut metadata = StorageWriteMetadata::default();
+        metadata.content_type = Some("application/json".to_string());
+        metadata.schema = Some("candle_checkpoint".to_string());
+        metadata.schema_version = Some("1".to_string());
+        metadata.source = Some("fdc-server:candle_acquisition".to_string());
+        metadata.tags.insert("kind".to_string(), "candle_checkpoint".to_string());
+        metadata.tags.insert("exchange".to_string(), key.exchange);
+        metadata.tags.insert("symbol".to_string(), key.symbol);
+        metadata.tags.insert("interval".to_string(), key.interval);
+        let record = StorageWriteRecord::new(
+            "market_data",
+            CANDLE_CHECKPOINT_COLLECTION,
+            storage_key,
+            serde_json::to_vec(&value).map_err(|error| Error::internal(error.to_string()))?,
+        )
+        .with_timestamp(Utc::now())
+        .with_metadata(metadata);
+        futures::executor::block_on(self.storage.write_batch(StorageWriteBatch::new(vec![record])))?;
+        Ok(())
+    }
+}
+
+fn candle_checkpoint_storage_key(key: &CandleCheckpointKey) -> Vec<u8> {
+    format!("{}:{}:{}", key.exchange, key.symbol, key.interval).into_bytes()
 }
 
 #[derive(Debug, Default)]
@@ -392,9 +465,10 @@ pub async fn run_binance_spot_candle_acquisition_once<W>(
     storage_sink: &W,
 ) -> Result<CandleAcquisitionRunStatus>
 where
-    W: StorageWriteSink,
+    W: StorageWriteSink + QueryableStorage,
 {
     let executor = BarterIntegrationHistoricalRestExecutor::binance_spot();
     let fetcher = BinanceSpotOhlcvHistoricalPageFetcher::new(&executor);
-    run_candle_acquisition_once(config, &fetcher, storage_sink).await
+    let checkpoint_store = StorageBackedCandleCheckpointStore::new(storage_sink);
+    run_candle_acquisition_once_with_checkpoints(config, &fetcher, storage_sink, &checkpoint_store).await
 }

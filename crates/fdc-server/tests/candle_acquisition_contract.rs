@@ -10,6 +10,7 @@ use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{
     market_data::candle_acquisition::{
         aggregate_candle_payloads, expand_candle_backfill_requests, run_candle_acquisition_once,
+        CandleCheckpointKey, CandleCheckpointStore, StorageBackedCandleCheckpointStore,
     },
     MarketDataCandleAcquisitionRuntimeConfig, ServerRuntimeConfig,
 };
@@ -406,6 +407,41 @@ async fn candle_acquisition_persists_final_cursor_for_resume() {
         TimestampNs::from_nanos(1_700_000_060_000_000_001)
     );
     assert_eq!(second_requests[0].cursor, Some(final_cursor));
+}
+
+#[tokio::test]
+async fn storage_backed_candle_checkpoint_store_round_trips_cursor() {
+    let store = QueryableMarketDataStore::new();
+    let checkpoint_store = StorageBackedCandleCheckpointStore::new(&store);
+    let key = CandleCheckpointKey {
+        exchange: "binance_spot".to_string(),
+        symbol: "BTCUSDT".to_string(),
+        interval: "1m".to_string(),
+    };
+    let cursor = HistoricalCursor {
+        exchange: "binance_spot".to_string(),
+        symbol: "BTCUSDT".to_string(),
+        kind: BarterMarketDataKind::Candle,
+        next_start: Some(TimestampNs::from_nanos(1_700_000_060_000_000_001)),
+        page_token: Some("resume-token".to_string()),
+        last_seen_exchange_id: Some("kline-1".to_string()),
+    };
+
+    checkpoint_store
+        .save(key.clone(), cursor.clone())
+        .expect("checkpoint should save to storage");
+
+    let loaded = checkpoint_store
+        .load(&key)
+        .expect("checkpoint should load from storage")
+        .expect("checkpoint should exist");
+
+    assert_eq!(loaded, cursor);
+    let records = store.all_records();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].collection, "candle_checkpoints");
+    assert_eq!(records[0].key, b"binance_spot:BTCUSDT:1m".to_vec());
+    assert_eq!(records[0].metadata.tags.get("kind").map(String::as_str), Some("candle_checkpoint"));
 }
 
 #[tokio::test]

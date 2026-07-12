@@ -198,10 +198,14 @@ impl ProductionServerState {
     where
         S: HistoricalPageFetcher + ?Sized,
     {
-        let result = crate::market_data::candle_acquisition::run_candle_acquisition_once(
+        let checkpoint_store = crate::market_data::candle_acquisition::StorageBackedCandleCheckpointStore::new(
+            self.market_data_store.as_ref(),
+        );
+        let result = crate::market_data::candle_acquisition::run_candle_acquisition_once_with_checkpoints(
             &self.config.market_data_candle_acquisition,
             source,
             self.market_data_store.as_ref(),
+            &checkpoint_store,
         )
         .await;
         self.record_candle_acquisition_result(&result);
