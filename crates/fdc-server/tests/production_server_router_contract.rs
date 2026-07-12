@@ -328,6 +328,74 @@ async fn market_data_contract_acquisition_run_once_reports_disabled_defaults() {
 }
 
 #[tokio::test]
+async fn market_data_contract_acquisition_scheduler_status_reports_disabled_defaults() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).unwrap(),
+    );
+    let app = build_production_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/contracts/acquisition/scheduler/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["enabled"], false);
+    assert_eq!(json["data"]["running"], false);
+    assert_eq!(json["data"]["suppressed"], false);
+    assert_eq!(json["data"]["total_runs"], 0);
+    assert_eq!(json["data"]["storage_records_written"], 0);
+}
+
+#[tokio::test]
+async fn market_data_contract_acquisition_scheduler_status_reports_enabled_config() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([
+            ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+            ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+            ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+            ("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_ENABLED", "1"),
+            (
+                "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_INTERVAL_SECONDS",
+                "120",
+            ),
+            ("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_JITTER_SECONDS", "5"),
+            (
+                "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                "4",
+            ),
+        ])
+        .unwrap(),
+    );
+    let app = build_production_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/contracts/acquisition/scheduler/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["enabled"], true);
+    assert_eq!(json["data"]["interval_seconds"], 120);
+    assert_eq!(json["data"]["jitter_seconds"], 5);
+    assert_eq!(json["data"]["max_consecutive_failures"], 4);
+}
+
+#[tokio::test]
 async fn market_data_contract_acquisition_status_reports_last_run() {
     let runtime = ServerRuntimeConfig::from_env_pairs([
         ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),

@@ -28,6 +28,7 @@ use crate::{
         MarketDataCandleRecord, MarketDataCandlesResponse,
         MarketDataContractAcquisitionRunOnceResponse,
         MarketDataContractAcquisitionRunStatusResponse,
+        MarketDataContractAcquisitionSchedulerStatusResponse,
         MarketDataContractAcquisitionStatusResponse, MarketDataLiveState,
         MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditEntryResponse,
         MarketDataStorageMaintenanceAuditResetRequest,
@@ -118,6 +119,39 @@ pub fn contract_acquisition_status(
         max_pages_per_run: config.max_pages_per_run,
         last_run,
         last_error: state.market_data_contract_acquisition_last_error(),
+    }
+}
+
+pub async fn contract_acquisition_scheduler_status(
+    state: &ProductionServerState,
+) -> MarketDataContractAcquisitionSchedulerStatusResponse {
+    let snapshot = state
+        .market_data_contract_acquisition_scheduler()
+        .snapshot()
+        .await;
+    MarketDataContractAcquisitionSchedulerStatusResponse {
+        enabled: snapshot.enabled,
+        running: snapshot.running,
+        suppressed: snapshot.suppressed,
+        interval_seconds: snapshot.interval_seconds,
+        jitter_seconds: snapshot.jitter_seconds,
+        max_consecutive_failures: snapshot.max_consecutive_failures,
+        consecutive_failures: snapshot.consecutive_failures,
+        total_runs: snapshot.total_runs,
+        successful_runs: snapshot.successful_runs,
+        failed_runs: snapshot.failed_runs,
+        skipped_runs: snapshot.skipped_runs,
+        last_started_at: snapshot.last_started_at.map(|ts| ts.to_rfc3339()),
+        last_finished_at: snapshot.last_finished_at.map(|ts| ts.to_rfc3339()),
+        last_status: snapshot.last_status,
+        last_error: snapshot.last_error,
+        next_run_at: snapshot.next_run_at.map(|ts| ts.to_rfc3339()),
+        tasks_started: snapshot.tasks_started,
+        tasks_completed: snapshot.tasks_completed,
+        pages_fetched: snapshot.pages_fetched,
+        envelopes_received: snapshot.envelopes_received,
+        storage_records_written: snapshot.storage_records_written,
+        audit_records_written: snapshot.audit_records_written,
     }
 }
 
