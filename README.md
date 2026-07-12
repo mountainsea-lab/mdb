@@ -13,7 +13,7 @@
 - **默认部署方式**：Docker Compose，本地监听 `127.0.0.1:18080`，容器内监听 `0.0.0.0:18080`。
 - **默认存储形态**：tiered market-data storage，L1 内存层加 L2 redb、L3 DuckDB、L4 RocksDB 持久化层。
 - **默认安全模型**：live acquisition 可手动启用但不自动启动；resume/reset 等恢复类操作通过环境变量显式开关保护。
-- **近期完成重点**：P38 查询 API 加固、P39 生产 runbook 与配置包、P40 生产运行时装配修复与 `/version` 就绪端点。
+- **近期完成重点**：P38 查询 API 加固、P39 生产 runbook 与配置包、P40 生产运行时装配修复与 `/version` 就绪端点，以及 Binance Futures USD perpetual OHLCV/candle 长期自动维护 scheduler。
 
 ## 已具备的可验证能力
 
@@ -30,7 +30,9 @@
 ### 行情采集与查询
 
 - 支持通过 `crates/fdc-adapter/barter` 接入 Barter 生态的 Binance spot/futures live 与 historical 数据能力。
+- 支持 Binance Futures USD perpetual candle/OHLCV 通过 `fdc-barter -> fdc-orchestrator -> fdc-storage` 写入 canonical `candles`，并可由默认关闭的 in-process scheduler 做长期自动维护。
 - `GET /market-data/trades` 已完成生产化查询加固：限制 `limit` 范围、规范化 symbol、返回稳定查询元数据，并对非法参数返回确定的 HTTP 400 JSON 错误。
+- `GET /market-data/candles` 是后续 factor research 的 canonical candle 输入面；`contract_checkpoints` 与 `contract_acquisition_audits` 仅是维护元数据。
 - live 采集支持手动 start/stop/status/resume，并暴露失败次数、重试状态、suppressed 状态和安全恢复门禁信息。
 
 ### 存储与维护
@@ -52,13 +54,14 @@
 | `binance_futures_usd` | Perpetual | Live | Trade, OrderBookL1, OrderBook, Liquidation | BTC/USDT, ETH/USDT | 已接入结构化 mapper 与示例 |
 | `binance_spot` | Spot | Historical REST | Candle/OHLCV | 请求指定 symbol/interval/time range | 已接入 adapter-owned REST descriptor/executor |
 | `binance_spot` | Spot | Historical REST | Trade | 请求指定 symbol/time range/cursor | 已接入 adapter-owned REST descriptor/executor |
+| `binance_futures_usd` | Perpetual | Historical REST | Candle/OHLCV | 请求指定 symbol/interval/time range | 已接入生产 contract candle acquisition；支持 manual run-once、startup autostart 和长期 scheduler 维护 |
 
 ### 能力矩阵声明/规划支持
 
 | Source | 市场类型 | Live 数据类型 | Historical 数据类型 | 说明 |
 |---|---|---|---|---|
 | `binance_spot` | Spot | Trade, OrderBookL1, OrderBook | Candle, Trade | 当前主线，historical 已实现 Binance Spot focused REST |
-| `binance_futures_usd` | Perpetual | Trade, OrderBookL1, OrderBook, Liquidation | - | 当前 live 主线之一 |
+| `binance_futures_usd` | Perpetual | Trade, OrderBookL1, OrderBook, Liquidation | Candle/OHLCV | 当前 live 主线之一；生产 canonical acquisition 当前只开放 candle/OHLCV，其他 derivatives historical endpoint 仍不作为 factor 输入面 |
 | `bybit_spot` | Spot | Trade, OrderBookL1, OrderBook | - | capability map 声明，生产验证程度低于 Binance 主线 |
 | `bybit_perpetuals_usd` | Perpetual | Trade, OrderBookL1, OrderBook | - | capability map 声明 |
 | `kraken` | Spot | Trade, OrderBookL1 | - | capability map 声明 |
@@ -75,8 +78,10 @@
 
 当前限制：
 
-- Historical REST 支持目前主要集中在 Binance Spot；多交易所 historical provider 是后续工作。
-- Historical 已覆盖 Binance Spot OHLCV 和 trades，但 historical order-book reconstruction 尚未实现。
+- Historical REST 支持目前集中在 Binance Spot OHLCV/trades 和 Binance Futures USD perpetual OHLCV/candles；多交易所 historical provider 是后续工作。
+- Binance Futures USD perpetual 的长期自动维护只覆盖 OHLCV/candle，默认关闭；需要显式设置 `FDC_MARKET_DATA_CONTRACTS_ENABLED=1` 与 `FDC_MARKET_DATA_CONTRACTS_SCHEDULER_ENABLED=1` 后启动服务器。
+- Funding rate、open interest、mark/index price、liquidation 等非 candle 衍生数据暂不进入生产 canonical acquisition，也不作为 factor 输入面。
+- Historical order-book reconstruction 尚未实现。
 - L2 order book payload 会保留 snapshot/update、levels、timestamps 和 sequence where available；durable book reconstruction、gap detection、out-of-order repair 仍是后续工作。
 - 外部网络 live/historical smoke 需要显式环境变量和公网访问，常规验证默认依赖 offline contract tests。
 - `fdc-barter` bounded helpers 到通用 `fdc-ingestion` source pipeline 的跨模块 glue 仍是后续工作。

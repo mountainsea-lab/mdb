@@ -78,7 +78,7 @@ pub fn supported_crypto_market_data_capabilities() -> Vec<BarterSourceCapabiliti
             "binance_futures_usd",
             Perpetual,
             vec![Trade, OrderBookL1, OrderBook, Liquidation],
-            vec![],
+            vec![Candle],
             vec![],
         ),
         BarterSourceCapabilities::crypto_exchange(
