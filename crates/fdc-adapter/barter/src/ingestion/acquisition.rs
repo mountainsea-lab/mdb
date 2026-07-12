@@ -10,9 +10,10 @@ use std::time::Duration;
 use crate::{
     error::{BarterAdapterError, Result},
     ingestion::{
-        execute_binance_spot_historical_trades_rest, execute_binance_spot_ohlcv_rest,
-        live::map_live_market_data_result, BarterIngestionEnvelope, HistoricalBackfillPage,
-        HistoricalBackfillRequest, HistoricalRestExecutor,
+        execute_binance_futures_usd_ohlcv_rest, execute_binance_spot_historical_trades_rest,
+        execute_binance_spot_ohlcv_rest, live::map_live_market_data_result,
+        BarterIngestionEnvelope, HistoricalBackfillPage, HistoricalBackfillRequest,
+        HistoricalRestExecutor,
     },
     model::HistoricalCursor,
 };
@@ -172,6 +173,27 @@ impl HistoricalPageFetcher for BinanceSpotOhlcvHistoricalPageFetcher<'_> {
         request: HistoricalBackfillRequest,
     ) -> Result<HistoricalBackfillPage> {
         execute_binance_spot_ohlcv_rest(self.executor, request).await
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct BinanceFuturesUsdOhlcvHistoricalPageFetcher<'a> {
+    executor: &'a dyn HistoricalRestExecutor,
+}
+
+impl<'a> BinanceFuturesUsdOhlcvHistoricalPageFetcher<'a> {
+    pub fn new(executor: &'a dyn HistoricalRestExecutor) -> Self {
+        Self { executor }
+    }
+}
+
+#[async_trait]
+impl HistoricalPageFetcher for BinanceFuturesUsdOhlcvHistoricalPageFetcher<'_> {
+    async fn fetch_page(
+        &self,
+        request: HistoricalBackfillRequest,
+    ) -> Result<HistoricalBackfillPage> {
+        execute_binance_futures_usd_ohlcv_rest(self.executor, request).await
     }
 }
 
