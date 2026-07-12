@@ -218,6 +218,19 @@ set +a
 CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo run -p fdc-server
 ```
 
+Long-term automatic maintenance configuration keeps the same acquisition bounds and enables the in-process contract scheduler. Use `AUTOSTART=0` when you want recurring maintenance without an extra startup run:
+
+```bash
+export FDC_MARKET_DATA_CONTRACTS_ENABLED=1
+export FDC_MARKET_DATA_CONTRACTS_AUTOSTART=0
+export FDC_MARKET_DATA_CONTRACTS_SCHEDULER_ENABLED=1
+export FDC_MARKET_DATA_CONTRACTS_SCHEDULER_INTERVAL_SECONDS=300
+export FDC_MARKET_DATA_CONTRACTS_SCHEDULER_JITTER_SECONDS=5
+export FDC_MARKET_DATA_CONTRACTS_SCHEDULER_MAX_CONSECUTIVE_FAILURES=3
+```
+
+The scheduler starts only when both contract acquisition and the contract scheduler are enabled. It runs the same bounded acquisition path as `run-once`, uses `contract_checkpoints` to continue from prior progress, prevents overlapping runs, and suppresses itself after the configured number of consecutive failures. Suppression is an operator signal: inspect status/audits, fix the cause, then restart the service or use the manual `run-once` fallback after deciding retry is safe.
+
 For a manual operator run, keep `FDC_MARKET_DATA_CONTRACTS_ENABLED=1`. `FDC_MARKET_DATA_CONTRACTS_AUTOSTART` can be `0` or unset if you do not want collection during server startup. Then trigger one bounded run:
 
 ```bash
@@ -237,6 +250,7 @@ Expected checks:
 
 ```bash
 curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/contracts/acquisition/status'
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/contracts/acquisition/scheduler/status'
 curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/candles?symbol=BTCUSDT&limit=10'
 ```
 
