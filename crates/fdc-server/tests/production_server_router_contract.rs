@@ -1,10 +1,18 @@
-use std::{collections::BTreeSet, sync::Arc};
+use std::{collections::BTreeSet, sync::{Arc, Mutex}};
 
+use async_trait::async_trait;
 use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
+use fdc_barter::{
+    BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
+    BarterMarketPayload, BarterMarketType, CandlePayload, DataQualityFlags, DecimalQuantity,
+    HistoricalBackfillPage, HistoricalBackfillRequest, HistoricalPageFetcher,
+};
+use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{
+    market_data::candle_acquisition::expand_candle_backfill_requests,
     MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig,
     MarketDataStorageRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
     build_market_data_store_from_runtime_config, build_production_router,
@@ -13,7 +21,75 @@ use fdc_storage::{
     QueryableMarketDataStore, QueryableStorage, StorageQuery, StorageTier, StorageTierScope,
     StorageWriteBatch, StorageWriteMetadata, StorageWriteRecord, StorageWriteSink,
 };
+use rust_decimal::Decimal;
 use tower::ServiceExt;
+
+fn candle_status_envelope(symbol: &str, sequence: &str) -> BarterIngestionEnvelope {
+    let event = BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_spot".to_string(),
+        symbol: Symbol::new(symbol),
+        market_type: BarterMarketType::Spot,
+        kind: BarterMarketDataKind::Candle,
+        timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_000),
+        received_at: TimestampNs::from_nanos(1_700_000_000_000_000_010),
+        payload: BarterMarketPayload::Candle(CandlePayload {
+            interval: Some("1m".to_string()),
+            open_time: TimestampNs::from_nanos(1_700_000_000_000_000_000),
+            close_time: TimestampNs::from_nanos(1_700_000_060_000_000_000),
+            open: Price::new(Decimal::new(42_000_00, 2)),
+            high: Price::new(Decimal::new(42_100_00, 2)),
+            low: Price::new(Decimal::new(41_900_00, 2)),
+            close: Price::new(Decimal::new(42_050_00, 2)),
+            volume: DecimalQuantity::new(25, 1),
+            trade_count: Some(100),
+            quote_volume: Some(DecimalQuantity::new(1_000_000, 2)),
+        }),
+        sequence: Some(sequence.to_string()),
+        checkpoint: None,
+    };
+
+    let mut envelope = BarterIngestionEnvelope::from_backfill_event(
+        "barter:binance_spot:historical:candle",
+        event,
+    );
+    envelope.envelope_id = format!("historical-candle-status-env-{sequence}");
+    envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
+    envelope.quality = DataQualityFlags {
+        is_replay: false,
+        is_backfill: true,
+        is_duplicate_candidate: false,
+        has_gap_before: false,
+        is_out_of_order: false,
+    };
+    envelope
+}
+
+#[derive(Debug)]
+struct ScriptedCandleStatusSource {
+    pages: Mutex<Vec<HistoricalBackfillPage>>,
+}
+
+impl ScriptedCandleStatusSource {
+    fn new(pages: Vec<HistoricalBackfillPage>) -> Self {
+        Self { pages: Mutex::new(pages) }
+    }
+}
+
+#[async_trait]
+impl HistoricalPageFetcher for ScriptedCandleStatusSource {
+    async fn fetch_page(
+        &self,
+        _request: HistoricalBackfillRequest,
+    ) -> fdc_barter::Result<HistoricalBackfillPage> {
+        let mut pages = self.pages.lock().expect("pages lock");
+        if pages.is_empty() {
+            panic!("scripted candle status source ran out of pages");
+        }
+        Ok(pages.remove(0))
+    }
+}
 
 fn runtime_storage_record(key: &str) -> StorageWriteRecord {
     let mut metadata = StorageWriteMetadata::default();
@@ -3028,4 +3104,71 @@ async fn production_live_start_with_enabled_config_updates_status_on_failure() {
         status_json["data"]["state"].as_str().unwrap(),
         "completed" | "failed"
     ));
+}
+
+#[tokio::test]
+async fn market_data_candle_acquisition_status_reports_disabled_by_default() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).unwrap(),
+    );
+    let router = build_production_router(state);
+
+    let json = p39_query_candles_status(
+        router,
+        "/market-data/candles/acquisition/status",
+        StatusCode::OK,
+    )
+    .await;
+
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["enabled"], false);
+    assert_eq!(json["data"]["autostart"], false);
+    assert_eq!(json["data"]["exchange"], "binance_spot");
+    assert_eq!(json["data"]["symbols"].as_array().unwrap().len(), 0);
+    assert_eq!(json["data"]["base_intervals"].as_array().unwrap().len(), 0);
+    assert_eq!(json["data"]["last_run"], serde_json::Value::Null);
+    assert_eq!(json["data"]["last_error"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn market_data_candle_acquisition_status_reports_last_run_summary() {
+    let runtime = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CANDLES_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CANDLES_SYMBOLS", "BTCUSDT"),
+        ("FDC_MARKET_DATA_CANDLES_BASE_INTERVALS", "1m"),
+        ("FDC_MARKET_DATA_CANDLES_START_NS", "1700000000000000000"),
+        ("FDC_MARKET_DATA_CANDLES_END_NS", "1700000060000000000"),
+    ])
+    .expect("runtime config should parse");
+    let state = ProductionServerState::new(runtime);
+    let request = expand_candle_backfill_requests(&state.config().market_data_candle_acquisition)
+        .expect("request should expand")
+        .remove(0);
+    let source = ScriptedCandleStatusSource::new(vec![HistoricalBackfillPage {
+        request,
+        envelopes: vec![candle_status_envelope("BTCUSDT", "status-seq-1")],
+        next_cursor: None,
+        complete: true,
+    }]);
+    state
+        .run_candle_acquisition_once_with_source(&source)
+        .await
+        .expect("state runner should complete");
+
+    let router = build_production_router(state);
+    let json = p39_query_candles_status(
+        router,
+        "/market-data/candles/acquisition/status",
+        StatusCode::OK,
+    )
+    .await;
+
+    assert_eq!(json["data"]["enabled"], true);
+    assert_eq!(json["data"]["symbols"], serde_json::json!(["BTCUSDT"]));
+    assert_eq!(json["data"]["base_intervals"], serde_json::json!(["1m"]));
+    assert_eq!(json["data"]["last_run"]["tasks_started"], 1);
+    assert_eq!(json["data"]["last_run"]["tasks_completed"], 1);
+    assert_eq!(json["data"]["last_run"]["pages_fetched"], 1);
+    assert_eq!(json["data"]["last_run"]["storage_records_written"], 1);
+    assert_eq!(json["data"]["last_error"], serde_json::Value::Null);
 }

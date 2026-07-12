@@ -10,7 +10,8 @@ use crate::{
     ProductionServerState,
     market_data::{
         model::{
-            LiveMarketDataStatusResponse, MarketDataCandlesResponse,
+            LiveMarketDataStatusResponse, MarketDataCandleAcquisitionStatusResponse,
+            MarketDataCandlesResponse,
             MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditResetRequest,
             MarketDataStorageMaintenanceAuditResetResponse,
             MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
@@ -24,7 +25,7 @@ use crate::{
             StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
         service::{
-            StorageMaintenanceHttpStatus, live_status, query_candles, query_trades,
+            StorageMaintenanceHttpStatus, candle_acquisition_status, live_status, query_candles, query_trades,
             reset_storage_maintenance_audit, reset_storage_maintenance_scheduler, resume_live,
             resume_storage_maintenance_scheduler, run_storage_maintenance_once, start_live,
             start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
@@ -102,6 +103,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
             post(storage_maintenance_scheduler_resume_handler),
         )
         .route("/market-data/trades", get(query_trades_handler))
+        .route(
+            "/market-data/candles/acquisition/status",
+            get(candle_acquisition_status_handler),
+        )
         .route("/market-data/candles", get(query_candles_handler))
         .with_state(state)
 }
@@ -171,6 +176,12 @@ async fn live_status_handler(
     State(state): State<ProductionServerState>,
 ) -> Json<ServerApiResponse<LiveMarketDataStatusResponse>> {
     Json(ServerApiResponse::success(live_status(&state)))
+}
+
+async fn candle_acquisition_status_handler(
+    State(state): State<ProductionServerState>,
+) -> Json<ServerApiResponse<MarketDataCandleAcquisitionStatusResponse>> {
+    Json(ServerApiResponse::success(candle_acquisition_status(&state)))
 }
 
 async fn storage_status_handler(

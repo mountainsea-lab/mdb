@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::Router;
 use fdc_barter::HistoricalPageFetcher;
@@ -27,6 +27,9 @@ pub struct ProductionServerState {
     market_data_storage_maintenance_audit: Arc<MarketDataStorageMaintenanceAuditLog>,
     market_data_storage_maintenance_scheduler: StorageMaintenanceSchedulerState,
     market_data_storage_maintenance_scheduler_task: StorageMaintenanceSchedulerTaskHandle,
+    market_data_candle_acquisition_last_run:
+        Arc<Mutex<Option<crate::market_data::candle_acquisition::CandleAcquisitionRunStatus>>>,
+    market_data_candle_acquisition_last_error: Arc<Mutex<Option<String>>>,
 }
 
 impl ProductionServerState {
@@ -42,6 +45,8 @@ impl ProductionServerState {
             market_data_storage_maintenance_scheduler,
             market_data_storage_maintenance_scheduler_task:
                 StorageMaintenanceSchedulerTaskHandle::default(),
+            market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
+            market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -69,6 +74,8 @@ impl ProductionServerState {
             market_data_storage_maintenance_audit,
             market_data_storage_maintenance_scheduler,
             market_data_storage_maintenance_scheduler_task,
+            market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
+            market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -87,6 +94,8 @@ impl ProductionServerState {
             market_data_storage_maintenance_scheduler,
             market_data_storage_maintenance_scheduler_task:
                 StorageMaintenanceSchedulerTaskHandle::default(),
+            market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
+            market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -116,6 +125,46 @@ impl ProductionServerState {
         &self,
     ) -> StorageMaintenanceSchedulerTaskHandle {
         self.market_data_storage_maintenance_scheduler_task.clone()
+    }
+
+    pub fn market_data_candle_acquisition_last_run(
+        &self,
+    ) -> Option<crate::market_data::candle_acquisition::CandleAcquisitionRunStatus> {
+        self.market_data_candle_acquisition_last_run
+            .lock()
+            .expect("candle acquisition status lock")
+            .clone()
+    }
+
+    pub fn market_data_candle_acquisition_last_error(&self) -> Option<String> {
+        self.market_data_candle_acquisition_last_error
+            .lock()
+            .expect("candle acquisition error lock")
+            .clone()
+    }
+
+    fn record_candle_acquisition_result(
+        &self,
+        result: &Result<crate::market_data::candle_acquisition::CandleAcquisitionRunStatus>,
+    ) {
+        match result {
+            Ok(status) => {
+                *self
+                    .market_data_candle_acquisition_last_run
+                    .lock()
+                    .expect("candle acquisition status lock") = Some(status.clone());
+                *self
+                    .market_data_candle_acquisition_last_error
+                    .lock()
+                    .expect("candle acquisition error lock") = None;
+            }
+            Err(error) => {
+                *self
+                    .market_data_candle_acquisition_last_error
+                    .lock()
+                    .expect("candle acquisition error lock") = Some(error.to_string());
+            }
+        }
     }
 
     pub async fn ingest_test_trade(&self, symbol: &str, trade_id: &str) -> Result<()> {
@@ -149,12 +198,14 @@ impl ProductionServerState {
     where
         S: HistoricalPageFetcher + ?Sized,
     {
-        crate::market_data::candle_acquisition::run_candle_acquisition_once(
+        let result = crate::market_data::candle_acquisition::run_candle_acquisition_once(
             &self.config.market_data_candle_acquisition,
             source,
             self.market_data_store.as_ref(),
         )
-        .await
+        .await;
+        self.record_candle_acquisition_result(&result);
+        result
     }
 
     pub async fn start_candle_acquisition_autostart_if_enabled(
@@ -163,14 +214,18 @@ impl ProductionServerState {
         if !(self.config.market_data_candle_acquisition.enabled
             && self.config.market_data_candle_acquisition.autostart)
         {
-            return Ok(crate::market_data::candle_acquisition::CandleAcquisitionRunStatus::default());
+            let result = Ok(crate::market_data::candle_acquisition::CandleAcquisitionRunStatus::default());
+            self.record_candle_acquisition_result(&result);
+            return result;
         }
 
-        crate::market_data::candle_acquisition::run_binance_spot_candle_acquisition_once(
+        let result = crate::market_data::candle_acquisition::run_binance_spot_candle_acquisition_once(
             &self.config.market_data_candle_acquisition,
             self.market_data_store.as_ref(),
         )
-        .await
+        .await;
+        self.record_candle_acquisition_result(&result);
+        result
     }
 }
 
