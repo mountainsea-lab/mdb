@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use fdc_barter::{
     BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
     BarterMarketPayload, BarterMarketType, CandlePayload, DataQualityFlags, DecimalQuantity,
-    TradePayload, TradeSide,
+    FundingRatePayload, TradePayload, TradeSide,
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_ingestion::{SourceEnvelope, SourceType};
@@ -88,6 +88,43 @@ fn sample_candle_envelope() -> BarterIngestionEnvelope {
     let mut envelope =
         BarterIngestionEnvelope::from_event("barter:binance_spot", sample_candle_event());
     envelope.envelope_id = "candle-env-1".to_string();
+    envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
+    envelope.quality = DataQualityFlags {
+        is_replay: false,
+        is_backfill: true,
+        is_duplicate_candidate: false,
+        has_gap_before: false,
+        is_out_of_order: false,
+    };
+    envelope
+}
+
+fn sample_funding_rate_event() -> BarterMarketEvent {
+    BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_futures_usd".to_string(),
+        symbol: Symbol::new("BTCUSDT"),
+        market_type: BarterMarketType::Perpetual,
+        kind: BarterMarketDataKind::FundingRate,
+        timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_000),
+        received_at: TimestampNs::from_nanos(1_700_000_000_000_000_010),
+        payload: BarterMarketPayload::FundingRate(FundingRatePayload {
+            funding_rate: Decimal::new(125, 6),
+            funding_time: TimestampNs::from_nanos(1_700_000_000_000_000_000),
+            mark_price: Some(Price::new(Decimal::new(42_000_00, 2))),
+        }),
+        sequence: Some("funding-seq-1".to_string()),
+        checkpoint: None,
+    }
+}
+
+fn sample_funding_rate_envelope() -> BarterIngestionEnvelope {
+    let mut envelope = BarterIngestionEnvelope::from_event(
+        "barter:binance_futures_usd",
+        sample_funding_rate_event(),
+    );
+    envelope.envelope_id = "funding-env-1".to_string();
     envelope.emitted_at = TimestampNs::from_nanos(1_700_000_000_000_000_020);
     envelope.quality = DataQualityFlags {
         is_replay: false,
@@ -296,6 +333,25 @@ fn market_data_candle_maps_to_generic_aggregate_storage_tags() {
         record.metadata.tags.get("record.kind").map(String::as_str),
         Some("candle")
     );
+}
+
+#[test]
+fn derivatives_payload_maps_to_raw_market_data() {
+    let source = barter_envelope_to_source_envelope(sample_funding_rate_envelope());
+
+    let dto = barter_event_to_market_data_dto(&source).expect("funding rate should map to DTO");
+
+    assert_eq!(dto.kind, MarketDataKind::Raw);
+    assert_eq!(dto.exchange, "binance_futures_usd");
+    assert_eq!(dto.symbol.as_str(), "BTCUSDT");
+    assert!(dto.quality.is_backfill);
+    match dto.payload {
+        MarketDataPayload::Raw(raw) => {
+            assert!(raw.description.contains("funding_rate"));
+            assert!(raw.description.contains("0.000125"));
+        }
+        other => panic!("expected raw payload, got {other:?}"),
+    }
 }
 
 #[tokio::test]

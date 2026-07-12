@@ -62,6 +62,10 @@ pub fn barter_kind_label(kind: BarterMarketDataKind) -> &'static str {
         BarterMarketDataKind::OrderBook => "order_book",
         BarterMarketDataKind::Candle => "candle",
         BarterMarketDataKind::Liquidation => "liquidation",
+        BarterMarketDataKind::FundingRate => "funding_rate",
+        BarterMarketDataKind::OpenInterest => "open_interest",
+        BarterMarketDataKind::MarkPrice => "mark_price",
+        BarterMarketDataKind::IndexPrice => "index_price",
     }
 }
 

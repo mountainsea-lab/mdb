@@ -62,6 +62,12 @@ fn barter_kind_to_market_data_kind(
         (BarterMarketDataKind::Liquidation, BarterMarketPayload::Liquidation(_)) => {
             Ok(MarketDataKind::Liquidation)
         }
+        (BarterMarketDataKind::FundingRate, BarterMarketPayload::FundingRate(_))
+        | (BarterMarketDataKind::OpenInterest, BarterMarketPayload::OpenInterest(_))
+        | (BarterMarketDataKind::MarkPrice, BarterMarketPayload::MarkPrice(_))
+        | (BarterMarketDataKind::IndexPrice, BarterMarketPayload::IndexPrice(_)) => {
+            Ok(MarketDataKind::Raw)
+        }
         (_, BarterMarketPayload::Raw(_)) => Ok(MarketDataKind::Raw),
         (kind, _) => Err(Error::validation(format!(
             "barter event kind {} does not match payload",
@@ -119,6 +125,55 @@ fn barter_payload_to_market_data_payload(payload: &BarterMarketPayload) -> Marke
                 ),
             })
         }
+        BarterMarketPayload::FundingRate(funding) => MarketDataPayload::Raw(RawMarketDataDto {
+            description: format!(
+                "funding_rate rate={} funding_time={} mark_price={}",
+                funding.funding_rate,
+                funding.funding_time.as_nanos(),
+                funding
+                    .mark_price
+                    .map(|price| price.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ),
+        }),
+        BarterMarketPayload::OpenInterest(open_interest) => {
+            MarketDataPayload::Raw(RawMarketDataDto {
+                description: format!(
+                    "open_interest value={} timestamp={}",
+                    open_interest.open_interest,
+                    open_interest.timestamp.as_nanos()
+                ),
+            })
+        }
+        BarterMarketPayload::MarkPrice(mark_price) => MarketDataPayload::Raw(RawMarketDataDto {
+            description: format!(
+                "mark_price mark={} index={} estimated_settle={} funding_rate={} next_funding_time={}",
+                mark_price.mark_price,
+                mark_price
+                    .index_price
+                    .map(|price| price.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                mark_price
+                    .estimated_settle_price
+                    .map(|price| price.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                mark_price
+                    .funding_rate
+                    .map(|rate| rate.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                mark_price
+                    .next_funding_time
+                    .map(|time| time.as_nanos().to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ),
+        }),
+        BarterMarketPayload::IndexPrice(index_price) => MarketDataPayload::Raw(RawMarketDataDto {
+            description: format!(
+                "index_price price={} timestamp={}",
+                index_price.index_price,
+                index_price.timestamp.as_nanos()
+            ),
+        }),
         BarterMarketPayload::Raw(raw) => MarketDataPayload::Raw(RawMarketDataDto {
             description: raw.description.clone(),
         }),
