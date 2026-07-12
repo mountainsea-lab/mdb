@@ -258,3 +258,28 @@ rtk cargo check -p fdc-orchestrator
 
 - Final real-network `historical_binance_spot_ohlcv` smoke was not rerun during this status update.
 - Broader production query APIs for derivatives are not yet exposed as server routes.
+- Before moving to the next development stage, complete candle acquisition maintenance: configuration-file-driven symbols/intervals, bounded historical backfill execution, checkpoint/retry behavior, and runbook/status evidence.
+
+**Next-stage candle acquisition maintenance decision:**
+
+- Use a configuration file as the initial control plane for candle acquisition. The first version should specify `exchange`, `symbols`, `base_intervals`, optional `verify_intervals`, `start/end`, page limits, max pages, and autostart/manual-run behavior.
+- Do not default to collecting every exchange-native interval. Collect key base intervals first, with `1m` as the recommended canonical base interval for liquid symbols.
+- Generate higher intervals such as `5m`, `15m`, `30m`, `1h`, `4h`, and `1d` from the base interval in a later aggregation stage.
+- Optionally collect low-frequency official candles such as `1h` or `1d` only as verification/reference data, not as the primary canonical source.
+- Treat this maintenance slice as a gate before Stage 5 / analytics work: downstream factor development should not depend on ad-hoc examples or manual candle fetches.
+
+Suggested initial config shape:
+
+```toml
+[market_data.candles]
+enabled = true
+autostart = false
+exchange = "binance_spot"
+symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+base_intervals = ["1m"]
+verify_intervals = ["1h", "1d"]
+start = "2024-01-01T00:00:00Z"
+end = null
+limit_per_page = 1000
+max_pages_per_run = 10
+```

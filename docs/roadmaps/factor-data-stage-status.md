@@ -41,7 +41,7 @@ docs: mark <stage> validated
 | Stage 2 | `fdc-orchestrator` | Adapter envelope → storage write input | `validated` | `dd4e273`, `c6f1fb0` | `rtk cargo test -p fdc-orchestrator --test orchestrator_boundary_contract -- --nocapture` → `9 passed`; `rtk cargo check -p fdc-orchestrator` → `0 errors` | Structured `MarketDataDto` + `StorageWriteRecord` tags/metadata |
 | Stage 3 | `fdc-storage` | Candle generic write/query and derivatives storage mapping | `validated` | `b41d5d1`, `c6f1fb0` | `rtk cargo test -p fdc-server --test realtime_mvp_contract -- --nocapture` → `3 passed`; orchestrator storage mapping contract → `9 passed` | `MarketDataQuery::for_candles()`, collections `candles`, `funding_rates`, `open_interest`, `mark_prices`, `index_prices` |
 | Stage 4 | `fdc-server` | Candle 受控查询接口和运行时验证 | `validated` | `b41d5d1` | `rtk cargo test -p fdc-server --test production_server_router_contract p39_market_data_candles_query_returns_candle_records -- --nocapture` → `1 passed` | `GET /market-data/candles?symbol=<SYMBOL>&limit=<N>` |
-| Stage 5 | Spot data | 现货数据补齐 | `planned` | - | 待合约链路 validated | Spot adapter/storage/query contract |
+| Stage 5 | Candle acquisition maintenance | 配置化 candle 采集、维护、checkpoint、runbook | `planned` | - | 待 Stage 2-4 validated；必须先完成本阶段再进入 analytics/更广 spot 扩展 | Config-driven candle backfill + maintenance contract |
 | Stage 6 | `fdc-analytics` | 因子计算 | `planned` | - | 待数据采集、存储、查询闭环 validated | Factor input datasets |
 
 ## 4. Stage 完成记录模板
@@ -226,3 +226,44 @@ storage access_pattern=Warm
 - 多 symbol / 多 interval candle 回补调度、checkpoint 连续性和 production runbook 仍需后续切片。
 
 **下一阶段建议：** 进入 Stage 5 / Stage 6 前，优先补 derivatives 查询 API 或 candle 回补 runbook，并把真实网络 smoke 纳入最终验收。
+
+
+## 7. Stage 5 planned gate：Candle acquisition maintenance
+
+**状态：** `planned`  
+**规划日期：** `2026-07-12`  
+**原因：** 当前 candle 下游 DTO/storage/query 闭环已 validated，但启动服务不会自动按币种和周期采集 candle。进入下一阶段因子或更广 spot 开发前，需要先把 candle 采集维护产品化，避免依赖 ad-hoc examples。
+
+**设计决策：**
+
+- 前期通过配置文件指定需要采集的币种和周期。
+- 不建议默认采集所有周期。优先采集关键基础周期，推荐 `1m` 作为 canonical base interval。
+- 其他周期优先由基础周期聚合生成，例如 `5m`、`15m`、`30m`、`1h`、`4h`、`1d`。
+- 可选采集交易所官方 `1h` / `1d` 等低频周期用于校验，不作为主数据源。
+
+**第一版建议配置 contract：**
+
+```toml
+[market_data.candles]
+enabled = true
+autostart = false
+exchange = "binance_spot"
+symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+base_intervals = ["1m"]
+verify_intervals = ["1h", "1d"]
+start = "2024-01-01T00:00:00Z"
+end = null
+limit_per_page = 1000
+max_pages_per_run = 10
+```
+
+**Stage 5 必须交付：**
+
+1. 配置文件解析和校验，覆盖 symbols、base intervals、verify intervals、时间范围、page/record limit。
+2. 手动触发或 autostart-gated candle backfill runner。
+3. 写入现有 `candles` collection，并可通过 `GET /market-data/candles` 查询。
+4. checkpoint / cursor / retry / partial completion 状态可观察。
+5. runbook 记录如何启动、验证、暂停和恢复。
+6. 验收必须包含 fixture/offline contract；真实网络 smoke 可 opt-in，但需要记录命令和输出摘要。
+
+**进入后续阶段前置条件：** Stage 5 标记为 `validated`，并在本文档记录提交、验收命令、输出摘要和明确未完成项。
