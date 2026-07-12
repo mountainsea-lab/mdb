@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fdc_barter::BarterIngestionEnvelope;
-use fdc_core::{error::Error, types::TimestampNs, Result};
+use fdc_core::{Result, error::Error, types::TimestampNs};
 use fdc_orchestrator::pipeline::run_barter_envelopes_to_storage_once;
-use fdc_storage::{MarketDataQuery, QueryableMarketDataStore};
+use fdc_storage::QueryableMarketDataStore;
 use futures::{Stream, StreamExt};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,9 +95,7 @@ where
         }
     }
 
-    summary.market_data_store_records = market_data_store
-        .query(&MarketDataQuery::for_trades())
-        .len();
+    summary.market_data_store_records = market_data_store.record_count();
     summary.stopped_at = TimestampNs::now();
     Ok(summary)
 }

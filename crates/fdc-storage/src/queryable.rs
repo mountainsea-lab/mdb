@@ -4,10 +4,10 @@ use parking_lot::RwLock;
 use std::sync::Arc;
 
 use crate::{
-    apply_query_order_and_limit, record_matches_storage_query, QueryableStorage,
-    StorageHealthSnapshot, StorageMaintenanceOptions, StorageMaintenanceReport, StorageQuery,
-    StorageTierScope, StorageTieringPolicy, StorageWriteBatch, StorageWriteOutcome,
+    QueryableStorage, StorageHealthSnapshot, StorageMaintenanceOptions, StorageMaintenanceReport,
+    StorageQuery, StorageTierScope, StorageTieringPolicy, StorageWriteBatch, StorageWriteOutcome,
     StorageWriteRecord, StorageWriteSink, TierConfig, TieredStorageStore,
+    apply_query_order_and_limit, record_matches_storage_query,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +32,10 @@ impl MarketDataQuery {
 
     pub fn for_trades() -> Self {
         Self::new().with_collection("trades").with_kind("trade")
+    }
+
+    pub fn for_candles() -> Self {
+        Self::new().with_collection("candles").with_kind("candle")
     }
 
     pub fn with_namespace(mut self, namespace: impl Into<String>) -> Self {
@@ -349,10 +353,12 @@ mod tests {
         assert_eq!(snapshot.migration_queue_len, 0);
         assert!(snapshot.tiers.values().all(|tier| tier.enabled));
         assert!(snapshot.tiers.values().all(|tier| tier.initialized));
-        assert!(snapshot
-            .tiers
-            .values()
-            .all(|tier| tier.status == StorageTierHealthStatus::Healthy));
+        assert!(
+            snapshot
+                .tiers
+                .values()
+                .all(|tier| tier.status == StorageTierHealthStatus::Healthy)
+        );
     }
 
     #[tokio::test]

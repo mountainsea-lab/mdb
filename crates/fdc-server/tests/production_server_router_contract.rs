@@ -5,9 +5,9 @@ use axum::{
     http::{Request, StatusCode},
 };
 use fdc_server::{
-    build_market_data_store_from_runtime_config, build_production_router,
     MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig,
     MarketDataStorageRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
+    build_market_data_store_from_runtime_config, build_production_router,
 };
 use fdc_storage::{
     QueryableMarketDataStore, QueryableStorage, StorageQuery, StorageTier, StorageTierScope,
@@ -228,6 +228,29 @@ async fn p38_query_trades_status(
 
 async fn p38_query_trades(router: axum::Router, uri: &str) -> serde_json::Value {
     p38_query_trades_status(router, uri, StatusCode::OK).await
+}
+
+async fn p39_query_candles_status(
+    router: axum::Router,
+    uri: &str,
+    expected_status: StatusCode,
+) -> serde_json::Value {
+    let response = router
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .body(Body::empty())
+                .expect("candle query request should build"),
+        )
+        .await
+        .expect("candle query should respond");
+
+    assert_eq!(response.status(), expected_status);
+    response_body_json(response).await
+}
+
+async fn p39_query_candles(router: axum::Router, uri: &str) -> serde_json::Value {
+    p39_query_candles_status(router, uri, StatusCode::OK).await
 }
 
 async fn p38_ingest_fixture_trades(
@@ -451,11 +474,13 @@ async fn production_storage_status_reports_memory_defaults() {
     assert_eq!(json["data"]["tiers"][0]["tier"], "L1");
     assert_eq!(json["data"]["tiers"][0]["engine"], "memory");
     assert_eq!(json["data"]["tiers"][0]["durable_path_configured"], false);
-    assert!(json["data"]["tiers"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|tier| tier["engine"] == "memory"));
+    assert!(
+        json["data"]["tiers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tier| tier["engine"] == "memory")
+    );
 }
 
 #[tokio::test]
@@ -1666,21 +1691,25 @@ async fn storage_maintenance_audit_route_returns_successful_run_entry() {
     assert_eq!(json["data"]["total_recorded_entries"], 1);
     assert_eq!(json["data"]["reset_count"], 0);
     assert_eq!(json["data"]["total_cleared_entries"], 0);
-    assert!(json["data"]["last_recorded_at"]
-        .as_str()
-        .unwrap()
-        .contains('T'));
+    assert!(
+        json["data"]["last_recorded_at"]
+            .as_str()
+            .unwrap()
+            .contains('T')
+    );
     assert!(json["data"]["last_reset_at"].is_null());
     let entries = json["data"]["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["scanned_entries"], 0);
     assert_eq!(entries[0]["healthy_tiers"], 4);
-    assert!(entries[0]
-        .get("recorded_at")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .contains('T'));
+    assert!(
+        entries[0]
+            .get("recorded_at")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .contains('T')
+    );
 }
 
 #[tokio::test]
@@ -1963,14 +1992,18 @@ async fn storage_maintenance_audit_route_returns_metadata_after_reset() {
     assert_eq!(json["data"]["total_recorded_entries"], 1);
     assert_eq!(json["data"]["reset_count"], 1);
     assert_eq!(json["data"]["total_cleared_entries"], 1);
-    assert!(json["data"]["last_recorded_at"]
-        .as_str()
-        .unwrap()
-        .contains('T'));
-    assert!(json["data"]["last_reset_at"]
-        .as_str()
-        .unwrap()
-        .contains('T'));
+    assert!(
+        json["data"]["last_recorded_at"]
+            .as_str()
+            .unwrap()
+            .contains('T')
+    );
+    assert!(
+        json["data"]["last_reset_at"]
+            .as_str()
+            .unwrap()
+            .contains('T')
+    );
     assert!(json["data"]["entries"].as_array().unwrap().is_empty());
 }
 
@@ -2000,10 +2033,12 @@ async fn production_live_start_is_explicitly_disabled_by_default() {
     let json: serde_json::Value = serde_json::from_slice(&body).expect("json");
     assert_eq!(json["status"], "error");
     assert_eq!(json["data"]["state"], "idle");
-    assert!(json["message"]
-        .as_str()
-        .unwrap()
-        .contains("FDC_LIVE_ENABLED=1"));
+    assert!(
+        json["message"]
+            .as_str()
+            .unwrap()
+            .contains("FDC_LIVE_ENABLED=1")
+    );
 }
 
 #[tokio::test]
@@ -2491,6 +2526,36 @@ async fn p38_trades_query_rejects_malformed_limits_with_envelope() {
 }
 
 #[tokio::test]
+async fn p39_market_data_candles_query_returns_candle_records() {
+    let state = ProductionServerState::try_new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).expect("config should parse"),
+    )
+    .await
+    .expect("production state should build");
+    state
+        .ingest_test_candle("BTCUSDT")
+        .await
+        .expect("p39 candle fixture ingestion should write");
+
+    let router = build_production_router(state);
+    let json = p39_query_candles(router, "/market-data/candles?symbol=btcusdt&limit=10").await;
+
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["message"], serde_json::Value::Null);
+    assert_eq!(json["data"]["requested_limit"], 10);
+    assert_eq!(json["data"]["applied_limit"], 10);
+    assert_eq!(json["data"]["symbol"], "BTCUSDT");
+    assert_eq!(json["data"]["data_kind"], "candle");
+    assert_eq!(json["data"]["query_source"], "market_data_store");
+    assert_eq!(json["data"]["returned_records"], 1);
+    assert_eq!(json["data"]["records"][0]["kind"], "candle");
+    assert_eq!(
+        json["data"]["records"][0]["payload"]["payload"]["Candle"]["close"],
+        "42050.00"
+    );
+}
+
+#[tokio::test]
 async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     let root = unique_test_path("p37-acquisition-query-reopen");
     let config = p37_durable_config(&root, &[]);
@@ -2512,11 +2577,13 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     let before_router = build_production_router(first_state.clone());
     let before_json = p37_query_trades(before_router, "BTCUSDT", 10).await;
     p37_assert_trade_ids(&before_json, &["p37-btc-1", "p37-btc-2"]);
-    assert!(before_json["data"]["records"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|record| record["symbol"] == "BTCUSDT"));
+    assert!(
+        before_json["data"]["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|record| record["symbol"] == "BTCUSDT")
+    );
 
     drop(first_state);
 
@@ -2533,11 +2600,13 @@ async fn p37_tiered_acquisition_query_acceptance_survives_reopen() {
     let reopened_router = build_production_router(reopened_state);
     let reopened_json = p37_query_trades(reopened_router, "BTCUSDT", 10).await;
     p37_assert_trade_ids(&reopened_json, &["p37-btc-1", "p37-btc-2"]);
-    assert!(reopened_json["data"]["records"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|record| record["symbol"] == "BTCUSDT"));
+    assert!(
+        reopened_json["data"]["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|record| record["symbol"] == "BTCUSDT")
+    );
 
     let _ = std::fs::remove_dir_all(root);
 }

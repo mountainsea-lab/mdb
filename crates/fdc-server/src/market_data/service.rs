@@ -1,14 +1,14 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
 use fdc_barter::{
-    collect_live_market_data_envelopes, default_binance_spot_market_data_subscriptions,
-    init_binance_spot_market_data, BarterIngestionEnvelope, BarterMarketDataKind,
-    BarterMarketDataMode, BarterMarketEvent, BarterMarketPayload, BarterMarketType,
-    DataQualityFlags, LiveMarketDataSubscription, TradePayload, TradeSide,
+    BarterIngestionEnvelope, BarterMarketDataKind, BarterMarketDataMode, BarterMarketEvent,
+    BarterMarketPayload, BarterMarketType, CandlePayload, DataQualityFlags,
+    LiveMarketDataSubscription, TradePayload, TradeSide, collect_live_market_data_envelopes,
+    default_binance_spot_market_data_subscriptions, init_binance_spot_market_data,
 };
 use fdc_core::{
-    types::{Price, Symbol, TimestampNs},
     Result,
+    types::{Price, Symbol, TimestampNs},
 };
 use fdc_storage::{
     MarketDataQuery, QueryableMarketDataStore, StorageMaintenanceAuditEntry,
@@ -19,13 +19,15 @@ use futures::stream;
 use rust_decimal::Decimal;
 
 use crate::{
+    MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig, ProductionServerState,
+    RealtimeMarketDataMvpConfig, ServerRuntimeConfig,
     market_data::maintenance_audit::MARKET_DATA_STORAGE_MAINTENANCE_AUDIT_CAPACITY,
     market_data::maintenance_scheduler::{
         claim_storage_maintenance_scheduler_task, spawn_storage_maintenance_scheduler_into_handle,
     },
     market_data::model::{
-        MarketDataLiveState, MarketDataStorageHealthResponse,
-        MarketDataStorageMaintenanceAuditEntryResponse,
+        MarketDataCandleRecord, MarketDataCandlesResponse, MarketDataLiveState,
+        MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditEntryResponse,
         MarketDataStorageMaintenanceAuditResetRequest,
         MarketDataStorageMaintenanceAuditResetResponse, MarketDataStorageMaintenanceAuditResponse,
         MarketDataStorageMaintenanceRunRequest, MarketDataStorageMaintenanceRunResponse,
@@ -38,9 +40,7 @@ use crate::{
         MarketDataTradesResponse, ResumeLiveMarketDataRequest, ResumeLiveMarketDataResponse,
         StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
     },
-    run_realtime_barter_envelope_stream, MarketDataStorageBackendConfig,
-    MarketDataStoragePolicyProfileConfig, ProductionServerState, RealtimeMarketDataMvpConfig,
-    ServerRuntimeConfig,
+    run_realtime_barter_envelope_stream,
 };
 
 pub fn live_status(
@@ -135,6 +135,13 @@ pub struct StorageMaintenanceSchedulerResumeResult {
 pub struct QueryTradesResult {
     pub http_status: StorageMaintenanceHttpStatus,
     pub response: MarketDataTradesResponse,
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryCandlesResult {
+    pub http_status: StorageMaintenanceHttpStatus,
+    pub response: MarketDataCandlesResponse,
     pub message: Option<String>,
 }
 
@@ -1172,12 +1179,109 @@ fn empty_trades_response(
     }
 }
 
+pub fn query_candles(
+    state: &ProductionServerState,
+    symbol: Option<String>,
+    limit: Option<String>,
+) -> QueryCandlesResult {
+    let normalized_symbol = symbol.map(|symbol| symbol.trim().to_ascii_uppercase());
+    let requested_limit = match parse_trade_query_limit(limit) {
+        Ok(limit) => limit,
+        Err(()) => {
+            return QueryCandlesResult {
+                http_status: StorageMaintenanceHttpStatus::BadRequest,
+                response: empty_candles_response(
+                    None,
+                    DEFAULT_TRADE_QUERY_LIMIT,
+                    normalized_symbol,
+                ),
+                message: Some(TRADE_QUERY_LIMIT_ERROR.to_string()),
+            };
+        }
+    };
+    let applied_limit = requested_limit.unwrap_or(DEFAULT_TRADE_QUERY_LIMIT);
+
+    if !(1..=MAX_TRADE_QUERY_LIMIT).contains(&applied_limit) {
+        return QueryCandlesResult {
+            http_status: StorageMaintenanceHttpStatus::BadRequest,
+            response: empty_candles_response(
+                requested_limit,
+                DEFAULT_TRADE_QUERY_LIMIT,
+                normalized_symbol,
+            ),
+            message: Some(TRADE_QUERY_LIMIT_ERROR.to_string()),
+        };
+    }
+
+    let mut query = MarketDataQuery::for_candles().with_limit(applied_limit);
+    if let Some(symbol) = normalized_symbol.clone() {
+        query = query.with_symbol(symbol);
+    }
+    let records: Vec<_> = state
+        .market_data_store()
+        .query(&query)
+        .into_iter()
+        .map(record_to_candle_record)
+        .collect();
+
+    QueryCandlesResult {
+        http_status: StorageMaintenanceHttpStatus::Ok,
+        response: MarketDataCandlesResponse {
+            requested_limit,
+            applied_limit,
+            symbol: normalized_symbol,
+            data_kind: "candle".to_string(),
+            query_source: "market_data_store".to_string(),
+            returned_records: records.len(),
+            records,
+        },
+        message: None,
+    }
+}
+
+fn empty_candles_response(
+    requested_limit: Option<usize>,
+    applied_limit: usize,
+    symbol: Option<String>,
+) -> MarketDataCandlesResponse {
+    MarketDataCandlesResponse {
+        requested_limit,
+        applied_limit,
+        symbol,
+        data_kind: "candle".to_string(),
+        query_source: "market_data_store".to_string(),
+        returned_records: 0,
+        records: Vec::new(),
+    }
+}
+
 pub async fn ingest_test_trade(
     state: &ProductionServerState,
     symbol: &str,
     trade_id: &str,
 ) -> Result<StartLiveMarketDataResponse> {
     let envelope = test_trade_envelope(symbol, trade_id);
+    let summary = run_realtime_barter_envelope_stream(
+        futures::stream::iter(vec![envelope]),
+        state.market_data_store(),
+        RealtimeMarketDataMvpConfig::default(),
+    )
+    .await?;
+
+    Ok(StartLiveMarketDataResponse {
+        state: MarketDataLiveState::Completed,
+        task_id: None,
+        envelopes_received: summary.envelopes_received,
+        storage_records_written: summary.storage_records_written,
+        market_data_store_records: summary.market_data_store_records,
+    })
+}
+
+pub async fn ingest_test_candle(
+    state: &ProductionServerState,
+    symbol: &str,
+) -> Result<StartLiveMarketDataResponse> {
+    let envelope = test_candle_envelope(symbol);
     let summary = run_realtime_barter_envelope_stream(
         futures::stream::iter(vec![envelope]),
         state.market_data_store(),
@@ -1403,12 +1507,27 @@ fn live_kind_label(kind: BarterMarketDataKind) -> &'static str {
         BarterMarketDataKind::OrderBook => "order_book",
         BarterMarketDataKind::Candle => "candle",
         BarterMarketDataKind::Liquidation => "liquidation",
+        BarterMarketDataKind::FundingRate => "funding_rate",
+        BarterMarketDataKind::OpenInterest => "open_interest",
+        BarterMarketDataKind::MarkPrice => "mark_price",
+        BarterMarketDataKind::IndexPrice => "index_price",
     }
 }
 
 fn record_to_trade_record(record: StorageWriteRecord) -> MarketDataTradeRecord {
     let payload = serde_json::from_slice(&record.value).unwrap_or_else(|_| serde_json::Value::Null);
     MarketDataTradeRecord {
+        key: String::from_utf8_lossy(&record.key).to_string(),
+        symbol: record.metadata.tags.get("symbol").cloned(),
+        kind: record.metadata.tags.get("kind").cloned(),
+        source: record.metadata.source.clone(),
+        payload,
+    }
+}
+
+fn record_to_candle_record(record: StorageWriteRecord) -> MarketDataCandleRecord {
+    let payload = serde_json::from_slice(&record.value).unwrap_or_else(|_| serde_json::Value::Null);
+    MarketDataCandleRecord {
         key: String::from_utf8_lossy(&record.key).to_string(),
         symbol: record.metadata.tags.get("symbol").cloned(),
         kind: record.metadata.tags.get("kind").cloned(),
@@ -1440,6 +1559,45 @@ fn test_trade_envelope(symbol: &str, trade_id: &str) -> BarterIngestionEnvelope 
     let mut envelope = BarterIngestionEnvelope::from_event("barter:binance_spot", event);
     envelope.envelope_id = format!("env-{trade_id}");
     envelope.quality = DataQualityFlags::default();
+    envelope
+}
+
+fn test_candle_envelope(symbol: &str) -> BarterIngestionEnvelope {
+    let now = TimestampNs::now();
+    let event = BarterMarketEvent {
+        source: "barter".to_string(),
+        mode: BarterMarketDataMode::Historical,
+        exchange: "binance_spot".to_string(),
+        symbol: Symbol::new(symbol),
+        market_type: BarterMarketType::Spot,
+        kind: BarterMarketDataKind::Candle,
+        timestamp: now,
+        received_at: now,
+        payload: BarterMarketPayload::Candle(CandlePayload {
+            interval: Some("1m".to_string()),
+            open_time: now,
+            close_time: TimestampNs::from_nanos(now.as_nanos() + 60_000_000_000),
+            open: Price::new(Decimal::new(42_000_00, 2)),
+            high: Price::new(Decimal::new(42_100_00, 2)),
+            low: Price::new(Decimal::new(41_900_00, 2)),
+            close: Price::new(Decimal::new(42_050_00, 2)),
+            volume: Decimal::new(25, 1),
+            trade_count: Some(100),
+            quote_volume: Some(Decimal::new(1_000_000, 2)),
+        }),
+        sequence: Some("seq-test-candle".to_string()),
+        checkpoint: None,
+    };
+
+    let mut envelope = BarterIngestionEnvelope::from_event("barter:binance_spot", event);
+    envelope.envelope_id = "env-test-candle".to_string();
+    envelope.quality = DataQualityFlags {
+        is_replay: false,
+        is_backfill: true,
+        is_duplicate_candidate: false,
+        has_gap_before: false,
+        is_out_of_order: false,
+    };
     envelope
 }
 
@@ -1714,8 +1872,8 @@ mod tests {
 mod live_retry_tests {
     use super::*;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     };
 
     #[tokio::test]

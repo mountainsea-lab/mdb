@@ -6,4 +6,4 @@ pub mod service;
 pub mod supervisor;
 
 pub use router::build_market_data_router;
-pub use service::ingest_test_trade;
+pub use service::{ingest_test_candle, ingest_test_trade};

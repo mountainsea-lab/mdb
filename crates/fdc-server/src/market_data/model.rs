@@ -260,7 +260,27 @@ pub struct MarketDataTradesResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataCandlesResponse {
+    pub requested_limit: Option<usize>,
+    pub applied_limit: usize,
+    pub symbol: Option<String>,
+    pub data_kind: String,
+    pub query_source: String,
+    pub returned_records: usize,
+    pub records: Vec<MarketDataCandleRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataTradeRecord {
+    pub key: String,
+    pub symbol: Option<String>,
+    pub kind: Option<String>,
+    pub source: Option<String>,
+    pub payload: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataCandleRecord {
     pub key: String,
     pub symbol: Option<String>,
     pub kind: Option<String>,

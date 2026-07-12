@@ -5,18 +5,17 @@ use fdc_core::Result;
 use fdc_storage::QueryableMarketDataStore;
 
 use crate::{
-    build_market_data_store_from_runtime_config,
+    ServerRuntimeConfig, build_market_data_store_from_runtime_config,
     health::build_health_router,
     market_data::{
-        build_market_data_router, ingest_test_trade,
+        build_market_data_router, ingest_test_candle, ingest_test_trade,
         maintenance_audit::MarketDataStorageMaintenanceAuditLog,
         maintenance_scheduler::{
-            spawn_storage_maintenance_scheduler_into_handle, StorageMaintenanceSchedulerState,
-            StorageMaintenanceSchedulerTaskHandle,
+            StorageMaintenanceSchedulerState, StorageMaintenanceSchedulerTaskHandle,
+            spawn_storage_maintenance_scheduler_into_handle,
         },
         supervisor::MarketDataSupervisor,
     },
-    ServerRuntimeConfig,
 };
 
 #[derive(Clone)]
@@ -120,6 +119,10 @@ impl ProductionServerState {
 
     pub async fn ingest_test_trade(&self, symbol: &str, trade_id: &str) -> Result<()> {
         ingest_test_trade(self, symbol, trade_id).await.map(|_| ())
+    }
+
+    pub async fn ingest_test_candle(&self, symbol: &str) -> Result<()> {
+        ingest_test_candle(self, symbol).await.map(|_| ())
     }
 
     pub async fn start_live_autostart_if_enabled(&self) -> Result<()> {

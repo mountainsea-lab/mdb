@@ -1,16 +1,17 @@
 use axum::{
+    Json, Router,
     extract::{Query, State},
     http::StatusCode,
     routing::{get, post},
-    Json, Router,
 };
 use serde::Deserialize;
 
 use crate::{
+    ProductionServerState,
     market_data::{
         model::{
-            LiveMarketDataStatusResponse, MarketDataStorageHealthResponse,
-            MarketDataStorageMaintenanceAuditResetRequest,
+            LiveMarketDataStatusResponse, MarketDataCandlesResponse,
+            MarketDataStorageHealthResponse, MarketDataStorageMaintenanceAuditResetRequest,
             MarketDataStorageMaintenanceAuditResetResponse,
             MarketDataStorageMaintenanceAuditResponse, MarketDataStorageMaintenanceRunRequest,
             MarketDataStorageMaintenanceRunResponse,
@@ -23,14 +24,13 @@ use crate::{
             StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
         service::{
-            live_status, query_trades, reset_storage_maintenance_audit,
-            reset_storage_maintenance_scheduler, resume_live, resume_storage_maintenance_scheduler,
-            run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
-            storage_health, storage_maintenance_audit, storage_maintenance_scheduler_status,
-            storage_status, StorageMaintenanceHttpStatus,
+            StorageMaintenanceHttpStatus, live_status, query_candles, query_trades,
+            reset_storage_maintenance_audit, reset_storage_maintenance_scheduler, resume_live,
+            resume_storage_maintenance_scheduler, run_storage_maintenance_once, start_live,
+            start_live_disabled, stop_live, storage_health, storage_maintenance_audit,
+            storage_maintenance_scheduler_status, storage_status,
         },
     },
-    ProductionServerState,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -102,6 +102,7 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
             post(storage_maintenance_scheduler_resume_handler),
         )
         .route("/market-data/trades", get(query_trades_handler))
+        .route("/market-data/candles", get(query_candles_handler))
         .with_state(state)
 }
 
@@ -316,6 +317,28 @@ async fn query_trades_handler(
             result
                 .message
                 .unwrap_or_else(|| "market data trade query failed".to_string()),
+        )
+    };
+    (status, Json(envelope))
+}
+
+async fn query_candles_handler(
+    State(state): State<ProductionServerState>,
+    Query(params): Query<TradeQueryParams>,
+) -> (
+    StatusCode,
+    Json<ServerApiResponse<MarketDataCandlesResponse>>,
+) {
+    let result = query_candles(&state, params.symbol, params.limit);
+    let status = storage_maintenance_status_code(result.http_status);
+    let envelope = if result.http_status == StorageMaintenanceHttpStatus::Ok {
+        ServerApiResponse::success(result.response)
+    } else {
+        ServerApiResponse::error(
+            result.response,
+            result
+                .message
+                .unwrap_or_else(|| "market data candle query failed".to_string()),
         )
     };
     (status, Json(envelope))
