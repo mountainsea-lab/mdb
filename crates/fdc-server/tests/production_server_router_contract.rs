@@ -12,7 +12,10 @@ use fdc_barter::{
 };
 use fdc_core::types::{Price, Symbol, TimestampNs};
 use fdc_server::{
-    market_data::candle_acquisition::expand_candle_backfill_requests,
+    market_data::{
+        candle_acquisition::expand_candle_backfill_requests,
+        contract_acquisition::expand_contract_backfill_requests,
+    },
     MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig,
     MarketDataStorageRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
     build_market_data_store_from_runtime_config, build_production_router,
@@ -69,6 +72,42 @@ fn candle_status_envelope(symbol: &str, sequence: &str) -> BarterIngestionEnvelo
 #[derive(Debug)]
 struct ScriptedCandleStatusSource {
     pages: Mutex<Vec<HistoricalBackfillPage>>,
+}
+
+fn contract_candle_status_envelope(symbol: &str, sequence: &str) -> BarterIngestionEnvelope {
+    let mut envelope = candle_status_envelope(symbol, sequence);
+    envelope.source_id = "barter:binance_futures_usd:historical:contract:candle".to_string();
+    envelope.event.exchange = "binance_futures_usd".to_string();
+    envelope.event.market_type = BarterMarketType::Perpetual;
+    envelope.envelope_id = format!("historical-contract-candle-status-env-{sequence}");
+    envelope
+}
+
+#[derive(Debug)]
+struct ScriptedContractStatusSource {
+    pages: Mutex<Vec<HistoricalBackfillPage>>,
+}
+
+impl ScriptedContractStatusSource {
+    fn new(pages: Vec<HistoricalBackfillPage>) -> Self {
+        Self {
+            pages: Mutex::new(pages),
+        }
+    }
+}
+
+#[async_trait]
+impl HistoricalPageFetcher for ScriptedContractStatusSource {
+    async fn fetch_page(
+        &self,
+        _request: HistoricalBackfillRequest,
+    ) -> fdc_barter::Result<HistoricalBackfillPage> {
+        let mut pages = self.pages.lock().expect("pages lock");
+        if pages.is_empty() {
+            panic!("scripted contract status source ran out of pages");
+        }
+        Ok(pages.remove(0))
+    }
 }
 
 impl ScriptedCandleStatusSource {
@@ -225,6 +264,78 @@ async fn response_body_json(response: axum::response::Response) -> serde_json::V
         .await
         .expect("body should read");
     serde_json::from_slice(&body).expect("response body should be json")
+}
+
+#[tokio::test]
+async fn market_data_contract_acquisition_status_reports_disabled_defaults() {
+    let state = ProductionServerState::new(
+        ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0]).unwrap(),
+    );
+    let app = build_production_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/contracts/acquisition/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["status"], "success");
+    assert_eq!(json["data"]["enabled"], false);
+    assert_eq!(json["data"]["autostart"], false);
+    assert_eq!(json["data"]["exchange"], "binance_futures_usd");
+    assert_eq!(json["data"]["kinds"], serde_json::json!(["candle"]));
+    assert!(json["data"]["last_run"].is_null());
+    assert!(json["data"]["last_error"].is_null());
+}
+
+#[tokio::test]
+async fn market_data_contract_acquisition_status_reports_last_run() {
+    let runtime = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+        ("FDC_MARKET_DATA_CONTRACTS_START_NS", "1700000000000000000"),
+        ("FDC_MARKET_DATA_CONTRACTS_END_NS", "1700000060000000000"),
+    ])
+    .expect("contract runtime config should parse");
+    let state = ProductionServerState::new(runtime);
+    let request = expand_contract_backfill_requests(&state.config().market_data_contract_acquisition)
+        .expect("request should expand")
+        .remove(0);
+    let source = ScriptedContractStatusSource::new(vec![HistoricalBackfillPage {
+        request,
+        envelopes: vec![contract_candle_status_envelope("BTCUSDT", "status-run-1")],
+        next_cursor: None,
+        complete: true,
+    }]);
+    state
+        .run_contract_acquisition_once_with_source(&source)
+        .await
+        .expect("contract acquisition should run");
+    let app = build_production_router(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/market-data/contracts/acquisition/status")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let json = response_body_json(response).await;
+    assert_eq!(json["data"]["last_run"]["tasks_started"], 1);
+    assert_eq!(json["data"]["last_run"]["tasks_completed"], 1);
+    assert_eq!(json["data"]["last_run"]["storage_records_written"], 1);
+    assert_eq!(json["data"]["last_run"]["audit_records_written"], 1);
 }
 
 fn p37_durable_config(root: &std::path::Path, extra_env: &[(&str, &str)]) -> ServerRuntimeConfig {

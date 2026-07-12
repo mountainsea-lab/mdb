@@ -26,8 +26,8 @@ pub use realtime::{
 pub use runner::{BoundedMarketDataRunnerHandle, BoundedRunnerFailure, BoundedRunnerState};
 pub use runtime::{
     build_market_data_store_from_runtime_config, build_production_router, shutdown_signal,
-    MarketDataCandleAcquisitionRuntimeConfig, MarketDataStorageBackendConfig,
-    MarketDataStoragePolicyProfileConfig, MarketDataStorageRuntimeConfig,
-    MarketDataStorageTierRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
-    ServerRuntimeEnvironment,
+    MarketDataCandleAcquisitionRuntimeConfig, MarketDataContractAcquisitionRuntimeConfig,
+    MarketDataStorageBackendConfig, MarketDataStoragePolicyProfileConfig,
+    MarketDataStorageRuntimeConfig, MarketDataStorageTierRuntimeConfig, ProductionServerState,
+    ServerRuntimeConfig, ServerRuntimeEnvironment,
 };

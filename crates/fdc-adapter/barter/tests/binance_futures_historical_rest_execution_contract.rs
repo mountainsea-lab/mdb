@@ -144,6 +144,21 @@ async fn executor_fetches_binance_futures_ohlcv_page_without_network() {
 }
 
 #[tokio::test]
+async fn binance_futures_ohlcv_page_fetcher_delegates_to_rest_executor() {
+    use fdc_barter::{BinanceFuturesUsdOhlcvHistoricalPageFetcher, HistoricalPageFetcher};
+
+    let fetcher = BinanceFuturesUsdOhlcvHistoricalPageFetcher::new(&FakeFuturesExecutor);
+    let page = fetcher
+        .fetch_page(request(BarterMarketDataKind::Candle))
+        .await
+        .expect("futures candle page should fetch");
+
+    assert_eq!(page.envelopes.len(), 1);
+    assert_eq!(page.envelopes[0].event.exchange, "binance_futures_usd");
+    assert_eq!(page.envelopes[0].event.kind, BarterMarketDataKind::Candle);
+}
+
+#[tokio::test]
 #[ignore = "requires MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES=1 and public Binance Futures REST access"]
 async fn ignored_live_smoke_fetches_one_binance_futures_funding_rate_record() {
     if std::env::var("MDB_BARTER_ENABLE_REAL_NETWORK_EXAMPLES").as_deref() != Ok("1") {

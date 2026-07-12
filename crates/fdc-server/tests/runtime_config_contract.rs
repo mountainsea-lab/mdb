@@ -505,3 +505,110 @@ fn candle_acquisition_config_rejects_invalid_ranges() {
         .to_string()
         .contains("FDC_MARKET_DATA_CANDLES_END_NS"));
 }
+
+#[test]
+fn contract_acquisition_config_is_disabled_by_default() {
+    let config = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0])
+        .expect("runtime config should parse");
+
+    assert!(!config.market_data_contract_acquisition.enabled);
+    assert!(!config.market_data_contract_acquisition.autostart);
+    assert_eq!(
+        config.market_data_contract_acquisition.exchange,
+        "binance_futures_usd"
+    );
+    assert!(config.market_data_contract_acquisition.symbols.is_empty());
+    assert_eq!(
+        config.market_data_contract_acquisition.kinds,
+        vec!["candle".to_string()]
+    );
+    assert!(config.market_data_contract_acquisition.intervals.is_empty());
+    assert_eq!(config.market_data_contract_acquisition.limit_per_page, 1000);
+    assert_eq!(config.market_data_contract_acquisition.max_pages_per_run, 1);
+}
+
+#[test]
+fn contract_acquisition_config_accepts_env_overrides() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_AUTOSTART", "yes"),
+        ("FDC_MARKET_DATA_CONTRACTS_EXCHANGE", "binance_futures_usd"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "btcusdt,ETHUSDT"),
+        ("FDC_MARKET_DATA_CONTRACTS_KINDS", "candle"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m,5m"),
+        ("FDC_MARKET_DATA_CONTRACTS_START_NS", "1000000000"),
+        ("FDC_MARKET_DATA_CONTRACTS_END_NS", "2000000000"),
+        ("FDC_MARKET_DATA_CONTRACTS_LIMIT_PER_PAGE", "500"),
+        ("FDC_MARKET_DATA_CONTRACTS_MAX_PAGES_PER_RUN", "3"),
+    ])
+    .expect("runtime config should parse");
+
+    assert!(config.market_data_contract_acquisition.enabled);
+    assert!(config.market_data_contract_acquisition.autostart);
+    assert_eq!(
+        config.market_data_contract_acquisition.exchange,
+        "binance_futures_usd"
+    );
+    assert_eq!(
+        config.market_data_contract_acquisition.symbols,
+        vec!["BTCUSDT", "ETHUSDT"]
+    );
+    assert_eq!(config.market_data_contract_acquisition.kinds, vec!["candle"]);
+    assert_eq!(
+        config.market_data_contract_acquisition.intervals,
+        vec!["1m", "5m"]
+    );
+    assert_eq!(
+        config.market_data_contract_acquisition.start_ns,
+        Some(1_000_000_000)
+    );
+    assert_eq!(
+        config.market_data_contract_acquisition.end_ns,
+        Some(2_000_000_000)
+    );
+    assert_eq!(config.market_data_contract_acquisition.limit_per_page, 500);
+    assert_eq!(config.market_data_contract_acquisition.max_pages_per_run, 3);
+}
+
+#[test]
+fn contract_acquisition_config_rejects_invalid_phase1_values() {
+    let missing_symbols = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+    ])
+    .expect_err("enabled contract acquisition requires symbols");
+    assert!(missing_symbols
+        .to_string()
+        .contains("FDC_MARKET_DATA_CONTRACTS_SYMBOLS"));
+
+    let missing_intervals = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+    ])
+    .expect_err("enabled contract candle acquisition requires intervals");
+    assert!(missing_intervals
+        .to_string()
+        .contains("FDC_MARKET_DATA_CONTRACTS_INTERVALS"));
+
+    let unsupported_exchange = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_EXCHANGE", "binance_spot"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+    ])
+    .expect_err("phase1 supports only binance_futures_usd");
+    assert!(unsupported_exchange
+        .to_string()
+        .contains("binance_futures_usd"));
+
+    let unsupported_kind = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+        ("FDC_MARKET_DATA_CONTRACTS_KINDS", "funding_rate"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+    ])
+    .expect_err("phase1 supports only candle kind");
+    assert!(unsupported_kind
+        .to_string()
+        .contains("FDC_MARKET_DATA_CONTRACTS_KINDS"));
+}

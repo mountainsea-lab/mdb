@@ -66,6 +66,37 @@ impl Default for MarketDataCandleAcquisitionRuntimeConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarketDataContractAcquisitionRuntimeConfig {
+    pub enabled: bool,
+    pub autostart: bool,
+    pub exchange: String,
+    pub symbols: Vec<String>,
+    pub kinds: Vec<String>,
+    pub intervals: Vec<String>,
+    pub start_ns: Option<i64>,
+    pub end_ns: Option<i64>,
+    pub limit_per_page: usize,
+    pub max_pages_per_run: usize,
+}
+
+impl Default for MarketDataContractAcquisitionRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            autostart: false,
+            exchange: "binance_futures_usd".to_string(),
+            symbols: Vec::new(),
+            kinds: vec!["candle".to_string()],
+            intervals: Vec::new(),
+            start_ns: None,
+            end_ns: None,
+            limit_per_page: 1000,
+            max_pages_per_run: 1,
+        }
+    }
+}
+
 impl Default for MarketDataStorageRuntimeConfig {
     fn default() -> Self {
         Self {
@@ -100,6 +131,7 @@ pub struct ServerRuntimeConfig {
     pub market_data_storage_maintenance_scheduler_jitter_seconds: u64,
     pub market_data_storage_maintenance_scheduler_max_consecutive_failures: u32,
     pub market_data_candle_acquisition: MarketDataCandleAcquisitionRuntimeConfig,
+    pub market_data_contract_acquisition: MarketDataContractAcquisitionRuntimeConfig,
     pub market_data_storage: MarketDataStorageRuntimeConfig,
 }
 
@@ -137,6 +169,8 @@ impl ServerRuntimeConfig {
         let mut market_data_storage_maintenance_scheduler_max_consecutive_failures = 3_u32;
         let mut market_data_candle_acquisition =
             MarketDataCandleAcquisitionRuntimeConfig::default();
+        let mut market_data_contract_acquisition =
+            MarketDataContractAcquisitionRuntimeConfig::default();
         let mut market_data_storage = MarketDataStorageRuntimeConfig::default();
 
         for (key, value) in pairs {
@@ -359,6 +393,62 @@ impl ServerRuntimeConfig {
                         10000,
                     )?;
                 }
+                "FDC_MARKET_DATA_CONTRACTS_ENABLED" => {
+                    market_data_contract_acquisition.enabled = parse_bool(value.as_ref());
+                }
+                "FDC_MARKET_DATA_CONTRACTS_AUTOSTART" => {
+                    market_data_contract_acquisition.autostart = parse_bool(value.as_ref());
+                }
+                "FDC_MARKET_DATA_CONTRACTS_EXCHANGE" => {
+                    market_data_contract_acquisition.exchange = parse_non_empty_string(
+                        "FDC_MARKET_DATA_CONTRACTS_EXCHANGE",
+                        value.as_ref(),
+                    )?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_SYMBOLS" => {
+                    market_data_contract_acquisition.symbols = parse_comma_list_uppercase(
+                        "FDC_MARKET_DATA_CONTRACTS_SYMBOLS",
+                        value.as_ref(),
+                    )?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_KINDS" => {
+                    market_data_contract_acquisition.kinds =
+                        parse_comma_list("FDC_MARKET_DATA_CONTRACTS_KINDS", value.as_ref())?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_INTERVALS" => {
+                    market_data_contract_acquisition.intervals = parse_comma_list(
+                        "FDC_MARKET_DATA_CONTRACTS_INTERVALS",
+                        value.as_ref(),
+                    )?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_START_NS" => {
+                    market_data_contract_acquisition.start_ns = Some(parse_i64(
+                        "FDC_MARKET_DATA_CONTRACTS_START_NS",
+                        value.as_ref(),
+                    )?);
+                }
+                "FDC_MARKET_DATA_CONTRACTS_END_NS" => {
+                    market_data_contract_acquisition.end_ns = Some(parse_i64(
+                        "FDC_MARKET_DATA_CONTRACTS_END_NS",
+                        value.as_ref(),
+                    )?);
+                }
+                "FDC_MARKET_DATA_CONTRACTS_LIMIT_PER_PAGE" => {
+                    market_data_contract_acquisition.limit_per_page = parse_usize_range(
+                        "FDC_MARKET_DATA_CONTRACTS_LIMIT_PER_PAGE",
+                        value.as_ref(),
+                        1,
+                        1000,
+                    )?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_MAX_PAGES_PER_RUN" => {
+                    market_data_contract_acquisition.max_pages_per_run = parse_usize_range(
+                        "FDC_MARKET_DATA_CONTRACTS_MAX_PAGES_PER_RUN",
+                        value.as_ref(),
+                        1,
+                        10000,
+                    )?;
+                }
                 _ => {}
             }
         }
@@ -383,6 +473,7 @@ impl ServerRuntimeConfig {
         }
 
         validate_candle_acquisition_config(&market_data_candle_acquisition)?;
+        validate_contract_acquisition_config(&market_data_contract_acquisition)?;
 
         Ok(Self {
             bind_addr,
@@ -407,6 +498,7 @@ impl ServerRuntimeConfig {
             market_data_storage_maintenance_scheduler_jitter_seconds,
             market_data_storage_maintenance_scheduler_max_consecutive_failures,
             market_data_candle_acquisition,
+            market_data_contract_acquisition,
             market_data_storage,
         })
     }
@@ -526,6 +618,45 @@ fn validate_candle_acquisition_config(
         if end <= start {
             return Err(Error::config(
                 "FDC_MARKET_DATA_CANDLES_END_NS must be greater than FDC_MARKET_DATA_CANDLES_START_NS",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_contract_acquisition_config(
+    config: &MarketDataContractAcquisitionRuntimeConfig,
+) -> Result<()> {
+    if config.exchange != "binance_futures_usd" {
+        return Err(Error::config(
+            "FDC_MARKET_DATA_CONTRACTS_EXCHANGE phase1 supports only binance_futures_usd",
+        ));
+    }
+
+    if config.kinds.len() != 1 || config.kinds[0] != "candle" {
+        return Err(Error::config(
+            "FDC_MARKET_DATA_CONTRACTS_KINDS phase1 supports only candle",
+        ));
+    }
+
+    if config.enabled {
+        if config.symbols.is_empty() {
+            return Err(Error::config(
+                "FDC_MARKET_DATA_CONTRACTS_SYMBOLS must not be empty when contract acquisition is enabled",
+            ));
+        }
+        if config.intervals.is_empty() {
+            return Err(Error::config(
+                "FDC_MARKET_DATA_CONTRACTS_INTERVALS must not be empty when contract candle acquisition is enabled",
+            ));
+        }
+    }
+
+    if let (Some(start), Some(end)) = (config.start_ns, config.end_ns) {
+        if end <= start {
+            return Err(Error::config(
+                "FDC_MARKET_DATA_CONTRACTS_END_NS must be greater than FDC_MARKET_DATA_CONTRACTS_START_NS",
             ));
         }
     }

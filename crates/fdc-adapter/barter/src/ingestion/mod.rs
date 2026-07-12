@@ -5,9 +5,10 @@ pub mod live;
 
 pub use acquisition::{
     collect_live_envelopes_with_summary, run_historical_backfill_pages,
-    BinanceSpotOhlcvHistoricalPageFetcher, BinanceSpotTradesHistoricalPageFetcher,
-    HistoricalBackfillRunOutcome, HistoricalBackfillRunRequest, HistoricalBackfillStopReason,
-    HistoricalPageFetcher, LiveCollectionOutcome, LiveCollectionRequest,
+    BinanceFuturesUsdOhlcvHistoricalPageFetcher, BinanceSpotOhlcvHistoricalPageFetcher,
+    BinanceSpotTradesHistoricalPageFetcher, HistoricalBackfillRunOutcome,
+    HistoricalBackfillRunRequest, HistoricalBackfillStopReason, HistoricalPageFetcher,
+    LiveCollectionOutcome, LiveCollectionRequest,
 };
 pub use envelope::{BarterIngestionEnvelope, DataQualityFlags};
 pub use historical::{

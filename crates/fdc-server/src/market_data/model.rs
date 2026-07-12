@@ -239,6 +239,33 @@ pub struct MarketDataCandleAcquisitionStatusResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataContractAcquisitionRunStatusResponse {
+    pub tasks_started: usize,
+    pub tasks_completed: usize,
+    pub pages_fetched: usize,
+    pub envelopes_received: usize,
+    pub storage_records_written: usize,
+    pub audit_records_written: usize,
+    pub final_cursors: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataContractAcquisitionStatusResponse {
+    pub enabled: bool,
+    pub autostart: bool,
+    pub exchange: String,
+    pub symbols: Vec<String>,
+    pub kinds: Vec<String>,
+    pub intervals: Vec<String>,
+    pub start_ns: Option<i64>,
+    pub end_ns: Option<i64>,
+    pub limit_per_page: usize,
+    pub max_pages_per_run: usize,
+    pub last_run: Option<MarketDataContractAcquisitionRunStatusResponse>,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataStorageMaintenanceSchedulerResetRequest {
     pub confirm: String,
     pub reason: Option<String>,
