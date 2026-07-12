@@ -195,6 +195,47 @@ Current Stage 5 scope:
 - Offline contract tests cover request expansion, storage writes, storage-backed checkpoint resume, status API, verify mismatch accounting, verify audit persistence, derived interval aggregation, and safe disabled autostart. Real-network smoke is opt-in.
 - Historical acquisition for trades, derivatives, and other non-candle market-data kinds is intentionally deferred until the next explicit scope decision.
 
+## Contract candle acquisition operator run
+
+Contract acquisition is disabled by default. Stage 5.6 Phase 1 adds a bounded Binance Futures USD perpetual candle/OHLCV runner that uses the existing `fdc-barter -> fdc-orchestrator -> candles storage -> /market-data/candles` path. Start with one symbol and one interval, validate storage/query/status, then expand deliberately.
+
+Safe manual/autostart configuration example:
+
+```bash
+set -a
+. ./.env.p39.local
+export FDC_MARKET_DATA_CONTRACTS_ENABLED=1
+export FDC_MARKET_DATA_CONTRACTS_AUTOSTART=1
+export FDC_MARKET_DATA_CONTRACTS_EXCHANGE=binance_futures_usd
+export FDC_MARKET_DATA_CONTRACTS_SYMBOLS=BTCUSDT
+export FDC_MARKET_DATA_CONTRACTS_KINDS=candle
+export FDC_MARKET_DATA_CONTRACTS_INTERVALS=1m
+export FDC_MARKET_DATA_CONTRACTS_START_NS=1700000000000000000
+export FDC_MARKET_DATA_CONTRACTS_END_NS=1700000060000000000
+export FDC_MARKET_DATA_CONTRACTS_LIMIT_PER_PAGE=100
+export FDC_MARKET_DATA_CONTRACTS_MAX_PAGES_PER_RUN=1
+set +a
+CARGO_TARGET_DIR=/Volumes/wdata/opensource/mountainsea-lab/mdb/target rtk cargo run -p fdc-server
+```
+
+Expected checks:
+
+```bash
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/contracts/acquisition/status'
+curl --noproxy '*' -sS 'http://127.0.0.1:18080/market-data/candles?symbol=BTCUSDT&limit=10'
+```
+
+Expected:
+
+- Startup remains a no-op unless both `FDC_MARKET_DATA_CONTRACTS_ENABLED=1` and `FDC_MARKET_DATA_CONTRACTS_AUTOSTART=1` are set.
+- Phase 1 supports only `FDC_MARKET_DATA_CONTRACTS_EXCHANGE=binance_futures_usd` and `FDC_MARKET_DATA_CONTRACTS_KINDS=candle`.
+- Each configured symbol/interval expands to a bounded Binance Futures USD perpetual candle task.
+- Successful pages are written to the canonical `candles` collection through the existing orchestrator/storage path.
+- Resume cursors are persisted through market-data storage in collection `contract_checkpoints` with key `exchange:symbol:kind:interval` and JSON cursor payload.
+- Run summaries are persisted through market-data storage in collection `contract_acquisition_audits` with run id, exchange, symbol, kind, interval, page count, envelope count, storage write count, final cursor, and timestamp metadata.
+- `contract_checkpoints` and `contract_acquisition_audits` are maintenance metadata collections. They must not be consumed as canonical factor inputs.
+- Funding rate, open interest, mark price, and index price acquisition are intentionally deferred. Expand them one data kind at a time using this validated pattern.
+
 ## Live recovery flow
 
 Use this only after inspecting live status and deciding resume is safe.
