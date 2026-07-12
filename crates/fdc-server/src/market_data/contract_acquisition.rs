@@ -83,11 +83,13 @@ where
     S: StorageWriteSink + QueryableStorage,
 {
     fn load(&self, key: &ContractCheckpointKey) -> Result<Option<HistoricalCursor>> {
-        let records = futures::executor::block_on(self.storage.query_storage(
-            &StorageQuery::new("market_data")
-                .with_collection(CONTRACT_CHECKPOINT_COLLECTION)
-                .with_key_prefix(contract_checkpoint_storage_key(key)),
-        ))?;
+        let records = futures::executor::block_on(
+            self.storage.query_storage(
+                &StorageQuery::new("market_data")
+                    .with_collection(CONTRACT_CHECKPOINT_COLLECTION)
+                    .with_key_prefix(contract_checkpoint_storage_key(key)),
+            ),
+        )?;
         let Some(record) = records.last() else {
             return Ok(None);
         };
@@ -125,7 +127,10 @@ where
         )
         .with_timestamp(Utc::now())
         .with_metadata(metadata);
-        futures::executor::block_on(self.storage.write_batch(StorageWriteBatch::new(vec![record])))?;
+        futures::executor::block_on(
+            self.storage
+                .write_batch(StorageWriteBatch::new(vec![record])),
+        )?;
         Ok(())
     }
 }
@@ -231,10 +236,16 @@ where
     metadata
         .tags
         .insert("kind".to_string(), "contract_acquisition_audit".to_string());
-    metadata.tags.insert("run_id".to_string(), run_id.to_string());
+    metadata
+        .tags
+        .insert("run_id".to_string(), run_id.to_string());
     metadata.tags.insert("exchange".to_string(), key.exchange);
-    metadata.tags.insert("symbol".to_string(), key.symbol.clone());
-    metadata.tags.insert("data_kind".to_string(), key.kind.clone());
+    metadata
+        .tags
+        .insert("symbol".to_string(), key.symbol.clone());
+    metadata
+        .tags
+        .insert("data_kind".to_string(), key.kind.clone());
     metadata.tags.insert(
         "interval".to_string(),
         key.interval.clone().unwrap_or_else(|| "none".to_string()),
@@ -297,16 +308,13 @@ where
         status.pages_fetched += outcome.pages.len();
         status.envelopes_received += outcome.records_received;
         let final_cursor = outcome.final_cursor.clone();
-        if let Some(cursor) = final_cursor.clone() {
-            checkpoint_store.save(key, cursor.clone())?;
-            status.final_cursors.push(cursor);
-        }
 
         let pages_fetched = outcome.pages.len();
         let envelopes_received = outcome.records_received;
         let mut task_storage_records_written = 0usize;
         for page in outcome.pages {
-            let pipeline = run_barter_envelopes_to_storage_once(page.envelopes, storage_sink).await?;
+            let pipeline =
+                run_barter_envelopes_to_storage_once(page.envelopes, storage_sink).await?;
             task_storage_records_written += pipeline.storage_records_written;
         }
         status.storage_records_written += task_storage_records_written;
@@ -317,9 +325,14 @@ where
             pages_fetched,
             envelopes_received,
             task_storage_records_written,
-            final_cursor,
+            final_cursor.clone(),
         )?;
         status.audit_records_written += 1;
+
+        if let Some(cursor) = final_cursor.clone() {
+            checkpoint_store.save(key, cursor.clone())?;
+            status.final_cursors.push(cursor);
+        }
 
         if outcome.complete {
             status.tasks_completed += 1;
@@ -353,6 +366,11 @@ where
     let executor = BarterIntegrationHistoricalRestExecutor::binance_futures_usd();
     let fetcher = BinanceFuturesUsdOhlcvHistoricalPageFetcher::new(&executor);
     let checkpoint_store = StorageBackedContractCheckpointStore::new(storage_sink);
-    run_contract_acquisition_once_with_checkpoints(config, &fetcher, storage_sink, &checkpoint_store)
-        .await
+    run_contract_acquisition_once_with_checkpoints(
+        config,
+        &fetcher,
+        storage_sink,
+        &checkpoint_store,
+    )
+    .await
 }

@@ -6,7 +6,11 @@ use fdc_barter::{
     BarterMarketPayload, BarterMarketType, CandlePayload, DataQualityFlags, DecimalQuantity,
     HistoricalBackfillPage, HistoricalBackfillRequest, HistoricalCursor, HistoricalPageFetcher,
 };
-use fdc_core::types::{Price, Symbol, TimestampNs};
+use fdc_core::{
+    error::Error,
+    types::{Price, Symbol, TimestampNs},
+    Result,
+};
 use fdc_server::{
     market_data::contract_acquisition::{
         expand_contract_backfill_requests, run_contract_acquisition_once_with_checkpoints,
@@ -14,7 +18,10 @@ use fdc_server::{
     },
     MarketDataContractAcquisitionRuntimeConfig, ProductionServerState, ServerRuntimeConfig,
 };
-use fdc_storage::{MarketDataQuery, QueryableMarketDataStore};
+use fdc_storage::{
+    MarketDataQuery, QueryableMarketDataStore, StorageWriteBatch, StorageWriteOutcome,
+    StorageWriteSink,
+};
 use rust_decimal::Decimal;
 
 fn config() -> MarketDataContractAcquisitionRuntimeConfig {
@@ -145,6 +152,53 @@ struct ScriptedContractCandleSource {
     requests: Mutex<Vec<HistoricalBackfillRequest>>,
 }
 
+#[derive(Debug, Default)]
+struct RecordingContractCheckpointStore {
+    saved: Mutex<Vec<(ContractCheckpointKey, HistoricalCursor)>>,
+}
+
+impl RecordingContractCheckpointStore {
+    fn saved(&self) -> Vec<(ContractCheckpointKey, HistoricalCursor)> {
+        self.saved.lock().expect("checkpoint lock").clone()
+    }
+}
+
+impl ContractCheckpointStore for RecordingContractCheckpointStore {
+    fn load(&self, _key: &ContractCheckpointKey) -> Result<Option<HistoricalCursor>> {
+        Ok(None)
+    }
+
+    fn save(&self, key: ContractCheckpointKey, cursor: HistoricalCursor) -> Result<()> {
+        self.saved
+            .lock()
+            .expect("checkpoint lock")
+            .push((key, cursor));
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct FailingCanonicalCandleStorageSink;
+
+#[async_trait]
+impl StorageWriteSink for FailingCanonicalCandleStorageSink {
+    async fn write_batch(&self, batch: StorageWriteBatch) -> Result<StorageWriteOutcome> {
+        batch.validate()?;
+        if batch
+            .records
+            .iter()
+            .any(|record| record.collection == "candles")
+        {
+            return Err(Error::storage("scripted canonical candle write failure"));
+        }
+
+        Ok(StorageWriteOutcome::accepted(
+            batch.batch_id,
+            batch.records.len(),
+        ))
+    }
+}
+
 impl ScriptedContractCandleSource {
     fn new(mut pages: Vec<HistoricalBackfillPage>) -> Self {
         pages.reverse();
@@ -236,6 +290,49 @@ async fn contract_acquisition_runner_writes_candles_checkpoints_and_audit_to_sto
 }
 
 #[tokio::test]
+async fn contract_acquisition_does_not_checkpoint_when_canonical_storage_write_fails() {
+    let mut cfg = config();
+    cfg.symbols = vec!["BTCUSDT".to_string()];
+    cfg.intervals = vec!["1m".to_string()];
+    cfg.max_pages_per_run = 1;
+
+    let request = expand_contract_backfill_requests(&cfg)
+        .expect("request should expand")
+        .remove(0);
+    let final_cursor = HistoricalCursor {
+        exchange: "binance_futures_usd".to_string(),
+        symbol: "BTCUSDT".to_string(),
+        kind: BarterMarketDataKind::Candle,
+        next_start: Some(TimestampNs::from_nanos(1_700_000_060_000_000_001)),
+        page_token: Some("resume-token".to_string()),
+        last_seen_exchange_id: Some("futures-kline-1".to_string()),
+    };
+    let page = HistoricalBackfillPage {
+        request,
+        envelopes: vec![candle_envelope("BTCUSDT", "seq-fail")],
+        next_cursor: Some(final_cursor),
+        complete: true,
+    };
+    let source = ScriptedContractCandleSource::new(vec![page]);
+    let storage_sink = FailingCanonicalCandleStorageSink;
+    let checkpoint_store = RecordingContractCheckpointStore::default();
+
+    let result = run_contract_acquisition_once_with_checkpoints(
+        &cfg,
+        &source,
+        &storage_sink,
+        &checkpoint_store,
+    )
+    .await;
+
+    assert!(result.is_err());
+    assert!(
+        checkpoint_store.saved().is_empty(),
+        "checkpoint must not advance before canonical candles are written"
+    );
+}
+
+#[tokio::test]
 async fn production_state_runs_configured_contract_acquisition_once_with_source() {
     let runtime = ServerRuntimeConfig::from_env_pairs([
         ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
@@ -246,9 +343,10 @@ async fn production_state_runs_configured_contract_acquisition_once_with_source(
     ])
     .expect("runtime config should parse");
     let state = ProductionServerState::new(runtime);
-    let request = expand_contract_backfill_requests(&state.config().market_data_contract_acquisition)
-        .expect("request should expand")
-        .remove(0);
+    let request =
+        expand_contract_backfill_requests(&state.config().market_data_contract_acquisition)
+            .expect("request should expand")
+            .remove(0);
     let source = ScriptedContractCandleSource::new(vec![HistoricalBackfillPage {
         request,
         envelopes: vec![candle_envelope("BTCUSDT", "state-seq-1")],
