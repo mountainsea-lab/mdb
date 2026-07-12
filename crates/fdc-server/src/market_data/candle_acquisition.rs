@@ -1,8 +1,9 @@
 use std::sync::Mutex;
 
 use fdc_barter::{
-    run_historical_backfill_pages, BarterIntegrationHistoricalRestExecutor, BarterMarketDataKind,
-    BarterMarketType, BinanceSpotOhlcvHistoricalPageFetcher, HistoricalBackfillRequest,
+    run_historical_backfill_pages, BarterIntegrationHistoricalRestExecutor, BarterIngestionEnvelope,
+    BarterMarketDataKind, BarterMarketPayload, BarterMarketType,
+    BinanceSpotOhlcvHistoricalPageFetcher, CandlePayload, HistoricalBackfillRequest,
     HistoricalBackfillRunRequest, HistoricalCursor, HistoricalPageFetcher,
 };
 use fdc_core::{error::Error, types::TimestampNs, Result};
@@ -19,6 +20,21 @@ pub struct CandleAcquisitionRunStatus {
     pub envelopes_received: usize,
     pub storage_records_written: usize,
     pub final_cursors: Vec<HistoricalCursor>,
+    pub verify_tasks_started: usize,
+    pub verify_candles_checked: usize,
+    pub verify_mismatches: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CandleAcquisitionRequestRole {
+    Base,
+    Verify,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CandleAcquisitionRequest {
+    role: CandleAcquisitionRequestRole,
+    request: HistoricalBackfillRequest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -74,29 +90,91 @@ impl CandleCheckpointStore for InMemoryCandleCheckpointStore {
 pub fn expand_candle_backfill_requests(
     config: &MarketDataCandleAcquisitionRuntimeConfig,
 ) -> Result<Vec<HistoricalBackfillRequest>> {
+    Ok(expand_candle_acquisition_requests(config)?
+        .into_iter()
+        .map(|request| request.request)
+        .collect())
+}
+
+fn expand_candle_acquisition_requests(
+    config: &MarketDataCandleAcquisitionRuntimeConfig,
+) -> Result<Vec<CandleAcquisitionRequest>> {
     let start = TimestampNs::from_nanos(config.start_ns.unwrap_or(0));
     let end = TimestampNs::from_nanos(config.end_ns.unwrap_or(i64::MAX));
-    let source_id = format!("barter:{}:historical:candle", config.exchange);
+    let base_source_id = format!("barter:{}:historical:candle:base", config.exchange);
+    let verify_source_id = format!("barter:{}:historical:candle:verify", config.exchange);
     let mut requests = Vec::new();
 
     for symbol in &config.symbols {
         for interval in &config.base_intervals {
-            requests.push(HistoricalBackfillRequest {
-                source_id: source_id.clone(),
-                exchange: config.exchange.clone(),
-                market_type: BarterMarketType::Spot,
-                symbol: symbol.clone(),
-                kind: BarterMarketDataKind::Candle,
-                interval: Some(interval.clone()),
-                start,
-                end,
-                limit: Some(config.limit_per_page),
-                cursor: None,
+            requests.push(CandleAcquisitionRequest {
+                role: CandleAcquisitionRequestRole::Base,
+                request: HistoricalBackfillRequest {
+                    source_id: base_source_id.clone(),
+                    exchange: config.exchange.clone(),
+                    market_type: BarterMarketType::Spot,
+                    symbol: symbol.clone(),
+                    kind: BarterMarketDataKind::Candle,
+                    interval: Some(interval.clone()),
+                    start,
+                    end,
+                    limit: Some(config.limit_per_page),
+                    cursor: None,
+                },
+            });
+        }
+        for interval in &config.verify_intervals {
+            requests.push(CandleAcquisitionRequest {
+                role: CandleAcquisitionRequestRole::Verify,
+                request: HistoricalBackfillRequest {
+                    source_id: verify_source_id.clone(),
+                    exchange: config.exchange.clone(),
+                    market_type: BarterMarketType::Spot,
+                    symbol: symbol.clone(),
+                    kind: BarterMarketDataKind::Candle,
+                    interval: Some(interval.clone()),
+                    start,
+                    end,
+                    limit: Some(config.limit_per_page),
+                    cursor: None,
+                },
             });
         }
     }
 
     Ok(requests)
+}
+
+fn candle_payloads_from_envelopes(envelopes: &[BarterIngestionEnvelope]) -> Vec<CandlePayload> {
+    envelopes
+        .iter()
+        .filter_map(|envelope| match &envelope.event.payload {
+            BarterMarketPayload::Candle(candle) => Some(candle.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn count_candle_mismatches(expected: &[CandlePayload], official: &[CandlePayload]) -> usize {
+    let common = expected.len().min(official.len());
+    let mut mismatches = expected.len().max(official.len()) - common;
+    for (left, right) in expected.iter().zip(official.iter()) {
+        if !candle_payload_matches(left, right) {
+            mismatches += 1;
+        }
+    }
+
+    mismatches
+}
+
+fn candle_payload_matches(left: &CandlePayload, right: &CandlePayload) -> bool {
+    left.open_time == right.open_time
+        && left.close_time == right.close_time
+        && left.open == right.open
+        && left.high == right.high
+        && left.low == right.low
+        && left.close == right.close
+        && left.volume == right.volume
 }
 
 fn apply_checkpoint_to_request(
@@ -125,15 +203,19 @@ where
     S: HistoricalPageFetcher + ?Sized,
     W: StorageWriteSink,
 {
-    let requests = expand_candle_backfill_requests(config)?;
+    let requests = expand_candle_acquisition_requests(config)?;
     let mut status = CandleAcquisitionRunStatus::default();
+    let mut expected_verify_candles = Vec::new();
 
-    for first_request in requests {
+    for acquisition_request in requests {
         status.tasks_started += 1;
+        if acquisition_request.role == CandleAcquisitionRequestRole::Verify {
+            status.verify_tasks_started += 1;
+        }
         let outcome = run_historical_backfill_pages(
             source,
             HistoricalBackfillRunRequest {
-                first_request,
+                first_request: acquisition_request.request,
                 max_pages: config.max_pages_per_run,
                 max_records: None,
             },
@@ -148,8 +230,20 @@ where
         }
 
         for page in outcome.pages {
-            let pipeline = run_barter_envelopes_to_storage_once(page.envelopes, storage_sink).await?;
-            status.storage_records_written += pipeline.storage_records_written;
+            match acquisition_request.role {
+                CandleAcquisitionRequestRole::Base => {
+                    expected_verify_candles.extend(candle_payloads_from_envelopes(&page.envelopes));
+                    let pipeline =
+                        run_barter_envelopes_to_storage_once(page.envelopes, storage_sink).await?;
+                    status.storage_records_written += pipeline.storage_records_written;
+                }
+                CandleAcquisitionRequestRole::Verify => {
+                    let official = candle_payloads_from_envelopes(&page.envelopes);
+                    status.verify_candles_checked += official.len();
+                    status.verify_mismatches +=
+                        count_candle_mismatches(&expected_verify_candles, &official);
+                }
+            }
         }
 
         if outcome.complete {
@@ -171,20 +265,30 @@ where
     W: StorageWriteSink,
     C: CandleCheckpointStore,
 {
-    let mut requests = expand_candle_backfill_requests(config)?;
+    let mut requests = expand_candle_acquisition_requests(config)?;
     let mut status = CandleAcquisitionRunStatus::default();
+    let mut expected_verify_candles = Vec::new();
 
-    for first_request in &mut requests {
-        apply_checkpoint_to_request(first_request, checkpoint_store)?;
+    for acquisition_request in &mut requests {
+        if acquisition_request.role == CandleAcquisitionRequestRole::Base {
+            apply_checkpoint_to_request(&mut acquisition_request.request, checkpoint_store)?;
+        }
     }
 
-    for first_request in requests {
+    for acquisition_request in requests {
         status.tasks_started += 1;
-        let key = CandleCheckpointKey::from_request(&first_request);
+        if acquisition_request.role == CandleAcquisitionRequestRole::Verify {
+            status.verify_tasks_started += 1;
+        }
+        let key = if acquisition_request.role == CandleAcquisitionRequestRole::Base {
+            CandleCheckpointKey::from_request(&acquisition_request.request)
+        } else {
+            None
+        };
         let outcome = run_historical_backfill_pages(
             source,
             HistoricalBackfillRunRequest {
-                first_request,
+                first_request: acquisition_request.request,
                 max_pages: config.max_pages_per_run,
                 max_records: None,
             },
@@ -202,8 +306,20 @@ where
         }
 
         for page in outcome.pages {
-            let pipeline = run_barter_envelopes_to_storage_once(page.envelopes, storage_sink).await?;
-            status.storage_records_written += pipeline.storage_records_written;
+            match acquisition_request.role {
+                CandleAcquisitionRequestRole::Base => {
+                    expected_verify_candles.extend(candle_payloads_from_envelopes(&page.envelopes));
+                    let pipeline =
+                        run_barter_envelopes_to_storage_once(page.envelopes, storage_sink).await?;
+                    status.storage_records_written += pipeline.storage_records_written;
+                }
+                CandleAcquisitionRequestRole::Verify => {
+                    let official = candle_payloads_from_envelopes(&page.envelopes);
+                    status.verify_candles_checked += official.len();
+                    status.verify_mismatches +=
+                        count_candle_mismatches(&expected_verify_candles, &official);
+                }
+            }
         }
 
         if outcome.complete {

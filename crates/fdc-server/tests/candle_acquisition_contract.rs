@@ -35,8 +35,8 @@ fn config() -> MarketDataCandleAcquisitionRuntimeConfig {
 fn expands_candle_acquisition_requests_for_symbols_and_base_intervals() {
     let requests = expand_candle_backfill_requests(&config()).expect("requests should expand");
 
-    assert_eq!(requests.len(), 4);
-    assert_eq!(requests[0].source_id, "barter:binance_spot:historical:candle");
+    assert_eq!(requests.len(), 6);
+    assert_eq!(requests[0].source_id, "barter:binance_spot:historical:candle:base");
     assert_eq!(requests[0].exchange, "binance_spot");
     assert_eq!(requests[0].market_type, BarterMarketType::Spot);
     assert_eq!(requests[0].kind, BarterMarketDataKind::Candle);
@@ -56,13 +56,28 @@ fn expands_candle_acquisition_requests_for_symbols_and_base_intervals() {
         vec![
             ("BTCUSDT".to_string(), Some("1m".to_string())),
             ("BTCUSDT".to_string(), Some("5m".to_string())),
+            ("BTCUSDT".to_string(), Some("1h".to_string())),
             ("ETHUSDT".to_string(), Some("1m".to_string())),
             ("ETHUSDT".to_string(), Some("5m".to_string())),
+            ("ETHUSDT".to_string(), Some("1h".to_string())),
         ]
     );
 }
 
 fn candle_envelope(symbol: &str, sequence: &str) -> BarterIngestionEnvelope {
+    candle_envelope_with_values(symbol, sequence, "1m", 42_000_00, 42_100_00, 41_900_00, 42_050_00, 25)
+}
+
+fn candle_envelope_with_values(
+    symbol: &str,
+    sequence: &str,
+    interval: &str,
+    open_cents: i64,
+    high_cents: i64,
+    low_cents: i64,
+    close_cents: i64,
+    volume_tenths: i64,
+) -> BarterIngestionEnvelope {
     let event = BarterMarketEvent {
         source: "barter".to_string(),
         mode: BarterMarketDataMode::Historical,
@@ -73,14 +88,14 @@ fn candle_envelope(symbol: &str, sequence: &str) -> BarterIngestionEnvelope {
         timestamp: TimestampNs::from_nanos(1_700_000_000_000_000_000),
         received_at: TimestampNs::from_nanos(1_700_000_000_000_000_010),
         payload: BarterMarketPayload::Candle(CandlePayload {
-            interval: Some("1m".to_string()),
+            interval: Some(interval.to_string()),
             open_time: TimestampNs::from_nanos(1_700_000_000_000_000_000),
             close_time: TimestampNs::from_nanos(1_700_000_060_000_000_000),
-            open: Price::new(Decimal::new(42_000_00, 2)),
-            high: Price::new(Decimal::new(42_100_00, 2)),
-            low: Price::new(Decimal::new(41_900_00, 2)),
-            close: Price::new(Decimal::new(42_050_00, 2)),
-            volume: DecimalQuantity::new(25, 1),
+            open: Price::new(Decimal::new(open_cents, 2)),
+            high: Price::new(Decimal::new(high_cents, 2)),
+            low: Price::new(Decimal::new(low_cents, 2)),
+            close: Price::new(Decimal::new(close_cents, 2)),
+            volume: DecimalQuantity::new(volume_tenths, 1),
             trade_count: Some(100),
             quote_volume: Some(DecimalQuantity::new(1_000_000, 2)),
         }),
@@ -143,6 +158,7 @@ async fn candle_acquisition_runner_writes_candles_to_storage() {
     let mut cfg = config();
     cfg.symbols = vec!["BTCUSDT".to_string()];
     cfg.base_intervals = vec!["1m".to_string()];
+    cfg.verify_intervals = Vec::new();
     cfg.max_pages_per_run = 1;
 
     let request = expand_candle_backfill_requests(&cfg)
@@ -239,6 +255,7 @@ async fn candle_acquisition_persists_final_cursor_for_resume() {
     let mut cfg = config();
     cfg.symbols = vec!["BTCUSDT".to_string()];
     cfg.base_intervals = vec!["1m".to_string()];
+    cfg.verify_intervals = Vec::new();
     cfg.max_pages_per_run = 1;
 
     let first_request = expand_candle_backfill_requests(&cfg)
@@ -307,4 +324,58 @@ async fn candle_acquisition_persists_final_cursor_for_resume() {
         TimestampNs::from_nanos(1_700_000_060_000_000_001)
     );
     assert_eq!(second_requests[0].cursor, Some(final_cursor));
+}
+
+#[tokio::test]
+async fn candle_acquisition_verify_intervals_cross_checks_official_candles() {
+    use fdc_server::market_data::candle_acquisition::run_candle_acquisition_once;
+
+    let mut cfg = config();
+    cfg.symbols = vec!["BTCUSDT".to_string()];
+    cfg.base_intervals = vec!["1m".to_string()];
+    cfg.verify_intervals = vec!["1m".to_string()];
+    cfg.max_pages_per_run = 1;
+
+    let requests = expand_candle_backfill_requests(&cfg).expect("requests should expand");
+    let base_request = requests
+        .iter()
+        .find(|request| request.interval.as_deref() == Some("1m") && !request.source_id.contains(":verify"))
+        .cloned()
+        .expect("base request should exist");
+    let verify_request = requests
+        .iter()
+        .find(|request| request.interval.as_deref() == Some("1m") && request.source_id.contains(":verify"))
+        .cloned()
+        .expect("verify request should exist");
+
+    let source = ScriptedCandleSource::new(vec![
+        HistoricalBackfillPage {
+            request: base_request,
+            envelopes: vec![candle_envelope_with_values(
+                "BTCUSDT", "base-1", "1m", 42_000_00, 42_100_00, 41_900_00, 42_050_00, 25,
+            )],
+            next_cursor: None,
+            complete: true,
+        },
+        HistoricalBackfillPage {
+            request: verify_request,
+            envelopes: vec![candle_envelope_with_values(
+                "BTCUSDT", "verify-1", "1m", 42_000_00, 42_100_00, 41_900_00, 42_060_00, 25,
+            )],
+            next_cursor: None,
+            complete: true,
+        },
+    ]);
+    let store = QueryableMarketDataStore::new();
+
+    let status = run_candle_acquisition_once(&cfg, &source, &store)
+        .await
+        .expect("runner should complete");
+
+    assert_eq!(status.tasks_started, 2);
+    assert_eq!(status.verify_tasks_started, 1);
+    assert_eq!(status.verify_candles_checked, 1);
+    assert_eq!(status.verify_mismatches, 1);
+    let stored = store.query(&MarketDataQuery::for_candles().with_symbol("BTCUSDT"));
+    assert_eq!(stored.len(), 1, "verify candles should not be stored as production candles");
 }

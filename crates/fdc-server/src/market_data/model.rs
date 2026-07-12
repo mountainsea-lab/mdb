@@ -217,6 +217,9 @@ pub struct MarketDataCandleAcquisitionRunStatusResponse {
     pub envelopes_received: usize,
     pub storage_records_written: usize,
     pub final_cursors: usize,
+    pub verify_tasks_started: usize,
+    pub verify_candles_checked: usize,
+    pub verify_mismatches: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

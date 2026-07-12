@@ -66,6 +66,9 @@ pub fn candle_acquisition_status(
             envelopes_received: status.envelopes_received,
             storage_records_written: status.storage_records_written,
             final_cursors: status.final_cursors.len(),
+            verify_tasks_started: status.verify_tasks_started,
+            verify_candles_checked: status.verify_candles_checked,
+            verify_mismatches: status.verify_mismatches,
         });
 
     MarketDataCandleAcquisitionStatusResponse {
