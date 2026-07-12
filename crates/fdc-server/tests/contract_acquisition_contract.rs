@@ -404,3 +404,42 @@ async fn production_state_runs_configured_contract_acquisition_once_with_source(
         1
     );
 }
+
+#[tokio::test]
+async fn production_state_contract_scheduler_defaults_disabled() {
+    let runtime = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0])
+        .expect("runtime config should parse");
+    let state = ProductionServerState::new(runtime);
+
+    let snapshot = state
+        .market_data_contract_acquisition_scheduler()
+        .snapshot()
+        .await;
+
+    assert!(!snapshot.enabled);
+    assert!(!snapshot.running);
+    assert!(!snapshot.suppressed);
+}
+
+#[tokio::test]
+async fn production_state_contract_scheduler_is_enabled_when_configured() {
+    let runtime = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+        ("FDC_MARKET_DATA_CONTRACTS_START_NS", "1700000000000000000"),
+        ("FDC_MARKET_DATA_CONTRACTS_END_NS", "1700000060000000000"),
+    ])
+    .expect("runtime config should parse");
+    let state = ProductionServerState::new(runtime);
+
+    let snapshot = state
+        .market_data_contract_acquisition_scheduler()
+        .snapshot()
+        .await;
+
+    assert!(snapshot.enabled);
+    assert!(!snapshot.running);
+    assert_eq!(snapshot.interval_seconds, 3600);
+}

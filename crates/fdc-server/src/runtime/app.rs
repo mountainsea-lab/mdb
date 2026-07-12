@@ -9,7 +9,12 @@ use crate::{
     build_market_data_store_from_runtime_config,
     health::build_health_router,
     market_data::{
-        build_market_data_router, ingest_test_candle, ingest_test_trade,
+        build_market_data_router,
+        contract_acquisition_scheduler::{
+            spawn_contract_acquisition_scheduler_into_handle, ContractAcquisitionSchedulerState,
+            ContractAcquisitionSchedulerTaskHandle,
+        },
+        ingest_test_candle, ingest_test_trade,
         maintenance_audit::MarketDataStorageMaintenanceAuditLog,
         maintenance_scheduler::{
             spawn_storage_maintenance_scheduler_into_handle, StorageMaintenanceSchedulerState,
@@ -28,6 +33,8 @@ pub struct ProductionServerState {
     market_data_storage_maintenance_audit: Arc<MarketDataStorageMaintenanceAuditLog>,
     market_data_storage_maintenance_scheduler: StorageMaintenanceSchedulerState,
     market_data_storage_maintenance_scheduler_task: StorageMaintenanceSchedulerTaskHandle,
+    market_data_contract_acquisition_scheduler: ContractAcquisitionSchedulerState,
+    market_data_contract_acquisition_scheduler_task: ContractAcquisitionSchedulerTaskHandle,
     market_data_candle_acquisition_last_run:
         Arc<Mutex<Option<crate::market_data::candle_acquisition::CandleAcquisitionRunStatus>>>,
     market_data_candle_acquisition_last_error: Arc<Mutex<Option<String>>>,
@@ -41,6 +48,8 @@ impl ProductionServerState {
         let market_data_storage_maintenance_audit = market_data_storage_maintenance_audit(&config);
         let market_data_storage_maintenance_scheduler =
             StorageMaintenanceSchedulerState::from_config(&config);
+        let market_data_contract_acquisition_scheduler =
+            ContractAcquisitionSchedulerState::from_config(&config);
         Self {
             config,
             market_data_store: Arc::new(QueryableMarketDataStore::new()),
@@ -49,6 +58,9 @@ impl ProductionServerState {
             market_data_storage_maintenance_scheduler,
             market_data_storage_maintenance_scheduler_task:
                 StorageMaintenanceSchedulerTaskHandle::default(),
+            market_data_contract_acquisition_scheduler,
+            market_data_contract_acquisition_scheduler_task:
+                ContractAcquisitionSchedulerTaskHandle::default(),
             market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
             market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
             market_data_contract_acquisition_last_run: Arc::new(Mutex::new(None)),
@@ -65,12 +77,23 @@ impl ProductionServerState {
             StorageMaintenanceSchedulerState::from_config(&config);
         let market_data_storage_maintenance_scheduler_task =
             StorageMaintenanceSchedulerTaskHandle::default();
+        let market_data_contract_acquisition_scheduler =
+            ContractAcquisitionSchedulerState::from_config(&config);
+        let market_data_contract_acquisition_scheduler_task =
+            ContractAcquisitionSchedulerTaskHandle::default();
         spawn_storage_maintenance_scheduler_into_handle(
             config.clone(),
             Arc::clone(&market_data_store),
             Arc::clone(&market_data_storage_maintenance_audit),
             market_data_storage_maintenance_scheduler.clone(),
             market_data_storage_maintenance_scheduler_task.clone(),
+        )
+        .await;
+        spawn_contract_acquisition_scheduler_into_handle(
+            config.clone(),
+            Arc::clone(&market_data_store),
+            market_data_contract_acquisition_scheduler.clone(),
+            market_data_contract_acquisition_scheduler_task.clone(),
         )
         .await;
         Ok(Self {
@@ -80,6 +103,8 @@ impl ProductionServerState {
             market_data_storage_maintenance_audit,
             market_data_storage_maintenance_scheduler,
             market_data_storage_maintenance_scheduler_task,
+            market_data_contract_acquisition_scheduler,
+            market_data_contract_acquisition_scheduler_task,
             market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
             market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
             market_data_contract_acquisition_last_run: Arc::new(Mutex::new(None)),
@@ -94,6 +119,8 @@ impl ProductionServerState {
         let market_data_storage_maintenance_audit = market_data_storage_maintenance_audit(&config);
         let market_data_storage_maintenance_scheduler =
             StorageMaintenanceSchedulerState::from_config(&config);
+        let market_data_contract_acquisition_scheduler =
+            ContractAcquisitionSchedulerState::from_config(&config);
         Self {
             config,
             market_data_store,
@@ -102,6 +129,9 @@ impl ProductionServerState {
             market_data_storage_maintenance_scheduler,
             market_data_storage_maintenance_scheduler_task:
                 StorageMaintenanceSchedulerTaskHandle::default(),
+            market_data_contract_acquisition_scheduler,
+            market_data_contract_acquisition_scheduler_task:
+                ContractAcquisitionSchedulerTaskHandle::default(),
             market_data_candle_acquisition_last_run: Arc::new(Mutex::new(None)),
             market_data_candle_acquisition_last_error: Arc::new(Mutex::new(None)),
             market_data_contract_acquisition_last_run: Arc::new(Mutex::new(None)),
@@ -135,6 +165,16 @@ impl ProductionServerState {
         &self,
     ) -> StorageMaintenanceSchedulerTaskHandle {
         self.market_data_storage_maintenance_scheduler_task.clone()
+    }
+
+    pub fn market_data_contract_acquisition_scheduler(&self) -> ContractAcquisitionSchedulerState {
+        self.market_data_contract_acquisition_scheduler.clone()
+    }
+
+    pub fn market_data_contract_acquisition_scheduler_task(
+        &self,
+    ) -> ContractAcquisitionSchedulerTaskHandle {
+        self.market_data_contract_acquisition_scheduler_task.clone()
     }
 
     pub fn market_data_candle_acquisition_last_run(
