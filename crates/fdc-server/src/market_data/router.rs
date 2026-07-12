@@ -11,6 +11,7 @@ use crate::{
         model::{
             LiveMarketDataStatusResponse, MarketDataCandleAcquisitionStatusResponse,
             MarketDataCandlesResponse, MarketDataContractAcquisitionRunOnceResponse,
+            MarketDataContractAcquisitionSchedulerStatusResponse,
             MarketDataContractAcquisitionStatusResponse, MarketDataStorageHealthResponse,
             MarketDataStorageMaintenanceAuditResetRequest,
             MarketDataStorageMaintenanceAuditResetResponse,
@@ -25,9 +26,10 @@ use crate::{
             StartLiveMarketDataRequest, StartLiveMarketDataResponse, StopLiveMarketDataResponse,
         },
         service::{
-            candle_acquisition_status, contract_acquisition_status, live_status, query_candles,
-            query_trades, reset_storage_maintenance_audit, reset_storage_maintenance_scheduler,
-            resume_live, resume_storage_maintenance_scheduler, run_contract_acquisition_once,
+            candle_acquisition_status, contract_acquisition_scheduler_status,
+            contract_acquisition_status, live_status, query_candles, query_trades,
+            reset_storage_maintenance_audit, reset_storage_maintenance_scheduler, resume_live,
+            resume_storage_maintenance_scheduler, run_contract_acquisition_once,
             run_storage_maintenance_once, start_live, start_live_disabled, stop_live,
             storage_health, storage_maintenance_audit, storage_maintenance_scheduler_status,
             storage_status, StorageMaintenanceHttpStatus,
@@ -116,6 +118,10 @@ pub fn build_market_data_router(state: ProductionServerState) -> Router {
         .route(
             "/market-data/contracts/acquisition/run-once",
             post(contract_acquisition_run_once_handler),
+        )
+        .route(
+            "/market-data/contracts/acquisition/scheduler/status",
+            get(contract_acquisition_scheduler_status_handler),
         )
         .route("/market-data/candles", get(query_candles_handler))
         .with_state(state)
@@ -230,6 +236,14 @@ async fn contract_acquisition_run_once_handler(
             ))
         }
     }
+}
+
+async fn contract_acquisition_scheduler_status_handler(
+    State(state): State<ProductionServerState>,
+) -> Json<ServerApiResponse<MarketDataContractAcquisitionSchedulerStatusResponse>> {
+    Json(ServerApiResponse::success(
+        contract_acquisition_scheduler_status(&state).await,
+    ))
 }
 
 async fn storage_status_handler(

@@ -70,6 +70,7 @@ impl Default for MarketDataCandleAcquisitionRuntimeConfig {
 pub struct MarketDataContractAcquisitionRuntimeConfig {
     pub enabled: bool,
     pub autostart: bool,
+    pub scheduler_enabled: bool,
     pub exchange: String,
     pub symbols: Vec<String>,
     pub kinds: Vec<String>,
@@ -78,6 +79,9 @@ pub struct MarketDataContractAcquisitionRuntimeConfig {
     pub end_ns: Option<i64>,
     pub limit_per_page: usize,
     pub max_pages_per_run: usize,
+    pub scheduler_interval_seconds: u64,
+    pub scheduler_jitter_seconds: u64,
+    pub scheduler_max_consecutive_failures: u32,
 }
 
 impl Default for MarketDataContractAcquisitionRuntimeConfig {
@@ -85,6 +89,7 @@ impl Default for MarketDataContractAcquisitionRuntimeConfig {
         Self {
             enabled: false,
             autostart: false,
+            scheduler_enabled: false,
             exchange: "binance_futures_usd".to_string(),
             symbols: Vec::new(),
             kinds: vec!["candle".to_string()],
@@ -93,6 +98,9 @@ impl Default for MarketDataContractAcquisitionRuntimeConfig {
             end_ns: None,
             limit_per_page: 1000,
             max_pages_per_run: 1,
+            scheduler_interval_seconds: 3600,
+            scheduler_jitter_seconds: 0,
+            scheduler_max_consecutive_failures: 3,
         }
     }
 }
@@ -348,22 +356,24 @@ impl ServerRuntimeConfig {
                     market_data_candle_acquisition.autostart = parse_bool(value.as_ref());
                 }
                 "FDC_MARKET_DATA_CANDLES_EXCHANGE" => {
-                    market_data_candle_acquisition.exchange = parse_non_empty_string(
-                        "FDC_MARKET_DATA_CANDLES_EXCHANGE",
-                        value.as_ref(),
-                    )?;
+                    market_data_candle_acquisition.exchange =
+                        parse_non_empty_string("FDC_MARKET_DATA_CANDLES_EXCHANGE", value.as_ref())?;
                 }
                 "FDC_MARKET_DATA_CANDLES_SYMBOLS" => {
-                    market_data_candle_acquisition.symbols =
-                        parse_comma_list_uppercase("FDC_MARKET_DATA_CANDLES_SYMBOLS", value.as_ref())?;
+                    market_data_candle_acquisition.symbols = parse_comma_list_uppercase(
+                        "FDC_MARKET_DATA_CANDLES_SYMBOLS",
+                        value.as_ref(),
+                    )?;
                 }
                 "FDC_MARKET_DATA_CANDLES_BASE_INTERVALS" => {
                     market_data_candle_acquisition.base_intervals =
                         parse_comma_list("FDC_MARKET_DATA_CANDLES_BASE_INTERVALS", value.as_ref())?;
                 }
                 "FDC_MARKET_DATA_CANDLES_VERIFY_INTERVALS" => {
-                    market_data_candle_acquisition.verify_intervals =
-                        parse_comma_list("FDC_MARKET_DATA_CANDLES_VERIFY_INTERVALS", value.as_ref())?;
+                    market_data_candle_acquisition.verify_intervals = parse_comma_list(
+                        "FDC_MARKET_DATA_CANDLES_VERIFY_INTERVALS",
+                        value.as_ref(),
+                    )?;
                 }
                 "FDC_MARKET_DATA_CANDLES_START_NS" => {
                     market_data_candle_acquisition.start_ns = Some(parse_i64(
@@ -372,10 +382,8 @@ impl ServerRuntimeConfig {
                     )?);
                 }
                 "FDC_MARKET_DATA_CANDLES_END_NS" => {
-                    market_data_candle_acquisition.end_ns = Some(parse_i64(
-                        "FDC_MARKET_DATA_CANDLES_END_NS",
-                        value.as_ref(),
-                    )?);
+                    market_data_candle_acquisition.end_ns =
+                        Some(parse_i64("FDC_MARKET_DATA_CANDLES_END_NS", value.as_ref())?);
                 }
                 "FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE" => {
                     market_data_candle_acquisition.limit_per_page = parse_usize_range(
@@ -399,6 +407,9 @@ impl ServerRuntimeConfig {
                 "FDC_MARKET_DATA_CONTRACTS_AUTOSTART" => {
                     market_data_contract_acquisition.autostart = parse_bool(value.as_ref());
                 }
+                "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_ENABLED" => {
+                    market_data_contract_acquisition.scheduler_enabled = parse_bool(value.as_ref());
+                }
                 "FDC_MARKET_DATA_CONTRACTS_EXCHANGE" => {
                     market_data_contract_acquisition.exchange = parse_non_empty_string(
                         "FDC_MARKET_DATA_CONTRACTS_EXCHANGE",
@@ -416,10 +427,8 @@ impl ServerRuntimeConfig {
                         parse_comma_list("FDC_MARKET_DATA_CONTRACTS_KINDS", value.as_ref())?;
                 }
                 "FDC_MARKET_DATA_CONTRACTS_INTERVALS" => {
-                    market_data_contract_acquisition.intervals = parse_comma_list(
-                        "FDC_MARKET_DATA_CONTRACTS_INTERVALS",
-                        value.as_ref(),
-                    )?;
+                    market_data_contract_acquisition.intervals =
+                        parse_comma_list("FDC_MARKET_DATA_CONTRACTS_INTERVALS", value.as_ref())?;
                 }
                 "FDC_MARKET_DATA_CONTRACTS_START_NS" => {
                     market_data_contract_acquisition.start_ns = Some(parse_i64(
@@ -448,6 +457,31 @@ impl ServerRuntimeConfig {
                         1,
                         10000,
                     )?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_INTERVAL_SECONDS" => {
+                    market_data_contract_acquisition.scheduler_interval_seconds = parse_u64_range(
+                        "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_INTERVAL_SECONDS",
+                        value.as_ref(),
+                        1,
+                        86_400,
+                    )?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_JITTER_SECONDS" => {
+                    market_data_contract_acquisition.scheduler_jitter_seconds = parse_u64_range(
+                        "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_JITTER_SECONDS",
+                        value.as_ref(),
+                        0,
+                        86_400,
+                    )?;
+                }
+                "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_MAX_CONSECUTIVE_FAILURES" => {
+                    market_data_contract_acquisition.scheduler_max_consecutive_failures =
+                        parse_u32_range(
+                            "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+                            value.as_ref(),
+                            1,
+                            100,
+                        )?;
                 }
                 _ => {}
             }
@@ -586,7 +620,9 @@ fn parse_comma_list(name: &str, value: &str) -> Result<Vec<String>> {
         .map(ToOwned::to_owned)
         .collect();
     if items.is_empty() && !value.trim().is_empty() {
-        return Err(Error::config(format!("{name} must contain non-empty items")));
+        return Err(Error::config(format!(
+            "{name} must contain non-empty items"
+        )));
     }
     Ok(items)
 }

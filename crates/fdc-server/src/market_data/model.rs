@@ -282,6 +282,32 @@ pub struct MarketDataContractAcquisitionRunOnceResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MarketDataContractAcquisitionSchedulerStatusResponse {
+    pub enabled: bool,
+    pub running: bool,
+    pub suppressed: bool,
+    pub interval_seconds: u64,
+    pub jitter_seconds: u64,
+    pub max_consecutive_failures: u32,
+    pub consecutive_failures: u32,
+    pub total_runs: u64,
+    pub successful_runs: u64,
+    pub failed_runs: u64,
+    pub skipped_runs: u64,
+    pub last_started_at: Option<String>,
+    pub last_finished_at: Option<String>,
+    pub last_status: Option<String>,
+    pub last_error: Option<String>,
+    pub next_run_at: Option<String>,
+    pub tasks_started: usize,
+    pub tasks_completed: usize,
+    pub pages_fetched: usize,
+    pub envelopes_received: usize,
+    pub storage_records_written: usize,
+    pub audit_records_written: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MarketDataStorageMaintenanceSchedulerResetRequest {
     pub confirm: String,
     pub reason: Option<String>,

@@ -28,6 +28,7 @@ fn config() -> MarketDataContractAcquisitionRuntimeConfig {
     MarketDataContractAcquisitionRuntimeConfig {
         enabled: true,
         autostart: false,
+        scheduler_enabled: false,
         exchange: "binance_futures_usd".to_string(),
         symbols: vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()],
         kinds: vec!["candle".to_string()],
@@ -36,6 +37,9 @@ fn config() -> MarketDataContractAcquisitionRuntimeConfig {
         end_ns: Some(1_700_000_060_000_000_000),
         limit_per_page: 500,
         max_pages_per_run: 2,
+        scheduler_interval_seconds: 3600,
+        scheduler_jitter_seconds: 0,
+        scheduler_max_consecutive_failures: 3,
     }
 }
 
@@ -399,4 +403,43 @@ async fn production_state_runs_configured_contract_acquisition_once_with_source(
             .audit_records_written,
         1
     );
+}
+
+#[tokio::test]
+async fn production_state_contract_scheduler_defaults_disabled() {
+    let runtime = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0])
+        .expect("runtime config should parse");
+    let state = ProductionServerState::new(runtime);
+
+    let snapshot = state
+        .market_data_contract_acquisition_scheduler()
+        .snapshot()
+        .await;
+
+    assert!(!snapshot.enabled);
+    assert!(!snapshot.running);
+    assert!(!snapshot.suppressed);
+}
+
+#[tokio::test]
+async fn production_state_contract_scheduler_is_enabled_when_configured() {
+    let runtime = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_ENABLED", "1"),
+        ("FDC_MARKET_DATA_CONTRACTS_SYMBOLS", "BTCUSDT"),
+        ("FDC_MARKET_DATA_CONTRACTS_INTERVALS", "1m"),
+        ("FDC_MARKET_DATA_CONTRACTS_START_NS", "1700000000000000000"),
+        ("FDC_MARKET_DATA_CONTRACTS_END_NS", "1700000060000000000"),
+    ])
+    .expect("runtime config should parse");
+    let state = ProductionServerState::new(runtime);
+
+    let snapshot = state
+        .market_data_contract_acquisition_scheduler()
+        .snapshot()
+        .await;
+
+    assert!(snapshot.enabled);
+    assert!(!snapshot.running);
+    assert_eq!(snapshot.interval_seconds, 3600);
 }

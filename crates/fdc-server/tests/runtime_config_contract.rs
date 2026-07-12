@@ -419,10 +419,19 @@ fn candle_acquisition_config_is_disabled_by_default() {
 
     assert!(!config.market_data_candle_acquisition.enabled);
     assert!(!config.market_data_candle_acquisition.autostart);
-    assert_eq!(config.market_data_candle_acquisition.exchange, "binance_spot");
+    assert_eq!(
+        config.market_data_candle_acquisition.exchange,
+        "binance_spot"
+    );
     assert!(config.market_data_candle_acquisition.symbols.is_empty());
-    assert!(config.market_data_candle_acquisition.base_intervals.is_empty());
-    assert!(config.market_data_candle_acquisition.verify_intervals.is_empty());
+    assert!(config
+        .market_data_candle_acquisition
+        .base_intervals
+        .is_empty());
+    assert!(config
+        .market_data_candle_acquisition
+        .verify_intervals
+        .is_empty());
     assert_eq!(config.market_data_candle_acquisition.limit_per_page, 1000);
     assert_eq!(config.market_data_candle_acquisition.max_pages_per_run, 1);
 }
@@ -445,7 +454,10 @@ fn candle_acquisition_config_accepts_env_overrides() {
 
     assert!(config.market_data_candle_acquisition.enabled);
     assert!(config.market_data_candle_acquisition.autostart);
-    assert_eq!(config.market_data_candle_acquisition.exchange, "binance_spot");
+    assert_eq!(
+        config.market_data_candle_acquisition.exchange,
+        "binance_spot"
+    );
     assert_eq!(
         config.market_data_candle_acquisition.symbols,
         vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()]
@@ -458,8 +470,14 @@ fn candle_acquisition_config_accepts_env_overrides() {
         config.market_data_candle_acquisition.verify_intervals,
         vec!["1h".to_string(), "1d".to_string()]
     );
-    assert_eq!(config.market_data_candle_acquisition.start_ns, Some(1_000_000_000));
-    assert_eq!(config.market_data_candle_acquisition.end_ns, Some(2_000_000_000));
+    assert_eq!(
+        config.market_data_candle_acquisition.start_ns,
+        Some(1_000_000_000)
+    );
+    assert_eq!(
+        config.market_data_candle_acquisition.end_ns,
+        Some(2_000_000_000)
+    );
     assert_eq!(config.market_data_candle_acquisition.limit_per_page, 500);
     assert_eq!(config.market_data_candle_acquisition.max_pages_per_run, 3);
 }
@@ -487,11 +505,9 @@ fn candle_acquisition_config_rejects_enabled_without_symbols_or_intervals() {
 
 #[test]
 fn candle_acquisition_config_rejects_invalid_ranges() {
-    let zero_limit = ServerRuntimeConfig::from_env_pairs([(
-        "FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE",
-        "0",
-    )])
-    .expect_err("zero page limit should be rejected");
+    let zero_limit =
+        ServerRuntimeConfig::from_env_pairs([("FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE", "0")])
+            .expect_err("zero page limit should be rejected");
     assert!(zero_limit
         .to_string()
         .contains("FDC_MARKET_DATA_CANDLES_LIMIT_PER_PAGE"));
@@ -528,6 +544,99 @@ fn contract_acquisition_config_is_disabled_by_default() {
 }
 
 #[test]
+fn contract_acquisition_scheduler_config_defaults_disabled() {
+    let config = ServerRuntimeConfig::from_env_pairs([] as [(&str, &str); 0])
+        .expect("defaults should parse");
+
+    assert!(!config.market_data_contract_acquisition.scheduler_enabled);
+    assert_eq!(
+        config
+            .market_data_contract_acquisition
+            .scheduler_interval_seconds,
+        3600
+    );
+    assert_eq!(
+        config
+            .market_data_contract_acquisition
+            .scheduler_jitter_seconds,
+        0
+    );
+    assert_eq!(
+        config
+            .market_data_contract_acquisition
+            .scheduler_max_consecutive_failures,
+        3
+    );
+}
+
+#[test]
+fn contract_acquisition_scheduler_config_accepts_valid_overrides() {
+    let config = ServerRuntimeConfig::from_env_pairs([
+        ("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_ENABLED", "1"),
+        (
+            "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_INTERVAL_SECONDS",
+            "120",
+        ),
+        ("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_JITTER_SECONDS", "15"),
+        (
+            "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+            "5",
+        ),
+    ])
+    .expect("contract scheduler config should parse");
+
+    assert!(config.market_data_contract_acquisition.scheduler_enabled);
+    assert_eq!(
+        config
+            .market_data_contract_acquisition
+            .scheduler_interval_seconds,
+        120
+    );
+    assert_eq!(
+        config
+            .market_data_contract_acquisition
+            .scheduler_jitter_seconds,
+        15
+    );
+    assert_eq!(
+        config
+            .market_data_contract_acquisition
+            .scheduler_max_consecutive_failures,
+        5
+    );
+}
+
+#[test]
+fn contract_acquisition_scheduler_config_rejects_invalid_values() {
+    let interval_error = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_INTERVAL_SECONDS",
+        "0",
+    )])
+    .expect_err("zero interval should be rejected");
+    assert!(interval_error
+        .to_string()
+        .contains("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_INTERVAL_SECONDS"));
+
+    let jitter_error = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_JITTER_SECONDS",
+        "86401",
+    )])
+    .expect_err("large jitter should be rejected");
+    assert!(jitter_error
+        .to_string()
+        .contains("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_JITTER_SECONDS"));
+
+    let failures_error = ServerRuntimeConfig::from_env_pairs([(
+        "FDC_MARKET_DATA_CONTRACTS_SCHEDULER_MAX_CONSECUTIVE_FAILURES",
+        "0",
+    )])
+    .expect_err("zero max failures should be rejected");
+    assert!(failures_error
+        .to_string()
+        .contains("FDC_MARKET_DATA_CONTRACTS_SCHEDULER_MAX_CONSECUTIVE_FAILURES"));
+}
+
+#[test]
 fn contract_acquisition_config_accepts_env_overrides() {
     let config = ServerRuntimeConfig::from_env_pairs([
         ("FDC_MARKET_DATA_CONTRACTS_ENABLED", "1"),
@@ -553,7 +662,10 @@ fn contract_acquisition_config_accepts_env_overrides() {
         config.market_data_contract_acquisition.symbols,
         vec!["BTCUSDT", "ETHUSDT"]
     );
-    assert_eq!(config.market_data_contract_acquisition.kinds, vec!["candle"]);
+    assert_eq!(
+        config.market_data_contract_acquisition.kinds,
+        vec!["candle"]
+    );
     assert_eq!(
         config.market_data_contract_acquisition.intervals,
         vec!["1m", "5m"]
