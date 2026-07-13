@@ -18,7 +18,7 @@ README 定义的是 FDC 的总体能力边界：
 - 面向因子、策略、分析的数据支撑体系；
 - 行情、新闻、公告、宏观、基本面、链上、舆情、另类数据等数据域边界；
 - 各模块围绕标准数据模型的职责划分；
-- `fdc-types` 与 `fdc-market` 以及后续扩展数据域的边界；
+- `fdc-types` 与 `fdc-data` 的边界；
 - 后续从实验分支迁移 adapter、orchestrator、market data pipeline 的方式。
 
 核心原则：
@@ -48,8 +48,7 @@ FDC_architecture_design.md
 - README 中的 `fdc-types` 仍负责自定义类型系统；
 - README 中的 `fdc-wasm` 仍负责横向扩展能力；
 - README 中的 `fdc-storage` 仍负责多层存储；
-- 本文新增的 `fdc-market` 负责标准市场行情和市场微观结构模型；
-- 新闻、公告、宏观、基本面、链上、舆情等数据域应作为后续 canonical data domains 纳入同一数据支撑体系；
+- 本文新增的 `fdc-data` 负责统一标准金融数据模型，并在 crate 内部按 market、reference、news、macro_data、fundamental、onchain、altdata、portfolio 等领域分模块；
 - 后续新增的 `fdc-factor`、`fdc-feature` 用于量化研究和特征体系。
 
 推荐将 README 项目结构扩展为：
@@ -59,7 +58,7 @@ crates/
   fdc-core/          基础设施
   fdc-common/        通用工具
   fdc-types/         自定义类型系统与金融基础类型
-  fdc-market/        标准行情与市场微观结构模型
+  fdc-data/          统一标准金融数据模型，内部按领域分模块
   fdc-wasm/          WASM 插件系统
   fdc-ingestion/     数据接入管线
   fdc-transform/     数据转换与派生
@@ -67,10 +66,6 @@ crates/
   fdc-query/         查询引擎
   fdc-factor/        因子定义与计算
   fdc-feature/       特征模型与特征存储接口
-  fdc-news/          新闻、公告、事件数据模型（后续可选）
-  fdc-macro/         宏观经济数据模型（后续可选）
-  fdc-fundamental/   基本面数据模型（后续可选）
-  fdc-altdata/       链上、舆情、另类数据模型（后续可选）
   fdc-analytics/     分析、风控、回测统计
   fdc-proto/         Protobuf/gRPC wire schema
   fdc-api/           API 层
@@ -98,7 +93,7 @@ crates/
 ```text
 外部数据源
   -> fdc-adapter / fdc-ingestion
-  -> fdc-market
+  -> fdc-data
   -> fdc-transform
   -> fdc-storage
   -> fdc-query
@@ -108,7 +103,7 @@ crates/
 其中：
 
 ```text
-fdc-market 是标准市场语义层。
+fdc-data 是统一标准金融数据模型层，其中 market 子模块负责标准市场语义。
 fdc-types 是基础类型系统层。
 fdc-storage 是持久化层。
 fdc-query 是查询层。
@@ -132,8 +127,15 @@ fdc-ingestion
   receiver, parser, validator, buffer, backpressure, checkpoint, source envelope
         |
         v
-fdc-market
-  Instrument, Trade, Bar, OrderBook, FundingRate, OpenInterest, MarketEvent
+fdc-data
+  market::{Instrument, Trade, Bar, OrderBook}
+  reference::{InstrumentRegistry, Calendar}
+  news::{NewsArticle, Announcement}
+  macro_data::{MacroIndicator, MacroRelease}
+  fundamental::{FinancialStatement, FundamentalMetric}
+  onchain::{OnChainTransaction, ProtocolMetric}
+  altdata::{SentimentScore, AlternativeMetric}
+  portfolio::{Order, Fill, Position}
         |
         +--------------------+
         |                    |
@@ -167,7 +169,7 @@ fdc-transform          fdc-storage
 - 自定义因子；
 - 自定义分析逻辑。
 
-但 `fdc-market` 不依赖 `fdc-wasm`，以保持 canonical model 稳定、低依赖、可测试。
+但 `fdc-data` 不依赖 `fdc-wasm`，以保持 canonical model 稳定、低依赖、可测试。
 
 ---
 
@@ -185,11 +187,11 @@ Canonical Financial Data Domains
   面向量化研究的完整数据域：行情、新闻、公告、宏观、基本面、链上、舆情、另类数据等。
 ```
 
-`fdc-market` 是第一阶段最重要的数据域，但它不是 FDC 的全部数据模型。长期应形成多个标准数据域，共同服务 `fdc-factor`、`fdc-feature`、`fdc-analytics` 和 Strategy。
+`fdc-data::market` 是第一阶段最重要的数据域，但它不是 FDC 的全部数据模型。长期应在同一个 `fdc-data` crate 内形成多个标准数据域，共同服务 `fdc-factor`、`fdc-feature`、`fdc-analytics` 和 Strategy。
 
 ### 5.1 行情与市场微观结构数据
 
-这是 `fdc-market` 的核心范围，也是实盘和高频策略的基础。
+这是 `fdc-data::market` 的核心范围，也是实盘和高频策略的基础。
 
 包括：
 
@@ -501,26 +503,65 @@ entity_links
 
 ### 5.10 对模块设计的影响
 
-因此，后续架构不应只有 `fdc-market` 一个领域 crate。更合理的长期方向是：
+为避免 crates 过早膨胀，后续不建议为每个数据域单独新建 crate。更合理的长期方向是新增一个统一标准数据定义模块：
 
 ```text
-fdc-market       行情与市场微观结构
-fdc-reference    主数据、交易日历、合约规格、实体映射
-fdc-news         新闻、公告、事件
-fdc-macro        宏观经济数据
-fdc-fundamental  基本面和财务数据
-fdc-onchain      链上数据
-fdc-altdata      舆情和另类数据
-fdc-portfolio    订单、成交、持仓、组合、策略运行数据
+fdc-data
+  market/        行情与市场微观结构
+  reference/     主数据、交易日历、合约规格、实体映射
+  news/          新闻、公告、事件
+  macro_data/    宏观经济数据
+  fundamental/   基本面和财务数据
+  onchain/       链上数据
+  altdata/       舆情和另类数据
+  portfolio/     订单、成交、持仓、组合、策略运行数据
+  common/        跨数据域通用元数据、实体链接、schema version、lineage
 ```
 
-第一阶段仍建议先做 `fdc-market`，但文档和接口必须预留多数据域扩展能力，避免系统被设计成只能处理 Trade/Bar/OrderBook 的行情库。
+第一阶段建议先实现 `fdc-data::market` 和 `fdc-data::reference`，但模块结构和通用元数据必须预留多数据域扩展能力，避免系统被设计成只能处理 Trade/Bar/OrderBook 的行情库。
 
-## 6. fdc-types 与 fdc-market 的边界
+如果未来某个数据域变得足够复杂或需要独立发布，再考虑从 `fdc-data` 内部模块拆分为独立 crate。拆分应是后期演进结果，而不是第一阶段默认设计。
 
-这是新方案中最重要的边界。
+### 5.11 fdc-data 内部模块化原则
 
-### 5.1 fdc-types 的职责
+`fdc-data` 不是一个大杂烩 crate，而是一个集中发布、内部边界清晰的标准数据定义 crate。它应遵循以下原则：
+
+1. **一个 crate，多个 domain modules**：第一阶段不创建 `fdc-news`、`fdc-macro`、`fdc-fundamental` 等独立 crate。所有标准金融数据模型先进入 `fdc-data`。
+2. **common 只放跨域元数据**：`common` 放 `DataId`、`SourceId`、`Domain`、`SchemaVersion`、时间戳语义、质量标记、lineage、entity links 等跨域结构，不放具体业务对象。
+3. **reference 是跨域基础设施**：交易日历、交易所、合约规格、实体映射、标的关系等放 `reference`，供 market、fundamental、news 等领域引用。
+4. **domain modules 保持低耦合**：`market` 可以引用 `common` 和 `reference` 的基础标识，但不应直接依赖 `news`、`macro_data`、`portfolio` 等兄弟模块的具体对象。跨域关系通过 `common::EntityLink`、`common::DataId` 或明确的 join key 表达。
+5. **拆 crate 是例外，不是默认**：只有当某个领域需要独立版本、独立 feature flags、独立依赖树或独立维护团队时，才考虑从 `fdc-data` 中拆出。拆出时必须保持原路径的 compatibility re-export。
+
+推荐内部依赖方向：
+
+```text
+fdc_data::common
+  -> no fdc_data sibling dependency
+
+fdc_data::reference
+  -> common
+
+fdc_data::market
+  -> common, reference
+
+fdc_data::{news, macro_data, fundamental, onchain, altdata, portfolio}
+  -> common, reference
+```
+
+禁止内部依赖形成领域环：
+
+```text
+market -> news -> market
+fundamental -> portfolio -> fundamental
+common -> any domain module
+reference -> market/news/macro_data/...
+```
+
+## 6. fdc-types 与 fdc-data 的边界
+
+这是新方案中最重要的边界。`fdc-data` 是统一标准金融数据模型 crate，`fdc-data::market` 是其中的行情与市场微观结构子模块。
+
+### 6.1 fdc-types 的职责
 
 `fdc-types` 负责“字段是什么类型”。
 
@@ -555,11 +596,11 @@ price 字段如何表达，精度是多少，是否合法，如何序列化，�
 这个 price 是一笔 Trade 的成交价，还是一个 Bar 的收盘价。
 ```
 
-### 5.2 fdc-market 的职责
+### 6.2 fdc-data 的职责
 
-`fdc-market` 负责“这些字段组成什么市场对象”。
+`fdc-data` 负责“这些字段组成什么标准金融数据对象”。
 
-它是金融市场领域模型层，适合包含：
+它是统一标准金融数据模型层，内部按领域分模块。第一阶段 `market` 子模块适合包含：
 
 - `InstrumentId`；
 - `Instrument`；
@@ -592,25 +633,25 @@ price 字段如何表达，精度是多少，是否合法，如何序列化，�
 Trade、Bar、OrderBook、FundingRate、OpenInterest 等市场对象如何标准表达。
 ```
 
-### 5.3 推荐依赖关系
+### 6.3 推荐依赖关系
 
 ```text
 fdc-core
   -> fdc-types
-  -> fdc-market
+  -> fdc-data
 ```
 
 严格避免：
 
 ```text
-fdc-types -> fdc-market
-fdc-market -> fdc-storage
-fdc-market -> fdc-query
-fdc-market -> fdc-transform
-fdc-market -> fdc-wasm
+fdc-types -> fdc-data
+fdc-data -> fdc-storage
+fdc-data -> fdc-query
+fdc-data -> fdc-transform
+fdc-data -> fdc-wasm
 ```
 
-### 5.4 当前代码中的重叠
+### 6.4 当前代码中的重叠
 
 当前 `fdc-core::types` 已包含：
 
@@ -637,9 +678,9 @@ fdc-market -> fdc-wasm
 短期策略：
 
 - 不立即删除旧类型；
-- `fdc-market` 第一版可临时使用 `fdc-core::TimestampNs`；
+- `fdc-data` 第一版可临时使用 `fdc-core::TimestampNs`；
 - `Price`、`Symbol`、`Volume` 的长期归属应是 `fdc-types`；
-- `TickData`、`MessageType` 的长期归属应是 `fdc-market`；
+- `TickData`、`MessageType` 的长期归属应是 `fdc-data::market`；
 - 通过 re-export 和 compatibility module 渐进迁移。
 
 ---
@@ -699,15 +740,15 @@ fdc-market -> fdc-wasm
 - introspection；
 - WASM 类型转换集成。
 
-它可以被 `fdc-market` 使用，但不依赖 `fdc-market`。
+它可以被 `fdc-data` 使用，但不依赖 `fdc-data`。
 
-### 7.4 fdc-market
+### 7.4 fdc-data
 
-定位：标准行情与市场微观结构数据模型。
+定位：统一标准金融数据模型，内部按数据域细分模块。第一阶段重点实现 market 和 reference。
 
 第一版目标：
 
-- 建立 `Instrument` / `InstrumentId` / `InstrumentRegistry`；
+- 建立 `market::Instrument` / `InstrumentId` / `reference::InstrumentRegistry`；
 - 建立 `Trade` / `Bar` / `OrderBook` 等基础市场对象；
 - 建立 `MarketEvent` 统一事件枚举；
 - 建立 `MarketDataQuality` 和时间语义；
@@ -740,13 +781,13 @@ fdc-market -> fdc-wasm
 未来输出应转向：
 
 ```text
-SourceEnvelope<fdc_market::MarketEvent>
+SourceEnvelope<fdc_data::market::MarketEvent>
 ```
 
 或：
 
 ```text
-SourceEnvelope<RawExchangeEvent> -> Mapper -> fdc_market::MarketEvent
+SourceEnvelope<RawExchangeEvent> -> Mapper -> fdc_data::market::MarketEvent
 ```
 
 不负责：
@@ -766,7 +807,7 @@ SourceEnvelope<RawExchangeEvent> -> Mapper -> fdc_market::MarketEvent
 - REST/WebSocket client；
 - exchange-specific raw model；
 - exchange-specific parser；
-- raw event 到 `fdc-market` 的 mapper。
+- raw event 到 `fdc_data::market::MarketEvent` 的 mapper。
 
 与 `fdc-ingestion` 的区别：
 
@@ -796,16 +837,16 @@ fdc-ingestion 负责统一接入管线。
 输入：
 
 ```text
-fdc_market::Trade
-fdc_market::OrderBook
-fdc_market::MarketEvent
+fdc_data::market::Trade
+fdc_data::market::OrderBook
+fdc_data::market::MarketEvent
 ```
 
 输出：
 
 ```text
-fdc_market::Bar
-fdc_market::DerivedEvent
+fdc_data::market::Bar
+fdc_data::market::DerivedEvent
 fdc_feature::Feature
 ```
 
@@ -904,7 +945,7 @@ instrument_id + market_data_kind + time_range
 依赖建议：
 
 ```text
-fdc-factor -> fdc-market
+fdc-factor -> fdc-data
 fdc-factor -> fdc-feature
 fdc-factor -> fdc-transform
 fdc-factor -> fdc-wasm 可选
@@ -947,12 +988,12 @@ fdc-feature 负责算出来的数据如何表达、组织和存取。
 - backtest reports；
 - portfolio metrics。
 
-当前 `fdc-analytics::models::MarketData` 与未来 `fdc_market::Bar` 重复。
+当前 `fdc-analytics::models::MarketData` 与未来 `fdc_data::market::Bar` 重复。
 
 长期策略：
 
 - `fdc-analytics` 不定义 canonical market data；
-- 使用 `fdc_market::Bar` / `fdc_market::Trade` 作为输入；
+- 使用 `fdc_data::market::Bar` / `fdc_data::market::Trade` 作为输入；
 - 只保留 `AnalyticsResult`、`RiskMetrics`、`PredictionResult` 等分析结果模型。
 
 ### 7.13 fdc-wasm
@@ -973,7 +1014,7 @@ fdc-feature 负责算出来的数据如何表达、组织和存取。
 - custom factor；
 - custom type conversion。
 
-不应成为 `fdc-market` 的依赖。
+不应成为 `fdc-data` 的依赖。
 
 ### 7.14 fdc-api
 
@@ -1013,7 +1054,7 @@ fdc-feature 负责算出来的数据如何表达、组织和存取。
 边界：
 
 ```text
-fdc-market 是 Rust 内部 canonical model。
+fdc-data 是 Rust 内部 canonical model。
 fdc-proto 是外部 wire schema。
 ```
 
@@ -1090,7 +1131,7 @@ fdc-common
   ↓
 fdc-types
   ↓
-fdc-market
+fdc-data
   ↓
 fdc-ingestion / fdc-transform / fdc-storage / fdc-query
   ↓
@@ -1104,55 +1145,87 @@ fdc-api / fdc-server / fdc-cli / fdc-orchestrator
 ```text
 fdc-core       <- almost everyone
 fdc-types      -> fdc-core, optional fdc-wasm integration
-fdc-market     -> fdc-core, fdc-types
-fdc-ingestion  -> fdc-core, fdc-types, fdc-market
-fdc-transform  -> fdc-core, fdc-types, fdc-market, optional fdc-wasm
-fdc-storage    -> fdc-core, fdc-types, fdc-market, optional fdc-wasm
-fdc-query      -> fdc-core, fdc-types, fdc-market, fdc-storage, optional fdc-wasm
-fdc-factor     -> fdc-core, fdc-types, fdc-market, fdc-feature, optional fdc-wasm
-fdc-feature    -> fdc-core, fdc-types, fdc-market, optional fdc-storage
-fdc-analytics  -> fdc-core, fdc-types, fdc-market, fdc-query, fdc-feature
-fdc-api        -> fdc-core, fdc-market, fdc-query, fdc-ingestion
+fdc-data       -> fdc-core, fdc-types
+fdc-ingestion  -> fdc-core, fdc-types, fdc-data
+fdc-transform  -> fdc-core, fdc-types, fdc-data, optional fdc-wasm
+fdc-storage    -> fdc-core, fdc-types, fdc-data, optional fdc-wasm
+fdc-query      -> fdc-core, fdc-types, fdc-data, fdc-storage, optional fdc-wasm
+fdc-factor     -> fdc-core, fdc-types, fdc-data, fdc-feature, optional fdc-wasm
+fdc-feature    -> fdc-core, fdc-types, fdc-data, optional fdc-storage
+fdc-analytics  -> fdc-core, fdc-types, fdc-data, fdc-query, fdc-feature
+fdc-api        -> fdc-core, fdc-data, fdc-query, fdc-ingestion
 fdc-server     -> fdc-api, fdc-storage, fdc-query, fdc-ingestion, fdc-wasm, fdc-orchestrator
 fdc-cli        -> fdc-api client or direct service crates for admin commands
-fdc-proto      -> wire DTO, conversion to/from fdc-market
+fdc-proto      -> wire DTO, conversion to/from fdc-data
 ```
 
 禁止形成反向依赖：
 
 ```text
-fdc-market -> fdc-storage
-fdc-market -> fdc-query
-fdc-market -> fdc-transform
-fdc-market -> fdc-api
-fdc-market -> fdc-wasm
-fdc-types  -> fdc-market
-fdc-core   -> fdc-market
+fdc-data -> fdc-storage
+fdc-data -> fdc-query
+fdc-data -> fdc-transform
+fdc-data -> fdc-api
+fdc-data -> fdc-wasm
+fdc-types  -> fdc-data
+fdc-core   -> fdc-data
 ```
 
 ---
 
 ## 9. 标准市场数据模型初版范围
 
-`fdc-market` 第一版应聚焦最小可用 market canonical model。它服务行情与市场微观结构，不承载新闻、宏观、基本面、链上等全部数据域。
+`fdc-data` 第一版应聚焦最小可用 canonical financial data model。实现范围以 `market` 和 `reference` 子模块为主，同时预留 news、macro_data、fundamental、onchain、altdata、portfolio 等内部模块边界。
 
 建议模块结构：
 
 ```text
-crates/fdc-market/src/
+crates/fdc-data/src/
   lib.rs
-  instrument.rs
-  exchange.rs
-  time.rs
-  quality.rs
-  trade.rs
-  bar.rs
-  orderbook.rs
-  derivatives.rs
-  event.rs
-  registry.rs
+  common.rs
+  market/
+    mod.rs
+    instrument.rs
+    exchange.rs
+    trade.rs
+    bar.rs
+    orderbook.rs
+    derivatives.rs
+    event.rs
+  reference/
+    mod.rs
+    registry.rs
+    calendar.rs
+    entity.rs
+  news/
+    mod.rs
+  macro_data/
+    mod.rs
+  fundamental/
+    mod.rs
+  onchain/
+    mod.rs
+  altdata/
+    mod.rs
+  portfolio/
+    mod.rs
   schema.rs
+  quality.rs
 ```
+
+对外公开路径应稳定、明确：
+
+```rust
+fdc_data::common::DataId
+fdc_data::reference::InstrumentRegistry
+fdc_data::market::Trade
+fdc_data::market::Bar
+fdc_data::market::MarketEvent
+fdc_data::fundamental::FinancialStatement
+fdc_data::portfolio::Position
+```
+
+不建议在 crate root 大量平铺 re-export 所有领域对象，避免 `fdc_data::Bar`、`fdc_data::Position` 这类路径在长期演进中产生命名冲突。crate root 可以 re-export 最基础的 `common` 类型，领域对象应通过 domain module 访问。
 
 ### 8.1 Instrument
 
@@ -1258,7 +1331,7 @@ close_time       Bar 结束时间
 
 ## 11. 数据质量模型
 
-`fdc-market` 应包含基础质量标记，但不要把 ingestion 实现细节放进去。
+`fdc-data::common` 应包含跨数据域基础质量标记，`fdc-data::market` 可扩展市场数据质量字段，但不要把 ingestion 实现细节放进去。
 
 建议：
 
@@ -1339,7 +1412,7 @@ limit = 500
 返回：
 
 ```text
-Vec<fdc_market::Bar>
+Vec<fdc_data::market::Bar>
 ```
 
 ---
@@ -1361,9 +1434,9 @@ Vec<fdc_market::Bar>
 主要重叠点：
 
 1. `fdc-core::types` 与 `fdc-types` 重叠；
-2. `fdc-analytics::models::MarketData` 与未来 `fdc-market::Bar` 重叠；
+2. `fdc-analytics::models::MarketData` 与未来 `fdc-data::market::Bar` 重叠；
 3. `fdc-wasm::WasmValue` 与 `fdc_core::Value` 有转换关系，长期应转向 `fdc_types::Value`；
-4. 当前缺少独立 `fdc-market`，导致市场数据语义尚无统一归属。
+4. 当前缺少独立 `fdc-data`，导致金融数据语义尚无统一归属。
 
 ---
 
@@ -1384,10 +1457,10 @@ Vec<fdc_market::Bar>
 只迁移成熟思想，不直接延续临时边界。
 ```
 
-迁移时必须改为围绕 `fdc-market`：
+迁移时必须改为围绕 `fdc-data`：
 
 ```text
-adapter raw event -> fdc_market::MarketEvent -> storage/query/transform
+adapter raw event -> fdc_data::market::MarketEvent -> storage/query/transform
 ```
 
 不再把 canonical model 放在 `fdc-transform` 或 `fdc-orchestrator` 中。
@@ -1402,16 +1475,18 @@ adapter raw event -> fdc_market::MarketEvent -> storage/query/transform
 
 - 明确 README 与本文档关系；
 - 明确各 crate 职责；
-- 明确 `fdc-types` / `fdc-market` 边界；
+- 明确 `fdc-types` / `fdc-data` 边界；
 - 明确依赖方向；
 - 明确实验分支迁移策略。
 
-### Phase 1：新增 fdc-market
+### Phase 1：新增 fdc-data
 
 目标：
 
-- 新增 `crates/fdc-market`；
-- 定义最小 canonical market model；
+- 新增 `crates/fdc-data`；
+- 定义统一标准金融数据模型 crate；
+- 第一阶段实现 `market` 与 `reference` 子模块；
+- 预留 news/macro_data/fundamental/onchain/altdata/portfolio 内部模块边界；
 - 增加单元测试；
 - 不连接 storage/query/ingestion。
 
@@ -1427,8 +1502,8 @@ adapter raw event -> fdc_market::MarketEvent -> storage/query/transform
 
 目标：
 
-- `fdc-transform` 输入输出改为使用 `fdc-market`；
-- `fdc-analytics::MarketData` 逐步替换为 `fdc_market::Bar`；
+- `fdc-transform` 输入输出改为使用 `fdc_data::market`；
+- `fdc-analytics::MarketData` 逐步替换为 `fdc_data::market::Bar`；
 - 建立 `Trade -> Bar` 第一条转换链。
 
 ### Phase 4：接入 storage 和 query
@@ -1491,4 +1566,4 @@ FDC 不只是一个数据库。
 
 其中：
 
-> `fdc-market` 是行情与市场微观结构语义的核心，`fdc-types` 是基础类型系统的核心。FDC 还必须为新闻、公告、宏观、基本面、链上、舆情、组合与策略运行数据预留标准数据域扩展能力。
+> `fdc-data` 是统一标准金融数据模型的核心 crate，`fdc-data::market` 是行情与市场微观结构语义的核心子模块，`fdc-types` 是基础类型系统的核心。FDC 必须在一个集中数据标准模块内为新闻、公告、宏观、基本面、链上、舆情、组合与策略运行数据预留扩展能力，避免 crates 过早碎片化。
