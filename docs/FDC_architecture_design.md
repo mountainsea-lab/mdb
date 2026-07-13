@@ -1,4 +1,4 @@
-# 金融数据中心（FDC）标准市场模型与模块架构设计
+# 金融数据中心（FDC）标准金融数据模型与模块架构设计
 
 ## 1. 文档定位
 
@@ -12,16 +12,18 @@ README 定义的是 FDC 的总体能力边界：
 - 多引擎、多层级存储；
 - 查询、接入、分析、API、CLI、Server 等模块化架构。
 
-本文档定义的是市场数据语义边界：
+本文档定义的是金融数据语义边界：
 
 - 统一金融市场数据模型；
-- 各模块围绕该模型的职责划分；
-- `fdc-types` 与 `fdc-market` 的边界；
+- 面向因子、策略、分析的数据支撑体系；
+- 行情、新闻、公告、宏观、基本面、链上、舆情、另类数据等数据域边界；
+- 各模块围绕标准数据模型的职责划分；
+- `fdc-types` 与 `fdc-market` 以及后续扩展数据域的边界；
 - 后续从实验分支迁移 adapter、orchestrator、market data pipeline 的方式。
 
 核心原则：
 
-> FDC 不应首先被设计成一个数据库，而应首先拥有一个稳定的 Canonical Market Data Model，然后围绕该模型构建采集、转换、存储、查询、因子、分析和策略能力。
+> FDC 不应首先被设计成一个数据库，也不应只被设计成行情库，而应首先拥有稳定的 Canonical Financial Data Model，然后围绕这些标准数据域构建采集、转换、存储、查询、因子、分析和策略能力。
 
 ---
 
@@ -38,7 +40,7 @@ README.md
   定义系统级目标：性能、WASM、类型系统、存储、查询、API、分析。
 
 FDC_architecture_design.md
-  定义金融市场领域模型：Instrument、Trade、Bar、OrderBook、MarketEvent 等。
+  定义金融数据领域模型：Market Data、News、Macro、Fundamentals、On-chain、Alternative Data 等。
 ```
 
 二者并不冲突：
@@ -46,7 +48,8 @@ FDC_architecture_design.md
 - README 中的 `fdc-types` 仍负责自定义类型系统；
 - README 中的 `fdc-wasm` 仍负责横向扩展能力；
 - README 中的 `fdc-storage` 仍负责多层存储；
-- 本文新增的 `fdc-market` 负责标准市场数据模型；
+- 本文新增的 `fdc-market` 负责标准市场行情和市场微观结构模型；
+- 新闻、公告、宏观、基本面、链上、舆情等数据域应作为后续 canonical data domains 纳入同一数据支撑体系；
 - 后续新增的 `fdc-factor`、`fdc-feature` 用于量化研究和特征体系。
 
 推荐将 README 项目结构扩展为：
@@ -56,7 +59,7 @@ crates/
   fdc-core/          基础设施
   fdc-common/        通用工具
   fdc-types/         自定义类型系统与金融基础类型
-  fdc-market/        标准金融市场数据模型
+  fdc-market/        标准行情与市场微观结构模型
   fdc-wasm/          WASM 插件系统
   fdc-ingestion/     数据接入管线
   fdc-transform/     数据转换与派生
@@ -64,6 +67,10 @@ crates/
   fdc-query/         查询引擎
   fdc-factor/        因子定义与计算
   fdc-feature/       特征模型与特征存储接口
+  fdc-news/          新闻、公告、事件数据模型（后续可选）
+  fdc-macro/         宏观经济数据模型（后续可选）
+  fdc-fundamental/   基本面数据模型（后续可选）
+  fdc-altdata/       链上、舆情、另类数据模型（后续可选）
   fdc-analytics/     分析、风控、回测统计
   fdc-proto/         Protobuf/gRPC wire schema
   fdc-api/           API 层
@@ -164,7 +171,352 @@ fdc-transform          fdc-storage
 
 ---
 
-## 5. fdc-types 与 fdc-market 的边界
+## 5. 数据支撑目标与金融数据域
+
+FDC 的目标不是只采集行情，而是为后续因子计算、策略执行、回测分析、风险管理和研究平台提供统一、可追溯、可查询的数据支撑。
+
+因此系统应从一开始区分两层概念：
+
+```text
+Canonical Market Data Model
+  行情和市场微观结构：Trade、Bar、OrderBook、FundingRate、OpenInterest。
+
+Canonical Financial Data Domains
+  面向量化研究的完整数据域：行情、新闻、公告、宏观、基本面、链上、舆情、另类数据等。
+```
+
+`fdc-market` 是第一阶段最重要的数据域，但它不是 FDC 的全部数据模型。长期应形成多个标准数据域，共同服务 `fdc-factor`、`fdc-feature`、`fdc-analytics` 和 Strategy。
+
+### 5.1 行情与市场微观结构数据
+
+这是 `fdc-market` 的核心范围，也是实盘和高频策略的基础。
+
+包括：
+
+- Instrument / Symbol / Contract Spec；
+- Trade / Tick；
+- Bar / OHLCV / VWAP；
+- OrderBook L1/L2/L3；
+- OrderBookDelta；
+- FundingRate；
+- OpenInterest；
+- MarkPrice / IndexPrice；
+- Liquidation；
+- Futures Basis；
+- Perpetual Swap Premium；
+- Option Chain；
+- Implied Volatility；
+- Greeks；
+- Spread / Depth / Liquidity metrics。
+
+典型用途：
+
+- 高频策略；
+- 趋势、动量、反转因子；
+- 波动率因子；
+- 流动性因子；
+- 订单流因子；
+- 回测撮合；
+- 风险监控。
+
+### 5.2 参考数据与主数据
+
+参考数据是所有数据域对齐的基础。没有稳定主数据，行情、新闻、基本面和策略持仓无法可靠关联。
+
+包括：
+
+- Instrument Registry；
+- exchange / venue；
+- trading calendar；
+- session hours；
+- contract specification；
+- tick size / lot size；
+- margin rules；
+- symbol mapping；
+- listing / delisting；
+- corporate actions；
+- asset metadata；
+- sector / industry classification。
+
+典型用途：
+
+- 将不同来源的 symbol 映射到统一 `instrument_id`；
+- 回测时处理合约换月、股票复权、交易日历；
+- 新闻和公告与资产关联；
+- 因子横截面分组和行业中性化。
+
+### 5.3 新闻、公告与事件数据
+
+新闻和事件数据是中低频策略、事件驱动策略和风险管理的重要输入。
+
+包括：
+
+- 新闻文章；
+- 交易所公告；
+- 项目公告；
+- 监管公告；
+- 上市 / 下架 / 停牌 / 复牌；
+- 财报发布事件；
+- 宏观数据发布时间表；
+- 央行会议；
+- 突发事件；
+- 事件标签；
+- NLP 情绪分数；
+- entity extraction；
+- topic classification。
+
+建议标准对象：
+
+```text
+NewsArticle
+Announcement
+CalendarEvent
+CorporateEvent
+RegulatoryEvent
+EventEntityLink
+SentimentScore
+```
+
+典型用途：
+
+- 新闻情绪因子；
+- 事件驱动策略；
+- 公告前后收益分析；
+- 风险预警；
+- 策略交易过滤器。
+
+### 5.4 宏观经济数据
+
+宏观数据为资产配置、风险因子、跨品种策略和 regime 判断提供支撑。
+
+包括：
+
+- CPI / PPI；
+- GDP；
+- unemployment / NFP；
+- interest rate；
+- yield curve；
+- central bank decision；
+- money supply；
+- PMI；
+- FX rates；
+- commodity inventory；
+- economic calendar；
+- actual / forecast / previous。
+
+建议标准对象：
+
+```text
+MacroIndicator
+MacroRelease
+EconomicCalendarEvent
+RateCurve
+YieldCurvePoint
+```
+
+典型用途：
+
+- 宏观 regime 因子；
+- 利率敏感性分析；
+- 跨资产配置；
+- 事件窗口回测；
+- 风险因子暴露分析。
+
+### 5.5 基本面与财务数据
+
+基本面数据主要服务股票、债券、基金、项目研究和中低频策略。
+
+包括：
+
+- income statement；
+- balance sheet；
+- cashflow statement；
+- valuation ratios；
+- earnings estimate；
+- analyst rating；
+- revenue / profit / margin；
+- shares outstanding；
+- dividend；
+- buyback；
+- tokenomics / protocol revenue。
+
+建议标准对象：
+
+```text
+FinancialStatement
+FundamentalMetric
+EarningsEvent
+AnalystRating
+ValuationSnapshot
+```
+
+典型用途：
+
+- 价值因子；
+- 成长因子；
+- 质量因子；
+- 财报事件策略；
+- 横截面选股。
+
+### 5.6 链上与加密原生数据
+
+对于 crypto 市场，链上数据是区别于传统金融的重要数据域。
+
+包括：
+
+- block / transaction；
+- address balance；
+- exchange inflow/outflow；
+- whale transfer；
+- stablecoin supply；
+- DeFi TVL；
+- protocol revenue；
+- staking；
+- gas fee；
+- active address；
+- holder distribution；
+- liquidation on lending protocols。
+
+建议标准对象：
+
+```text
+OnChainTransaction
+AddressBalanceSnapshot
+ExchangeFlow
+ProtocolMetric
+StablecoinSupply
+DefiTvlSnapshot
+```
+
+典型用途：
+
+- 链上资金流因子；
+- 稳定币流动性因子；
+- DeFi 风险监控；
+- 大户行为分析；
+- crypto regime 判断。
+
+### 5.7 舆情与另类数据
+
+另类数据用于捕捉传统行情以外的信息优势。
+
+包括：
+
+- social media posts；
+- forum / community discussions；
+- search trends；
+- app ranking；
+- web traffic；
+- GitHub activity；
+- developer activity；
+- sentiment score；
+- topic trend；
+- crowd attention。
+
+建议标准对象：
+
+```text
+SocialPost
+SentimentScore
+TrendMetric
+AttentionMetric
+DeveloperActivity
+AlternativeMetric
+```
+
+典型用途：
+
+- 热度因子；
+- 情绪反转因子；
+- 项目活跃度分析；
+- 风险事件监控；
+- 新闻确认信号。
+
+### 5.8 策略、交易与组合数据
+
+除了外部数据，FDC 还应保存内部策略运行数据，便于归因和复盘。
+
+包括：
+
+- orders；
+- fills；
+- positions；
+- portfolio snapshot；
+- cash balance；
+- PnL；
+- risk exposure；
+- signal snapshot；
+- decision log；
+- execution report。
+
+建议标准对象：
+
+```text
+Order
+Fill
+Position
+PortfolioSnapshot
+SignalSnapshot
+DecisionLog
+ExecutionReport
+RiskSnapshot
+```
+
+典型用途：
+
+- 策略归因；
+- 交易成本分析；
+- 风控；
+- 复盘；
+- 训练 execution model。
+
+### 5.9 跨数据域通用元数据
+
+所有数据域都应有统一元数据，以支持追溯、质量控制和回测一致性。
+
+建议通用字段：
+
+```text
+data_id
+source_id
+source_type
+domain
+schema_version
+event_time
+received_time
+ingested_time
+emitted_time
+quality_flags
+lineage
+raw_reference
+entity_links
+```
+
+其中：
+
+- `domain` 区分 market/news/macro/fundamental/onchain/alternative/portfolio；
+- `schema_version` 支持模型演进；
+- `lineage` 记录数据来源和转换链；
+- `entity_links` 将新闻、宏观、链上、基本面数据关联到 instrument、asset、issuer、protocol、country 等实体。
+
+### 5.10 对模块设计的影响
+
+因此，后续架构不应只有 `fdc-market` 一个领域 crate。更合理的长期方向是：
+
+```text
+fdc-market       行情与市场微观结构
+fdc-reference    主数据、交易日历、合约规格、实体映射
+fdc-news         新闻、公告、事件
+fdc-macro        宏观经济数据
+fdc-fundamental  基本面和财务数据
+fdc-onchain      链上数据
+fdc-altdata      舆情和另类数据
+fdc-portfolio    订单、成交、持仓、组合、策略运行数据
+```
+
+第一阶段仍建议先做 `fdc-market`，但文档和接口必须预留多数据域扩展能力，避免系统被设计成只能处理 Trade/Bar/OrderBook 的行情库。
+
+## 6. fdc-types 与 fdc-market 的边界
 
 这是新方案中最重要的边界。
 
@@ -292,9 +644,9 @@ fdc-market -> fdc-wasm
 
 ---
 
-## 6. 模块职责定义
+## 7. 模块职责定义
 
-### 6.1 fdc-core
+### 7.1 fdc-core
 
 定位：底层基础设施。
 
@@ -318,7 +670,7 @@ fdc-market -> fdc-wasm
 
 当前代码中 `fdc-core::types` 已承担较多类型系统职责，后续应逐步收敛。
 
-### 6.2 fdc-common
+### 7.2 fdc-common
 
 定位：跨 crate 通用工具。
 
@@ -332,7 +684,7 @@ fdc-market -> fdc-wasm
 
 不应放领域模型。
 
-### 6.3 fdc-types
+### 7.3 fdc-types
 
 定位：自定义类型系统和基础金融类型。
 
@@ -349,9 +701,9 @@ fdc-market -> fdc-wasm
 
 它可以被 `fdc-market` 使用，但不依赖 `fdc-market`。
 
-### 6.4 fdc-market
+### 7.4 fdc-market
 
-定位：标准金融市场数据模型。
+定位：标准行情与市场微观结构数据模型。
 
 第一版目标：
 
@@ -368,7 +720,7 @@ fdc-market -> fdc-wasm
 - 所有交易所差异在进入该层前或该层边界处被消化；
 - 不依赖存储、查询、转换、WASM、API。
 
-### 6.5 fdc-ingestion
+### 7.5 fdc-ingestion
 
 定位：数据接入管线。
 
@@ -404,7 +756,7 @@ SourceEnvelope<RawExchangeEvent> -> Mapper -> fdc_market::MarketEvent
 - factor；
 - storage tier routing。
 
-### 6.6 fdc-adapter/*
+### 7.6 fdc-adapter/*
 
 定位：具体数据源适配器。
 
@@ -425,7 +777,7 @@ fdc-ingestion 负责统一接入管线。
 
 实验分支中的 `fdc-adapter/barter` 可作为后续迁移参考。
 
-### 6.7 fdc-transform
+### 7.7 fdc-transform
 
 定位：标准市场数据加工层。
 
@@ -459,7 +811,7 @@ fdc_feature::Feature
 
 不应拥有 canonical market model。
 
-### 6.8 fdc-storage
+### 7.8 fdc-storage
 
 定位：多层存储引擎。
 
@@ -494,7 +846,7 @@ fdc-storage::market
 
 底层仍使用 `StorageEngine`。
 
-### 6.9 fdc-query
+### 7.9 fdc-query
 
 定位：查询引擎。
 
@@ -531,7 +883,7 @@ instrument_id + market_data_kind + time_range
 
 而不是只围绕 `symbol string`。
 
-### 6.10 fdc-factor
+### 7.10 fdc-factor
 
 定位：因子定义和计算。
 
@@ -558,7 +910,7 @@ fdc-factor -> fdc-transform
 fdc-factor -> fdc-wasm 可选
 ```
 
-### 6.11 fdc-feature
+### 7.11 fdc-feature
 
 定位：特征模型和特征存储接口。
 
@@ -581,7 +933,7 @@ fdc-factor 负责怎么算。
 fdc-feature 负责算出来的数据如何表达、组织和存取。
 ```
 
-### 6.12 fdc-analytics
+### 7.12 fdc-analytics
 
 定位：分析、回测统计、风控和报告。
 
@@ -603,7 +955,7 @@ fdc-feature 负责算出来的数据如何表达、组织和存取。
 - 使用 `fdc_market::Bar` / `fdc_market::Trade` 作为输入；
 - 只保留 `AnalyticsResult`、`RiskMetrics`、`PredictionResult` 等分析结果模型。
 
-### 6.13 fdc-wasm
+### 7.13 fdc-wasm
 
 定位：插件和扩展执行层。
 
@@ -623,7 +975,7 @@ fdc-feature 负责算出来的数据如何表达、组织和存取。
 
 不应成为 `fdc-market` 的依赖。
 
-### 6.14 fdc-api
+### 7.14 fdc-api
 
 定位：对外 API 层。
 
@@ -647,7 +999,7 @@ fdc-feature 负责算出来的数据如何表达、组织和存取。
 - 存储实现；
 - canonical model 定义。
 
-### 6.15 fdc-proto
+### 7.15 fdc-proto
 
 定位：wire protocol。
 
@@ -667,7 +1019,7 @@ fdc-proto 是外部 wire schema。
 
 二者通过 conversion 层互转。
 
-### 6.16 fdc-server
+### 7.16 fdc-server
 
 定位：服务组装层。
 
@@ -689,7 +1041,7 @@ fdc-api    负责 API crate、routes、handlers、DTO。
 fdc-server 负责 application composition 和 binary/service startup。
 ```
 
-### 6.17 fdc-cli
+### 7.17 fdc-cli
 
 定位：命令行工具。
 
@@ -705,7 +1057,7 @@ fdc-server 负责 application composition 和 binary/service startup。
 - run benchmarks；
 - development utilities。
 
-### 6.18 fdc-orchestrator
+### 7.18 fdc-orchestrator
 
 定位：运行时编排层。
 
@@ -727,7 +1079,7 @@ fdc-server 负责 application composition 和 binary/service startup。
 
 ---
 
-## 7. 推荐依赖方向
+## 8. 推荐依赖方向
 
 总体依赖方向：
 
@@ -780,9 +1132,9 @@ fdc-core   -> fdc-market
 
 ---
 
-## 8. 标准市场数据模型初版范围
+## 9. 标准市场数据模型初版范围
 
-`fdc-market` 第一版应聚焦最小可用 canonical model。
+`fdc-market` 第一版应聚焦最小可用 market canonical model。它服务行情与市场微观结构，不承载新闻、宏观、基本面、链上等全部数据域。
 
 建议模块结构：
 
@@ -880,7 +1232,7 @@ pub enum MarketEvent {
 
 ---
 
-## 9. 时间语义
+## 10. 时间语义
 
 金融市场数据必须明确多种时间：
 
@@ -904,7 +1256,7 @@ close_time       Bar 结束时间
 
 ---
 
-## 10. 数据质量模型
+## 11. 数据质量模型
 
 `fdc-market` 应包含基础质量标记，但不要把 ingestion 实现细节放进去。
 
@@ -925,7 +1277,7 @@ pub struct MarketDataQuality {
 
 ---
 
-## 11. 存储分层与标准模型
+## 12. 存储分层与标准模型
 
 存储层只关心标准模型，不关心 Binance/OKX/Bybit 原始格式。
 
@@ -952,7 +1304,7 @@ exchange string / symbol string / raw source format
 
 ---
 
-## 12. 查询语义
+## 13. 查询语义
 
 查询层应同时支持：
 
@@ -992,7 +1344,7 @@ Vec<fdc_market::Bar>
 
 ---
 
-## 13. 当前 upstream/main 模块实现盘点
+## 14. 当前 upstream/main 模块实现盘点
 
 当前项目中：
 
@@ -1015,7 +1367,7 @@ Vec<fdc_market::Bar>
 
 ---
 
-## 14. 实验分支迁移策略
+## 15. 实验分支迁移策略
 
 当前新分支从干净 `main` 开始。实验分支 `mdb-mqdev` 中已有一些可参考成果：
 
@@ -1042,7 +1394,7 @@ adapter raw event -> fdc_market::MarketEvent -> storage/query/transform
 
 ---
 
-## 15. 推荐开发阶段
+## 16. 推荐开发阶段
 
 ### Phase 0：文档和边界确认
 
@@ -1106,13 +1458,13 @@ adapter raw event -> fdc_market::MarketEvent -> storage/query/transform
 
 ---
 
-## 16. 最终定位
+## 17. 最终定位
 
 FDC 不只是一个数据库。
 
 它应成为：
 
-> Rust 实现的高性能量化金融数据基础设施。
+> Rust 实现的高性能量化金融数据基础设施，而不是单一行情数据库。
 
 它结合：
 
@@ -1128,7 +1480,7 @@ FDC 不只是一个数据库。
 ```text
 基础设施
   -> 类型系统
-  -> 标准市场模型
+  -> 标准金融数据域
   -> 数据采集
   -> 数据转换
   -> 数据存储
@@ -1139,4 +1491,4 @@ FDC 不只是一个数据库。
 
 其中：
 
-> `fdc-market` 是市场数据语义的核心，`fdc-types` 是基础类型系统的核心，二者必须协作但不能重复。
+> `fdc-market` 是行情与市场微观结构语义的核心，`fdc-types` 是基础类型系统的核心。FDC 还必须为新闻、公告、宏观、基本面、链上、舆情、组合与策略运行数据预留标准数据域扩展能力。
