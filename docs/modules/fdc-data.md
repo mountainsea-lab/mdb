@@ -1103,9 +1103,17 @@ pub struct IndexPrice {
 ### 15.4 Liquidation
 
 ```rust
+pub enum LiquidationSide {
+    LongLiquidated,
+    ShortLiquidated,
+    BuyOrder,
+    SellOrder,
+    Unknown,
+}
+
 pub struct Liquidation {
     pub instrument_id: InstrumentId,
-    pub side: AggressorSide,
+    pub side: LiquidationSide,
     pub price: Price,
     pub quantity: Quantity,
     pub event_time: TimestampNs,
@@ -1116,7 +1124,7 @@ pub struct Liquidation {
 
 设计说明：
 
-- `side` 对 liquidation 的含义必须在 adapter mapper 中统一成 canonical 语义；
+- liquidation side 语义在不同交易所差异较大，详细设计见 `docs/modules/fdc-data-market.md`；
 - 不同交易所 liquidation payload 差异较大，source-specific 字段不进入核心结构。
 
 ---
