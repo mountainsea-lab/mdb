@@ -818,6 +818,14 @@ fdc-ingestion 负责统一接入管线。
 
 实验分支中的 `fdc-adapter/barter` 可作为后续迁移参考。
 
+后续具体设计实现可重点参考 `barter-rs` 的 adapter 分层思想：
+
+- exchange-specific connector 只处理交易所协议、认证、订阅和原始 payload；
+- stream layer 负责 websocket/rest stream 生命周期、重连、心跳和 backpressure 入口；
+- normalized market event 作为 adapter 输出边界，进入 FDC 时应映射为 `fdc_data::market::MarketEvent`；
+- 不把 barter-rs 的内部类型直接作为 FDC canonical model，避免外部库结构污染 `fdc-data`；
+- 可借鉴其 exchange/product/subscription 抽象，但最终命名、错误模型、时间语义和质量标记应服从 FDC canonical architecture。
+
 ### 7.7 fdc-transform
 
 定位：标准市场数据加工层。
