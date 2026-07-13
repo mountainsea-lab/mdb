@@ -3,6 +3,10 @@
 **/*.rs.bk
 *.pdb
 
+# Local tooling
+/.worktrees/
+/.codegraph/
+
 # Cargo
 Cargo.lock
 
